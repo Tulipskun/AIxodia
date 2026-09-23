@@ -23,7 +23,6 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import kotlin.math.min
-import kotlin.time.Duration.Companion.seconds
 import kotlin.random.Random
 
 enum class ConnState { OFFLINE, CONNECTING, ONLINE }
@@ -43,7 +42,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
     private val outAdapter = moshi.adapter(AiOutput::class.java)
     private val inAdapter = moshi.adapter(AiInput::class.java)
     private val client = OkHttpClient.Builder()
-        .pingInterval(20.seconds)
+        .pingInterval(java.time.Duration.ofSeconds(20))
         .build()
 
     private val _state = MutableStateFlow(ConnState.OFFLINE)
