@@ -1,0 +1,25 @@
+# AIxodia
+
+Private Android chat client (Kotlin + Compose) for `Tulipskun/ai`.
+
+- **Direct live display**: authenticated WebSocket to the `ai` daemon mobile endpoint — JSON `Input`/`Output` frames mirroring `ai/sdk/io.go` (+ `types.go`, `trace.go`). See `bridge/mobile_ws.go`.
+- **Old history from Cloudflare**: Cloudflare D1 via Worker REST (`worker/`), never direct D1 from the phone.
+- **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; open = cache → D1 backfill → WS live tail.
+- **Messenger UX**: Discord-like session drawer + Telegram-like bubbles, typing/tool status, connection dot, retry, pull-older.
+
+## Layout
+
+```text
+app/            Android client (.kt, Compose Material3, Room, OkHttp WS, Worker REST)
+worker/         Cloudflare Worker + D1 schema (wrangler.toml, schema.sql, src/index.ts)
+bridge/         Go drop-in mobile WS transport for the ai daemon
+requirements/   spec source of truth (read before code)
+```
+
+## Setup
+
+1. **D1 + Worker**: `wrangler d1 create aixodia` → put id in `worker/wrangler.toml` → `wrangler d1 execute aixodia --file=worker/schema.sql` → `wrangler secret put AIXODIA_TOKEN` → `wrangler deploy`.
+2. **Daemon**: wire `bridge/mobile_ws.go` into `ai` (see `bridge/README.md`), expose `:18789/ws`, mirror turns to Worker ingest.
+3. **App**: open in Android Studio, run `app`. Settings: WS URL, Worker URL, token, session. Needs reachable daemon (LAN/Tailscale) or Worker `/ws` proxy.
+
+Spec: `requirements/` (AX-xxx). Initial change: `requirements/changes.md` AXCH-001.
