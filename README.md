@@ -31,6 +31,17 @@ to D1, and the app discovers it via `GET /api/node` (Settings → "ค้นห�
 in D1 (`/api/state`), and the phone's scoped Worker token (sent in the WS hello,
 memory-only) is its DB credential. Raw Cloudflare API tokens never leave your account.
 
+## Test it right now (no Cloudflare needed)
+
+```bash
+cd mock
+go run ./cmd/mockai -token devtoken -db 127.0.0.1:39117 -ws 127.0.0.1:39118 -tunnel
+```
+
+Then in the app (gear icon): DB URL `http://<host>:39117`, WS URL
+`ws://<host>:39118/ws` (emulator: `10.0.2.2`), token `devtoken`, or press
+"ค้นหา ai" and use the announced tunnel URL. Details: `mock/README.md`.
+
 ## Build / update (no uninstall needed)
 
 CI (`.github/workflows/android.yml`, same shape as Droid-SSH) signs every build

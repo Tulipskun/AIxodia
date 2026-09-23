@@ -3,9 +3,11 @@ package com.tulipskun.aixodia.data.remote
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.ConnConfig
+import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiInput
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.ContentPart
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,33 +28,46 @@ import kotlin.random.Random
 enum class ConnState { OFFLINE, CONNECTING, ONLINE }
 
 /**
- * Direct WebSocket to the ai daemon mobile endpoint (see bridge/mobile_ws.go).
- * JSON frames mirror ai sdk/io.go Input/Output. Reconnect uses exp backoff
- * like transport/discord/gateway_liveness.go.
+ * One WebSocket for the whole app (not per session). Frames carry
+ * `session_id`, so switching sessions only changes which rows the repository
+ * writes — the connection and its auth stay up.
+ *
+ * Auth is connection-scoped: the token travels in the hello frame only. The
+ * daemon keeps working when this socket is gone; on reconnect the app pulls the
+ * newest turns from the DB and then takes the live tail again.
  */
-class AiDirectSocket(private val settings: com.tulipskun.aixodia.SettingsStore) {
+class AiDirectSocket(private val settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val outAdapter = moshi.adapter(AiOutput::class.java)
     private val inAdapter = moshi.adapter(AiInput::class.java)
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .pingInterval(20_000)
+        .build()
 
     private val _state = MutableStateFlow(ConnState.OFFLINE)
     val state: StateFlow<ConnState> = _state
 
-    private val _frames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 128)
+    private val _frames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 256)
     val frames: SharedFlow<AiOutput> = _frames
 
     private var ws: WebSocket? = null
     private var wantOpen = false
-    private var lastSeq: Long = 0
-    private var cfg: ConnConfig? = null
+    private var session: String = "default"
+    private var resumeFrom: Long = 0
 
+    /** Starts the single connection (idempotent) for [sessionId]. */
     fun open(sessionId: String, fromSeq: Long) {
-        lastSeq = fromSeq
+        session = sessionId
+        resumeFrom = fromSeq
         if (wantOpen) return
         wantOpen = true
-        scope.launch { loop(sessionId) }
+        scope.launch { loop() }
+    }
+
+    /** Switches the session used for subsequent sends + reconnects. */
+    fun switchSession(sessionId: String) {
+        session = sessionId
     }
 
     fun close() {
@@ -62,56 +77,84 @@ class AiDirectSocket(private val settings: com.tulipskun.aixodia.SettingsStore) 
         _state.value = ConnState.OFFLINE
     }
 
-    fun send(text: String) {
-        val c = cfg ?: return
-        val frame = AiInput(sessionId = c.sessionId, content = listOf(ContentPart(text = text)), token = c.token)
-        ws?.send(inAdapter.toJson(frame))
+    /** Returns true when the frame was handed to the socket. */
+    fun send(sessionId: String, text: String, clientMsgId: String): Boolean {
+        val frame = AiInput(
+            sessionId = sessionId,
+            content = listOf(ContentPart(text = text)),
+            clientMsgId = clientMsgId,
+        )
+        return ws?.send(inAdapter.toJson(frame)) == true
     }
 
-    private suspend fun loop(sessionId: String) {
+    private suspend fun loop() {
         var backoff = 1000L
         while (wantOpen) {
+            var opened = false
             try {
-                cfg = settings.current()
-                val c = cfg!!
+                val c: ConnConfig = settings.current()
                 _state.value = ConnState.CONNECTING
                 val req = Request.Builder().url(c.wsUrl).build()
-                val opened = kotlinx.coroutines.CompletableDeferred<Unit>()
+                val ready = CompletableDeferred<Unit>()
                 ws = client.newWebSocket(req, object : WebSocketListener() {
                     override fun onOpen(w: WebSocket, r: Response) {
-                        // hello with resume cursor (AX-002)
                         val hello = inAdapter.toJson(
-                            AiInput(type = "hello", sessionId = sessionId, token = c.token,
-                                content = listOf(ContentPart(text = "resume:${lastSeq}")))
+                            AiInput(
+                                type = "hello",
+                                sessionId = session,
+                                token = c.token,
+                                content = listOf(ContentPart(text = "resume:$resumeFrom")),
+                            )
                         )
                         w.send(hello)
                         _state.value = ConnState.ONLINE
                         backoff = 1000L
-                        opened.complete(Unit)
+                        ready.complete(Unit)
                     }
+
                     override fun onMessage(w: WebSocket, text: String) {
                         try {
                             val f = outAdapter.fromJson(text) ?: return
-                            if (f.seq > 0) lastSeq = maxOf(lastSeq, f.seq)
                             scope.launch { _frames.emit(f) }
-                        } catch (_: Exception) { }
+                        } catch (_: Exception) {
+                            scope.launch {
+                                _frames.emit(
+                                    AiOutput(
+                                        kind = "error",
+                                        text = "frame ที่อ่านไม่ได้: ${text.take(120)}",
+                                    )
+                                )
+                            }
+                        }
                     }
+
                     override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
-                        if (!opened.isCompleted) opened.complete(Unit)
+                        if (!ready.isCompleted) ready.complete(Unit)
                         _state.value = ConnState.OFFLINE
                     }
+
                     override fun onClosed(w: WebSocket, code: Int, reason: String) {
                         _state.value = ConnState.OFFLINE
                     }
+
+                    override fun onClosing(w: WebSocket, code: Int, reason: String) {
+                        w.close(code, reason)
+                    }
                 })
-                opened.await()
-                // stay open until failure/close
-                while (wantOpen && _state.value == ConnState.ONLINE) delay(1000)
-            } catch (_: Exception) { }
+                ready.await()
+                opened = true
+                while (wantOpen && _state.value == ConnState.ONLINE) delay(500)
+            } catch (_: Exception) {
+                // fall through to backoff
+            }
+            if (!opened && _state.value != ConnState.ONLINE) {
+                _state.value = ConnState.OFFLINE
+            }
             if (!wantOpen) break
             _state.value = ConnState.OFFLINE
-            delay(backoff + Random.nextLong(0, 500))
+            delay(backoff + Random.nextLong(0, 400))
             backoff = min(backoff * 2, 30_000L)
         }
+        _state.value = ConnState.OFFLINE
     }
 }

@@ -99,8 +99,22 @@ export default {
 
     // ---- history (unchanged) ----
     if (u.pathname === "/api/sessions" && req.method === "GET") {
-      const r = await env.DB.prepare("SELECT id, model, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 200").all();
+      const r = await env.DB.prepare(
+        "SELECT id, title, provider, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 200"
+      ).all();
       return json(r.results ?? []);
+    }
+    if (u.pathname === "/api/sessions" && req.method === "POST") {
+      const b = await req.json<{ id?: string; title?: string; model?: string }>().catch(() => ({}));
+      const id = (b.id ?? "").trim() || `s${Date.now().toString(36)}`;
+      if (!/^[A-Za-z0-9:_-]{1,128}$/.test(id)) return json({ error: "bad id" }, 400);
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO sessions(id, title, model, created_at, updated_at)
+         VALUES(?, ?, ?, unixepoch(), unixepoch())`
+      ).bind(id, b.title ?? id, b.model ?? "").run();
+      const row = await env.DB.prepare("SELECT id, title, provider, model, created_at, updated_at FROM sessions WHERE id = ?")
+        .bind(id).first();
+      return json(row ?? { id });
     }
     const m = u.pathname.match(/^\/api\/sessions\/([^/]+)\/turns$/);
     if (m) {
@@ -109,17 +123,30 @@ export default {
         const before = Number(u.searchParams.get("before_seq") ?? "9007199254740991");
         const limit = Math.min(Number(u.searchParams.get("limit") ?? "50"), 200);
         const r = await env.DB.prepare(
-          "SELECT seq, role, text, created_at FROM turns WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?"
+          "SELECT seq, role, agent, job_id, text, created_at FROM turns WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?"
         ).bind(sid, before, limit).all();
         return json({ turns: (r.results ?? []).reverse() });
       }
       if (req.method === "POST") {
-        const b = await req.json<{ role?: string; text?: string }>().catch(() => ({}));
-        await env.DB.prepare("INSERT OR IGNORE INTO sessions(id, updated_at) VALUES(?, unixepoch())").bind(sid).run();
+        const b = await req.json<{ role?: string; text?: string; agent?: string; job_id?: string }>().catch(() => ({}));
+        const role = b.role ?? "model";
+        await env.DB.prepare(
+          "INSERT OR IGNORE INTO sessions(id, title, updated_at) VALUES(?, ?, unixepoch())"
+        ).bind(sid, sid).run();
+        // First user message names the session, like every messenger does.
+        if (role === "user") {
+          const titled = await env.DB.prepare("SELECT title FROM sessions WHERE id = ?").bind(sid)
+            .first<{ title: string }>();
+          if (titled && (!titled.title || titled.title === sid)) {
+            const t = (b.text ?? "").slice(0, 42);
+            await env.DB.prepare("UPDATE sessions SET title = ? WHERE id = ?")
+              .bind(t.length ? t : sid, sid).run();
+          }
+        }
         const mx = await env.DB.prepare("SELECT COALESCE(MAX(seq),0) AS m FROM turns WHERE session_id = ?").bind(sid).first<{ m: number }>();
         const seq = (mx?.m ?? 0) + 1;
-        await env.DB.prepare("INSERT INTO turns(session_id, seq, role, text) VALUES(?,?,?,?)")
-          .bind(sid, seq, b.role ?? "model", b.text ?? "").run();
+        await env.DB.prepare("INSERT INTO turns(session_id, seq, role, agent, job_id, text) VALUES(?,?,?,?,?,?)")
+          .bind(sid, seq, role, b.agent ?? "", b.job_id ?? "", b.text ?? "").run();
         await env.DB.prepare("UPDATE sessions SET updated_at = unixepoch() WHERE id = ?").bind(sid).run();
         return json({ seq });
       }

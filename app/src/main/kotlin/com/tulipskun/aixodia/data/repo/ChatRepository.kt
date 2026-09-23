@@ -1,22 +1,31 @@
 package com.tulipskun.aixodia.data.repo
 
+import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.local.MessageEntity
 import com.tulipskun.aixodia.data.local.SessionEntity
+import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
-import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
+import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Merge strategy (AX-012): Room cache first -> D1 pages -> WS live tail.
- * (session_id, seq) unique; WS seqs continue past D1 max.
+ * Owns the merge of three sources (AXCH-005):
+ *  1. Room cache — instant, offline-capable.
+ *  2. REST (Cloudflare Worker/D1 in prod, mock DB in tests) — history + the
+ *     newest rows, pulled on open, on reconnect and after a cold start.
+ *  3. WebSocket — the live tail from the agent, which keeps running server-side
+ *     when the app is closed, so every frame is also written to Room and the
+ *     next open sees it.
  */
 class ChatRepository(
     private val db: AppDatabase,
@@ -24,8 +33,33 @@ class ChatRepository(
     private val socket: AiDirectSocket,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    val connState = socket.state
-    val liveFrames = socket.frames
+    val connState: StateFlow<ConnState> = socket.state
+    val liveFrames get() = socket.frames
+
+    private val _active = MutableStateFlow("default")
+    val activeSession: StateFlow<String> = _active
+
+    init {
+        scope.launch {
+            socket.frames.collect { onFrame(it) }
+        }
+        scope.launch {
+            var wasOnline = false
+            socket.state.collect { st ->
+                if (st == ConnState.ONLINE) {
+                    if (wasOnline) {
+                        // reconnect: pull whatever the agent finished while we
+                        // were away, then resend anything still queued.
+                        refreshLatest(_active.value)
+                    }
+                    wasOnline = true
+                    flushPending()
+                } else if (st == ConnState.OFFLINE) {
+                    wasOnline = false
+                }
+            }
+        }
+    }
 
     fun observeSessions(): Flow<List<ChatSession>> = db.sessions().observe().map { list ->
         list.map { ChatSession(it.id, it.title, it.model, it.unread, it.lastSnippet, it.lastAt) }
@@ -33,58 +67,197 @@ class ChatRepository(
 
     fun observeMessages(sid: String): Flow<List<ChatMessage>> = db.messages().observe(sid).map { list ->
         list.map {
-            ChatMessage("${it.sessionId}:${it.seq}", it.sessionId, it.seq, it.role, it.text, it.createdAt, it.pending)
+            ChatMessage(
+                id = "${it.sessionId}:${it.seq}",
+                sessionId = it.sessionId,
+                seq = it.seq,
+                role = it.role,
+                text = it.text,
+                createdAt = it.createdAt,
+                pending = it.pending,
+                agent = it.agent,
+                jobId = it.jobId,
+                stage = it.stage,
+                toolName = it.toolName,
+                toolArgs = it.toolArgs,
+                tokensIn = it.tokensIn,
+                tokensOut = it.tokensOut,
+            )
         }
     }
 
-    suspend fun openSession(sid: String) {
-        db.sessions().upsert(SessionEntity(id = sid))
-        db.sessions().clearUnread(sid)
-        val maxSeq = db.messages().maxSeq(sid)
-        // 1) D1 backfill (old data) into Room cache
-        try {
-            val rows = history.turns(sid, beforeSeq = if (maxSeq == 0L) Long.MAX_VALUE else maxSeq)
-            if (rows.isNotEmpty()) {
-                db.messages().insertAll(rows.map {
-                    MessageEntity(sid, it.seq, it.role, it.text, it.createdAt.ifZeroNow())
-                })
+    /** Session list from the DB (cloud/mock), merged into Room. */
+    suspend fun syncSessions() {
+        val rows = history.sessions()
+        if (rows.isEmpty()) return
+        db.sessions().upsertAll(
+            rows.map {
+                SessionEntity(
+                    id = it.id,
+                    title = it.title.ifBlank { it.id },
+                    model = it.model,
+                    lastAt = it.updatedAt * 1000,
+                )
             }
-        } catch (_: Exception) { }
-        // 2) flush queued pending sends, 3) attach live tail
-        val cur = db.messages().maxSeq(sid)
-        socket.open(sid, cur)
-        scope.launch {
-            socket.frames.collect { f ->
-                if (f.sessionId.isNotEmpty() && f.sessionId != sid) return@collect
-                val text = f.text.ifEmpty { f.content.joinToString("") { it.text } }
-                if (text.isEmpty() && f.kind == "trace") return@collect // handled as status upstream
-                val seq = if (f.seq > 0) f.seq else db.messages().maxSeq(sid) + 1
-                db.messages().upsert(MessageEntity(sid, seq, f.role.ifEmpty { "model" }, text, System.currentTimeMillis()))
-                db.sessions().get(sid)?.let {
-                    db.sessions().upsert(it.copy(lastSnippet = text.take(120), lastAt = System.currentTimeMillis()))
-                }
+        )
+    }
+
+    suspend fun openSession(sid: String) {
+        _active.value = sid
+        if (db.sessions().get(sid) == null) {
+            val row = history.sessions().firstOrNull { it.id == sid }
+            db.sessions().upsert(
+                SessionEntity(
+                    id = sid,
+                    title = row?.title?.ifBlank { sid } ?: sid,
+                    model = row?.model ?: "",
+                    lastAt = (row?.updatedAt ?: 0) * 1000,
+                )
+            )
+        }
+        db.sessions().clearUnread(sid)
+        val localMax = db.messages().maxSeq(sid)
+        // Older page first (keeps the whole thread), then the newest rows.
+        val min = db.messages().minSeq(sid)
+        if (db.messages().count(sid) == 0 || min > 1) {
+            history.turns(sid, beforeSeq = 0, limit = 200).takeIf { it.isNotEmpty() }?.let { rows ->
+                db.messages().insertAll(rows.map { it.toEntity(sid) })
+            }
+        }
+        refreshLatest(sid, skipAtOrBelow = localMax)
+        socket.switchSession(sid)
+        socket.open(sid, db.messages().maxSeq(sid))
+        flushPending()
+    }
+
+    suspend fun createSession(title: String): String {
+        val id = "s" + System.currentTimeMillis().toString(36)
+        db.sessions().upsert(SessionEntity(id = id, title = title.ifBlank { "แชตใหม่" }))
+        history.createSession(id, title.ifBlank { "แชตใหม่" })
+        openSession(id)
+        return id
+    }
+
+    /** Newest rows from the DB — the "reopen the app" path. */
+    suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {
+        val rows = history.latest(sid)
+        if (rows.isEmpty()) return
+        db.messages().insertAll(
+            rows.filter { it.seq > skipAtOrBelow }.map { it.toEntity(sid) }
+        )
+        val last = rows.maxByOrNull { it.seq } ?: return
+        val cur = db.sessions().get(sid)
+        db.sessions().upsert(
+            (cur ?: SessionEntity(id = sid)).copy(
+                title = cur?.title?.takeIf { it.isNotBlank() && it != sid } ?: last.text.take(42).ifBlank { sid },
+                lastSnippet = last.text.take(120),
+                lastAt = if (last.createdAt > 0) last.createdAt * 1000 else System.currentTimeMillis(),
+            )
+        )
+    }
+
+    /**
+     * Sends a message. Offline (or before the socket is ready) it is stored
+     * with pending=true and flushed on the next successful connection.
+     */
+    suspend fun send(sid: String, text: String) {
+        val clientMsgId = "$sid:${System.currentTimeMillis()}"
+        val seq = db.messages().maxSeq(sid) + 1
+        db.messages().upsert(
+            MessageEntity(
+                sessionId = sid,
+                seq = seq,
+                role = "user",
+                text = text,
+                createdAt = System.currentTimeMillis(),
+                pending = true,
+                clientMsgId = clientMsgId,
+            )
+        )
+        val queued = socket.send(sid, text, clientMsgId)
+        if (queued) {
+            db.messages().markAcked(clientMsgId)
+        }
+        // queued == false → stays pending, the state collector retries it.
+    }
+
+    suspend fun flushPending() {
+        val pending = db.messages().allPending()
+        for (m in pending) {
+            if (m.clientMsgId.isBlank()) continue
+            if (socket.send(m.sessionId, m.text, m.clientMsgId)) {
+                db.messages().markAcked(m.clientMsgId)
             }
         }
     }
 
     suspend fun loadOlder(sid: String) {
-        val min = db.messages().maxSeq(sid) // simplified: page before current min via DAO max; full paging in v2
-        val rows = try { history.turns(sid, beforeSeq = min, limit = 50) } catch (_: Exception) { emptyList() }
-        if (rows.isNotEmpty()) db.messages().insertAll(rows.map {
-            MessageEntity(sid, it.seq, it.role, it.text, it.createdAt.ifZeroNow())
-        })
+        val min = db.messages().minSeq(sid)
+        if (min <= 1) return
+        history.turns(sid, beforeSeq = min, limit = 100).takeIf { it.isNotEmpty() }?.let { rows ->
+            db.messages().insertAll(rows.map { it.toEntity(sid) })
+        }
     }
 
-    suspend fun send(sid: String, text: String) {
-        val seq = db.messages().maxSeq(sid) + 1
-        db.messages().upsert(MessageEntity(sid, seq, "user", text, System.currentTimeMillis(), pending = true))
-        try {
-            socket.send(text)
-            db.messages().upsert(MessageEntity(sid, seq, "user", text, System.currentTimeMillis(), pending = false))
-        } catch (_: Exception) { /* stays pending, flushed on reconnect */ }
+    private suspend fun onFrame(f: AiOutput) {
+        when (f.kind) {
+            "ack" -> {
+                if (f.clientMsgId.isNotBlank()) db.messages().markAcked(f.clientMsgId)
+                return
+            }
+            "error" -> {
+                if (f.text.isNotBlank() && f.sessionId.isNotBlank()) {
+                    record(f, f.sessionId)
+                }
+                return
+            }
+            "done" -> return
+        }
+        val sid = f.sessionId.ifBlank { _active.value }
+        record(f, sid)
     }
+
+    private suspend fun record(f: AiOutput, sid: String) {
+        val text = f.text.ifEmpty { f.content.joinToString("") { it.text } }
+        val hasBody = text.isNotBlank() || f.toolCall != null
+        if (!hasBody) return
+        val seq = if (f.seq > 0) f.seq else db.messages().maxSeq(sid) + 1
+        db.messages().upsert(
+            MessageEntity(
+                sessionId = sid,
+                seq = seq,
+                role = f.role.ifBlank { "model" },
+                text = text,
+                createdAt = System.currentTimeMillis(),
+                clientMsgId = f.clientMsgId,
+                agent = f.agent,
+                jobId = f.jobId,
+                stage = f.stage,
+                toolName = f.toolCall?.name ?: "",
+                toolArgs = f.toolCall?.arguments ?: "",
+                tokensIn = f.inputTokens,
+                tokensOut = f.outputTokens,
+            )
+        )
+        val cur = db.sessions().get(sid)
+        db.sessions().upsert(
+            (cur ?: SessionEntity(id = sid, title = sid)).copy(
+                lastSnippet = text.take(120),
+                lastAt = System.currentTimeMillis(),
+            )
+        )
+        if (sid != _active.value) db.sessions().bumpUnread(sid)
+    }
+
+    private fun com.tulipskun.aixodia.data.remote.TurnRow.toEntity(sid: String) = MessageEntity(
+        sessionId = sid,
+        seq = seq,
+        role = role.ifBlank { "model" },
+        text = text,
+        createdAt = if (createdAt > 0) createdAt * 1000 else System.currentTimeMillis(),
+        agent = agent,
+        jobId = jobId,
+    )
 
     fun close() = socket.close()
-
-    private fun Long.ifZeroNow(): Long = if (this == 0L) System.currentTimeMillis() else this
 }

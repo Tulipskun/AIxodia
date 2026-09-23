@@ -71,3 +71,21 @@
 - AX-052 — Stateless state: `GET/PUT /api/state/:key` stores opaque JSON
   (≤500KB, key charset `[A-Za-z0-9:_-]`), e.g. `config/provider`,
   `sessions/<id>`. Local disk on the ai host is a pure cache, safe to wipe.
+
+## Mock-first testing + agent attribution (AX-06x)
+
+- AX-060 — `mock/` provides a complete local stack (mock DB REST + mock
+  agent WS + `aiclient` CLI) speaking the production contract, so the app is
+  testable before Cloudflare exists. CI runs its Go tests on every push.
+- AX-061 — Jobs are server-side: the agent persists each step to the DB before
+  broadcasting it, and the job continues after the client disconnects. The app
+  pulls the newest rows on open/reconnect and merges them with Room, so closing
+  the app never loses or freezes work.
+- AX-062 — Every turn carries `agent` (main | sub | worker | system), `job_id`,
+  `stage` and optional tool name/args; the UI badges them so main vs sub
+  activity is visible, both live and after a restart.
+- AX-063 — Multiple sessions: the DB owns the session list (`POST /api/sessions`
+  creates), the drawer switches without touching connection settings, and
+  messages never cross session boundaries.
+- AX-064 — Offline sends queue in Room (`pending`) and flush on reconnect;
+  an ack frame clears the marker.

@@ -36,3 +36,19 @@
   (AIXODIA_TOKEN) + ตาราง devices เตรียม per-device; (4) provider keys ใน D1 =
   ใครมี token อ่านได้ รับได้เฉพาะ personal use. Upgrade path: named tunnel +
   per-device tokens. เพิ่ม AX-050..052, bridge/tunnel.go, NodeCard ใน Settings.
+
+- AXCH-005 (2026-09-23) — ทดสอบได้จริงก่อน setup Cloudflare: เพิ่ม `mock/`
+  (Go: mock DB + mock agent + `aiclient` + 6 tests) ที่พูด protocol เดียวกับ
+  Worker และ bridge. ความต้องการที่บังคับให้แก้โค้ดจริง: (1) **ปิดแอพแล้ว agent
+  ต้องทำงานต่อ** → job ถูก detach จาก connection, ทุก step `persist → broadcast`
+  (DB เป็นผู้ชี้ขาด, WS แค่ส่งซ้ำให้คนดู) — เทสต์ `TestJobContinuesAfterClientDisconnectAndIsReadableFromDB`
+  ตัดกลางงานแล้วยืนยันว่า main/sub turns อยู่ใน DB ครบ; (2) **หลาย session** →
+  `POST /api/sessions` + session แยก Room/DB, ไม่มีข้อความรั่วข้าม session
+  (เทสต์ `TestMultipleSessionsAreIsolated`); (3) **แสดง main/sub agent** →
+  เพิ่ม `agent` + `job_id` + `stage` + `tool` ใน turn/frame ทั้ง Worker, D1,
+  Room (migration 1→2 ติดตั้งทับได้ไม่หายประวัติเดิม) และ badge ใน UI;
+  (4) **เปิดแอปกลับมาแล้วดึงล่าสุดจาก DB** → `syncSessions()` + `refreshLatest()`
+  ทำทั้งตอนเปิด, ตอนสลับ session และทุกครั้งที่ reconnect; (5) ส่งขณะออฟไลน์
+  ค้างเป็น pending แล้ว flush ตอน reconnect; (6) บั๊กจริงที่เจอตอนเทสต์ tunnel:
+  cloudflared ต้องการ `--metrics 127.0.0.1:0` ไม่งั้น resolve `localhost`
+  ไม่ได้แล้ว tunnel ตายเงียบ (error 1033) — แก้ใน `bridge/tunnel.go` + mock.

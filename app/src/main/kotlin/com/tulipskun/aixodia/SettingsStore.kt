@@ -16,11 +16,13 @@ class SettingsStore(private val ctx: Context) {
     private val token = stringPreferencesKey("token")
     private val sessionId = stringPreferencesKey("session_id")
 
-    // Defaults: daemon WS direct, Worker REST for D1 history.
-    val wsUrlFlow: Flow<String> = ctx.ds.data.map { it[wsUrl] ?: "ws://127.0.0.1:18789/ws" }
-    val workerUrlFlow: Flow<String> = ctx.ds.data.map { it[workerUrl] ?: "https://aixodia.example.workers.dev" }
-    val tokenFlow: Flow<String> = ctx.ds.data.map { it[token] ?: "" }
-    val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "default" }
+    // Defaults point at the local mock stack (mock/cmd/mockai) so the app is
+    // testable before Cloudflare exists. 10.0.2.2 is the Android emulator's
+    // alias for the host machine; on a real phone use the host's LAN IP.
+    val wsUrlFlow: Flow<String> = ctx.ds.data.map { it[wsUrl] ?: "ws://10.0.2.2:39118/ws" }
+    val workerUrlFlow: Flow<String> = ctx.ds.data.map { it[workerUrl] ?: "http://10.0.2.2:39117" }
+    val tokenFlow: Flow<String> = ctx.ds.data.map { it[token] ?: "devtoken" }
+    val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "work-1" }
 
     suspend fun current(): ConnConfig = ConnConfig(
         wsUrl = wsUrlFlow.first(), workerUrl = workerUrlFlow.first(),
@@ -28,7 +30,12 @@ class SettingsStore(private val ctx: Context) {
     )
 
     suspend fun save(ws: String, worker: String, tok: String, sess: String) {
-        ctx.ds.edit { it[wsUrl] = ws; it[workerUrl] = worker; it[token] = tok; it[sessionId] = sess }
+        ctx.ds.edit {
+            it[wsUrl] = ws
+            it[workerUrl] = worker
+            it[token] = tok
+            it[sessionId] = sess.ifBlank { "default" }
+        }
     }
 
     /** Switch session only — never touches connection settings. */

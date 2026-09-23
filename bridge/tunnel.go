@@ -75,7 +75,11 @@ func RunQuickTunnel(ctx context.Context, port int, workerBase, version string) (
 		return "", nil, fmt.Errorf("bridge: cloudflared not found in PATH (install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)")
 	}
 	child, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(child, bin, "tunnel", "--no-autoupdate", "--url", fmt.Sprintf("http://127.0.0.1:%d", port))
+	// --metrics 127.0.0.1:0 avoids depending on a resolvable "localhost" hostname;
+	// some containers cannot resolve it and cloudflared then aborts before the
+	// tunnel is registered.
+	cmd := exec.CommandContext(child, bin, "tunnel", "--no-autoupdate",
+		"--metrics", "127.0.0.1:0", "--url", fmt.Sprintf("http://127.0.0.1:%d", port))
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()

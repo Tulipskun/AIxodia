@@ -1,7 +1,10 @@
 -- Cloudflare D1 schema. Mirrors ai sdk/session_db.go (sessions + turns),
 -- flattened so the Android client can page history with simple REST.
+-- Kept in lockstep with mock/mockdb/db.go (the local stand-in used before
+-- Cloudflare is set up) — change one, change both.
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
   provider TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -12,11 +15,14 @@ CREATE TABLE IF NOT EXISTS turns (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,
   role TEXT NOT NULL,          -- user | model | tool_call | tool_result
+  agent TEXT NOT NULL DEFAULT '',  -- main | sub | worker | system (UI badge)
+  job_id TEXT NOT NULL DEFAULT '',  -- groups the steps of one turn
   text TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   UNIQUE(session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_turns_session_seq ON turns(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_turns_job ON turns(session_id, job_id);
 
 -- AXCH-004: quick-tunnel discovery + stateless ai + device registry.
 -- ai re-announces its random trycloudflare URL here every 30s; the phone

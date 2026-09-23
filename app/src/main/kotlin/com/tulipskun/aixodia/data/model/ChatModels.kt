@@ -3,7 +3,9 @@ package com.tulipskun.aixodia.data.model
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 
-// Mirrors ai sdk/io.go + sdk/types.go + sdk/trace.go (additive-only).
+// Mirrors ai sdk/io.go + sdk/types.go + sdk/trace.go (additive-only), plus the
+// AXCH-005 fields the mock agent adds: which agent spoke (main/sub), which job
+// a step belongs to, and the client id used to clear the pending marker.
 
 @JsonClass(generateAdapter = true)
 data class ContentPart(
@@ -18,7 +20,7 @@ data class ToolCall(
     @Json(name = "arguments") val arguments: String = "",
 )
 
-// Canonical inbound display frame (ai Output).
+// Canonical inbound display frame (ai Output + agent attribution).
 @JsonClass(generateAdapter = true)
 data class AiOutput(
     @Json(name = "source") val source: String = "",
@@ -26,11 +28,16 @@ data class AiOutput(
     @Json(name = "content") val content: List<ContentPart> = emptyList(),
     @Json(name = "text") val text: String = "",
     @Json(name = "stage") val stage: String = "",
-    @Json(name = "kind") val kind: String = "message", // message | trace | error | done
+    @Json(name = "kind") val kind: String = "message", // ack | message | trace | done | error
     @Json(name = "seq") val seq: Long = 0,
     @Json(name = "role") val role: String = "model",
+    @Json(name = "agent") val agent: String = "", // main | sub | worker | system
+    @Json(name = "job_id") val jobId: String = "",
+    @Json(name = "client_msg_id") val clientMsgId: String = "",
     @Json(name = "tool_call") val toolCall: ToolCall? = null,
     @Json(name = "usage") val usage: Usage? = null,
+    @Json(name = "input_tokens") val inputTokens: Int = 0,
+    @Json(name = "output_tokens") val outputTokens: Int = 0,
 )
 
 // Canonical outbound frame (ai Input).
@@ -41,6 +48,7 @@ data class AiInput(
     @Json(name = "session_id") val sessionId: String = "",
     @Json(name = "role") val role: String = "user",
     @Json(name = "content") val content: List<ContentPart> = emptyList(),
+    @Json(name = "client_msg_id") val clientMsgId: String = "",
     @Json(name = "token") val token: String = "",
 )
 
@@ -54,12 +62,17 @@ data class ChatMessage(
     val id: String,
     val sessionId: String,
     val seq: Long,
-    val role: String, // user | model | status
+    val role: String, // user | model | tool_call | tool_result | system
     val text: String,
     val createdAt: Long,
     val pending: Boolean = false,
-    val streaming: Boolean = false,
-    val toolNote: String? = null,
+    val agent: String = "", // main | sub | worker | system
+    val jobId: String = "",
+    val stage: String = "",
+    val toolName: String = "",
+    val toolArgs: String = "",
+    val tokensIn: Int = 0,
+    val tokensOut: Int = 0,
 )
 
 data class ChatSession(

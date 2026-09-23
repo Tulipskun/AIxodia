@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -84,6 +85,17 @@ fun SettingsScreen(
             Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Card {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("ทดสอบก่อนได้เลย (mock)", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "บนเครื่องคอม: go run ./mock/cmd/mockai แล้วใช้ค่าด้านล่าง\n" +
+                            "• emulator: ws://10.0.2.2:39118/ws + http://10.0.2.2:39117\n" +
+                            "• มือถือจริง: เปลี่ยน 10.0.2.2 เป็น IP LAN ของเครื่องนั้น",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             Text("ai daemon (รับสดผ่าน WebSocket โดยตรง)", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(
                 value = ws, onValueChange = { ws = it }, label = { Text("WS URL") },

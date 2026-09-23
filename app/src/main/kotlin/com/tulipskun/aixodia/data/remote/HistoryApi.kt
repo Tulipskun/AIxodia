@@ -7,13 +7,22 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
+/**
+ * REST client for history + node discovery. The base URL is either the real
+ * Cloudflare Worker (production) or the local mock DB (`mock/`, testing) —
+ * both speak the same contract, so the app code does not care.
+ */
 @JsonClass(generateAdapter = true)
 data class TurnRow(
     @Json(name = "seq") val seq: Long = 0,
     @Json(name = "role") val role: String = "",
+    @Json(name = "agent") val agent: String = "",
+    @Json(name = "job_id") val jobId: String = "",
     @Json(name = "text") val text: String = "",
     @Json(name = "created_at") val createdAt: Long = 0,
 )
@@ -32,27 +41,62 @@ data class NodeInfo(
 @JsonClass(generateAdapter = true)
 data class SessionRow(
     @Json(name = "id") val id: String = "",
+    @Json(name = "title") val title: String = "",
     @Json(name = "model") val model: String = "",
+    @Json(name = "provider") val provider: String = "",
     @Json(name = "updated_at") val updatedAt: Long = 0,
 )
 
-/** Cloudflare Worker REST for D1 history (see worker/src/index.ts). */
 class HistoryApi(private val settings: SettingsStore) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val client = OkHttpClient()
+    private val sessionsAdapter = moshi.adapter(Array<SessionRow>::class.java)
+    private val turnsAdapter = moshi.adapter(TurnsPage::class.java)
+    private val nodeAdapter = moshi.adapter(NodeInfo::class.java)
 
     suspend fun sessions(): List<SessionRow> = withContext(Dispatchers.IO) {
         val c = settings.current()
         val req = Request.Builder().url("${c.workerUrl}/api/sessions")
             .header("Authorization", "Bearer ${c.token}").get().build()
-        client.newCall(req).execute().use { r ->
-            if (!r.isSuccessful) return@withContext emptyList()
-            return@withContext try {
-                val sa = moshi.adapter(Array<SessionRow>::class.java)
-                sa.fromJson(r.body!!.source())?.toList() ?: emptyList()
-            } catch (_: Exception) { emptyList() }
-        }
+        runCatching {
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use emptyList()
+                sessionsAdapter.fromJson(r.body!!.source())?.toList() ?: emptyList()
+            }
+        }.getOrDefault(emptyList())
     }
+
+    /** Creates the session on the DB side too, so the daemon and phone agree. */
+    suspend fun createSession(id: String, title: String): Boolean = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val body = """{"id":"$id","title":"$title"}"""
+        val req = Request.Builder().url("${c.workerUrl}/api/sessions")
+            .header("Authorization", "Bearer ${c.token}")
+            .header("Content-Type", "application/json")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        runCatching {
+            client.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
+    /** Newest page for a session; the app calls this on open and on reconnect. */
+    suspend fun latest(sessionId: String, limit: Int = 200): List<TurnRow> = turns(sessionId, 0, limit)
+
+    suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
+        withContext(Dispatchers.IO) {
+            val c = settings.current()
+            val before = if (beforeSeq <= 0) Long.MAX_VALUE else beforeSeq
+            val url = "${c.workerUrl}/api/sessions/$sessionId/turns?before_seq=$before&limit=$limit"
+            val req = Request.Builder().url(url)
+                .header("Authorization", "Bearer ${c.token}").get().build()
+            runCatching {
+                client.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) return@use emptyList()
+                    turnsAdapter.fromJson(r.body!!.source())?.turns ?: emptyList()
+                }
+            }.getOrDefault(emptyList())
+        }
 
     /** Connectivity check for the Settings screen: session count or throw. */
     suspend fun ping(workerOverride: String = "", tokenOverride: String = ""): Int =
@@ -63,18 +107,16 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/sessions")
                 .header("Authorization", "Bearer $tok").get().build()
             client.newCall(req).execute().use { r ->
-                if (r.code == 401) throw IllegalStateException("401 token ผิด")
-                if (r.code == 404) throw IllegalStateException("404 Worker ยังไม่ deploy?")
-                if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code}")
-                return@withContext (moshi.adapter(Array<SessionRow>::class.java)
-                    .fromJson(r.body!!.source())?.size ?: 0)
+                when {
+                    r.code == 401 -> throw IllegalStateException("401 token ผิด")
+                    r.code == 404 -> throw IllegalStateException("404 ยังไม่มี DB/Worker ตรงนี้")
+                    !r.isSuccessful -> throw IllegalStateException("HTTP ${r.code}")
+                    else -> sessionsAdapter.fromJson(r.body!!.source())?.size ?: 0
+                }
             }
         }
 
-    /**
-     * Quick-tunnel discovery (AX-050): where is the ai daemon right now?
-     * Returns null on network failure; throws on 401/404 like ping().
-     */
+    /** Quick-tunnel discovery: where is the ai daemon right now? */
     suspend fun node(workerOverride: String = "", tokenOverride: String = ""): NodeInfo? =
         withContext(Dispatchers.IO) {
             val c = settings.current()
@@ -85,28 +127,18 @@ class HistoryApi(private val settings: SettingsStore) {
             try {
                 client.newCall(req).execute().use { r ->
                     if (r.code == 401) throw IllegalStateException("401 token ผิด")
-                    if (r.code == 404) throw IllegalStateException("404 Worker ยังไม่ deploy?")
+                    if (r.code == 404) throw IllegalStateException("404 ยังไม่มี DB/Worker ตรงนี้")
                     if (!r.isSuccessful) return@withContext null
-                    return@withContext moshi.adapter(NodeInfo::class.java)
-                        .fromJson(r.body!!.source())
+                    nodeAdapter.fromJson(r.body!!.source())
                 }
-            } catch (e: IllegalStateException) { throw e }
-            catch (_: Exception) { null }
+            } catch (e: IllegalStateException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
         }
 
     /** https://x.trycloudflare.com -> wss://x.trycloudflare.com/ws */
     fun wsUrlFor(tunnelUrl: String): String =
         tunnelUrl.replaceFirst("https://", "wss://").trimEnd('/') + "/ws"
-
-    suspend fun turns(sessionId: String, beforeSeq: Long = Long.MAX_VALUE, limit: Int = 50): List<TurnRow> =
-        withContext(Dispatchers.IO) {
-            val c = settings.current()
-            val url = "${c.workerUrl}/api/sessions/$sessionId/turns?before_seq=$beforeSeq&limit=$limit"
-            val req = Request.Builder().url(url).header("Authorization", "Bearer ${c.token}").get().build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return@withContext emptyList()
-                return@withContext moshi.adapter(TurnsPage::class.java)
-                    .fromJson(r.body!!.source())?.turns ?: emptyList()
-            }
-        }
 }

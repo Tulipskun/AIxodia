@@ -8,3 +8,7 @@ app/build/
 app/*.keystore
 *.jks
 local.env.json
+
+# local mock stack data (acts as the DB while testing)
+mock/mockai-data.json
+mock/*.json

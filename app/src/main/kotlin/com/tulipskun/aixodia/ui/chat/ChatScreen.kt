@@ -1,39 +1,49 @@
 package com.tulipskun.aixodia.ui.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Divider
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,30 +52,40 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.ChatMessage
-import com.tulipskun.aixodia.data.remote.ConnState
-import com.tulipskun.aixodia.data.repo.ChatRepository
-import com.tulipskun.aixodia.BuildConfig
+import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
+import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
 import com.tulipskun.aixodia.update.UpdateManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryApi, socket: AiDirectSocket) {
-    val sessId by settings.sessionFlow.collectAsState(initial = "default")
-    val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, sessId) }
+    val sessId by settings.sessionFlow.collectAsState(initial = "work-1")
+    val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, settings, sessId) }
     val messages by vm.messages.collectAsState(initial = emptyList())
     val sessions by vm.sessions.collectAsState(initial = emptyList())
     val conn by vm.conn.collectAsState(initial = ConnState.OFFLINE)
     val status by vm.status.collectAsState()
+    val notice by vm.notice.collectAsState()
+    val busy by vm.busy.collectAsState()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
@@ -76,18 +96,33 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
         return
     }
 
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
+
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
             ModalDrawerSheet {
-                Text("AIxodia sessions", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
-                sessions.forEach { s ->
-                    AssistChip(
-                        onClick = { scope.launch { settings.saveSession(s.id); drawer.close() } },
-                        label = { Text("${s.id} • ${s.lastSnippet.take(24)}") },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                    )
+                Text(
+                    "AIxodia • ${sessions.size} เซสชัน",
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                OutlinedButton(
+                    onClick = { vm.newSession(); scope.launch { drawer.close() } },
+                    modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text("  เซสชันใหม่")
                 }
+                Divider(Modifier.padding(vertical = 8.dp))
+                if (sessions.isEmpty()) {
+                    Text("ยังไม่มีเซสชัน — กดเซสชันใหม่ หรือรอ agent สร้างให้", Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                sessions.forEach { s -> SessionRow(s, active = s.id == sessId) { vm.switchTo(s.id); scope.launch { drawer.close() } } }
                 Divider(Modifier.padding(vertical = 8.dp))
                 UpdateRow(settings)
             }
@@ -96,71 +131,161 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("AIxodia • $sessId") },
+                    title = {
+                        Column {
+                            Text(sessionTitle(sessions, sessId), maxLines = 1)
+                            Text(
+                                "session: $sessId",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawer.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "menu")
+                            Icon(Icons.Default.Menu, contentDescription = "เมนูเซสชัน")
                         }
                     },
                     actions = {
+                        IconButton(onClick = { vm.refresh() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "ดึงข้อมูลล่าสุด")
+                        }
                         ConnDot(conn)
                         IconButton(onClick = { showSettings = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "settings")
+                            Icon(Icons.Default.Settings, contentDescription = "ตั้งค่า")
                         }
                     },
                 )
             },
             bottomBar = {
-                // Keep the composer above the NavBar and the keyboard.
                 Column(
                     Modifier.fillMaxWidth()
                         .navigationBarsPadding()
                         .imePadding()
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.labelSmall)
+                    if (status.isNotEmpty()) {
+                        Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (notice.isNotEmpty()) {
+                        Text(notice, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
-                            value = draft, onValueChange = { draft = it },
-                            modifier = Modifier.weight(1f), placeholder = { Text("Message…") }, maxLines = 4,
+                            value = draft,
+                            onValueChange = { draft = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("ส่งงานให้ agent…") },
+                            maxLines = 4,
                         )
-                        IconButton(onClick = { vm.send(draft); draft = "" }) {
-                            Icon(Icons.Default.Send, contentDescription = "send")
+                        IconButton(
+                            onClick = { vm.send(draft); draft = "" },
+                            enabled = !busy,
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = "ส่ง")
                         }
                     }
                 }
             }
         ) { pad ->
-            val listState = rememberLazyListState()
             LazyColumn(
-                state = listState, modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 8.dp),
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
             ) {
+                if (messages.isEmpty()) {
+                    item {
+                        Text(
+                            "ยังไม่มีข้อความ — agent จะทำงานต่อแม้ปิดแอป แล้วข้อมูลจะมาตอนเปิดใหม่",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
                 items(messages, key = { it.id }) { m -> Bubble(m) }
             }
         }
     }
 }
 
+private fun sessionTitle(sessions: List<ChatSession>, id: String): String =
+    sessions.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } ?: id
+
+@Composable
+private fun SessionRow(s: ChatSession, active: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(8.dp).clip(RoundedCornerShape(4.dp))
+                .background(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+        )
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(s.title, maxLines = 1, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
+            Text(
+                s.lastSnippet.ifBlank { "ยังไม่มีข้อความ" },
+                maxLines = 1,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (s.unread > 0) {
+            AssistChip(onClick = onClick, label = { Text("${s.unread} ใหม่") })
+        }
+    }
+}
+
 @Composable
 private fun ConnDot(c: ConnState) {
-    val t = when (c) { ConnState.ONLINE -> "● online"; ConnState.CONNECTING -> "● connecting"; ConnState.OFFLINE -> "● offline" }
-    Box(Modifier.padding(end = 12.dp)) { Text(t, style = MaterialTheme.typography.labelMedium) }
+    val (label, color) = when (c) {
+        ConnState.ONLINE -> "● ออนไลน์" to MaterialTheme.colorScheme.primary
+        ConnState.CONNECTING -> "● กำลังต่อ" to MaterialTheme.colorScheme.tertiary
+        ConnState.OFFLINE -> "● ออฟไลน์" to MaterialTheme.colorScheme.error
+    }
+    Text(label, style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(end = 4.dp))
 }
 
 @Composable
 private fun Bubble(m: ChatMessage) {
     val mine = m.role == "user"
+    val isTool = m.role == "tool_call" || m.role == "tool_result"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
-        Card(colors = CardDefaults.cardColors(
-            containerColor = if (mine) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceVariant
-        )) {
+        Card(
+            modifier = Modifier.widthIn(max = 320.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = when {
+                    mine -> MaterialTheme.colorScheme.primaryContainer
+                    isTool -> MaterialTheme.colorScheme.surfaceVariant
+                    else -> MaterialTheme.colorScheme.secondaryContainer
+                }
+            ),
+        ) {
             Column(Modifier.padding(10.dp)) {
-                Text(m.text)
+                if (m.agent.isNotBlank() || isTool) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AgentBadge(m)
+                        if (m.toolName.isNotBlank()) {
+                            Text(
+                                m.toolName,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Text(m.text.ifBlank { m.toolArgs })
                 Text(
-                    (if (m.pending) "sending • " else "") + m.role,
+                    buildString {
+                        if (m.pending) append("กำลังส่ง…")
+                        append(clock(m.createdAt))
+                        if (m.tokensOut > 0) append(" • ${m.tokensIn}↓ ${m.tokensOut}↑")
+                    },
                     style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -168,21 +293,49 @@ private fun Bubble(m: ChatMessage) {
 }
 
 @Composable
-private fun UpdateRow(settings: com.tulipskun.aixodia.SettingsStore) {
+private fun AgentBadge(m: ChatMessage) {
+    val (label, bg) = when {
+        m.role == "user" -> "คุณ" to MaterialTheme.colorScheme.primary
+        m.agent == "main" -> "MAIN AGENT" to MaterialTheme.colorScheme.primary
+        m.agent == "sub" -> "SUB AGENT" to MaterialTheme.colorScheme.tertiary
+        m.agent == "worker" -> "WORKER" to MaterialTheme.colorScheme.secondary
+        else -> return
+    }
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+        modifier = Modifier
+            .padding(end = 6.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+private fun clock(ts: Long): String =
+    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
+
+@Composable
+private fun UpdateRow(settings: SettingsStore) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var msg by remember { mutableStateOf("v" + BuildConfig.VERSION_NAME) }
+    var msg by remember { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
-        Button(
+        FilledTonalButton(
             onClick = {
                 busy = true; msg = "กำลังตรวจ…"
                 scope.launch {
                     try {
                         val token = settings.tokenFlow.first()
                         val up = UpdateManager.check(token)
-                        if (up == null) { msg = "ล่าสุดแล้ว (v" + BuildConfig.VERSION_NAME + ")"; return@launch }
+                        if (up == null) {
+                            msg = "ล่าสุดแล้ว (v" + BuildConfig.VERSION_NAME + ")"
+                            return@launch
+                        }
                         msg = "พบ ${up.tag} กำลังโหลด…"
                         val apk = UpdateManager.download(ctx, up, token) { p -> msg = "โหลด $p% (${up.tag})" }
                         msg = "พร้อมติดตั้ง ${up.tag}"
