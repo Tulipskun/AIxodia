@@ -102,7 +102,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     }
 
     if (!configured) {
-        SetupNeeded(dbUrlPresent = dbUrl.isNotBlank(), onOpen = { showSettings = true })
+        SetupNeeded(dbUrl = dbUrl, onOpen = { showSettings = true })
         return
     }
 
@@ -221,7 +221,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
 }
 
 @Composable
-private fun SetupNeeded(dbUrlPresent: Boolean, onOpen: () -> Unit) {
+private fun SetupNeeded(dbUrl: String, onOpen: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -232,7 +232,7 @@ private fun SetupNeeded(dbUrlPresent: Boolean, onOpen: () -> Unit) {
                 "(ค่าเหล่านี้อยู่ใน runtime config ของเครื่อง ไม่ถูก commit ลง git)",
             style = MaterialTheme.typography.bodyMedium,
         )
-        if (dbUrlPresent) {
+        if (dbUrl.isNotBlank()) {
             Text("DB/Worker URL: $dbUrl", style = MaterialTheme.typography.bodySmall)
         }
         Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("เปิดหน้าตั้งค่า") }
