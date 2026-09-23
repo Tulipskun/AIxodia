@@ -72,7 +72,7 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Go tests (mock DB + agent: background jobs, sessions, tunnel)
+      - name: "Go tests (mock DB + agent - background jobs, sessions, tunnel)"
         working-directory: mock
         run: go vet ./... && go test -count=1 -timeout 120s ./...
 
