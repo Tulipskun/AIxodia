@@ -15,6 +15,32 @@ Two reference files (copy to `ai/transport/mobile/`, rename package):
   `GET /api/node`. Plus `LoadState`/`SaveState` for stateless operation
   (config/sessions as JSON blobs in D1, nothing required on local disk).
 
+## Mode A — direct LAN (no tunnel, same WiFi)
+
+Use this when the phone and the ai host share one network. No Cloudflare hop,
+lowest latency.
+
+1. On the ai host, find its LAN IP: `hostname -I` (e.g. `192.168.1.50`).
+2. Serve the hub on **all interfaces, not localhost**: `127.0.0.1` accepts
+   only connections from the same machine, so the phone must reach
+   `0.0.0.0:18789` (or the LAN IP explicitly). Example:
+   `http.ListenAndServe("0.0.0.0:18789", hub)` with the hub mounted at `/ws`.
+3. Open the firewall: `sudo ufw allow 18789/tcp` (or equivalent).
+4. Phone on the **same WiFi** → Settings → WS URL
+   `ws://192.168.1.50:18789/ws` + same token as the daemon → back to chat.
+   Old history still loads via Worker/D1 (needs internet); direct replaces
+   only the live WS leg.
+5. Note: plain `ws://` sends the token unencrypted on the LAN — fine at home,
+   never on public/cafe WiFi (use Mode B there).
+
+## Mode B — quick tunnel (different networks, no port forward)
+
+`tunnel.go` path (default): hub stays on `127.0.0.1:18789`, `RunQuickTunnel`
+publishes it as `https://<random>.trycloudflare.com`, phone discovers it via
+`GET /api/node` (Settings → "ค้นหา ai"). Free TLS (wss), works over mobile
+data. Alternative with a stable address and end-to-end encryption: Tailscale
+on both machines, then use Mode A with the Tailscale IP/hostname.
+
 ## Wire into `ai` (Go daemon)
 
 1. `cloudflared` must be in `PATH` on the daemon host.
