@@ -39,14 +39,29 @@ class HistoryApi(private val settings: SettingsStore) {
             .header("Authorization", "Bearer ${c.token}").get().build()
         client.newCall(req).execute().use { r ->
             if (!r.isSuccessful) return@withContext emptyList()
-            val a = moshi.adapter(TurnsPage::class.java)
-            // sessions endpoint returns {"turns":[...]}-shaped or array; parse leniently
             return@withContext try {
                 val sa = moshi.adapter(Array<SessionRow>::class.java)
                 sa.fromJson(r.body!!.source())?.toList() ?: emptyList()
             } catch (_: Exception) { emptyList() }
         }
     }
+
+    /** Connectivity check for the Settings screen: session count or throw. */
+    suspend fun ping(workerOverride: String = "", tokenOverride: String = ""): Int =
+        withContext(Dispatchers.IO) {
+            val c = settings.current()
+            val base = workerOverride.ifBlank { c.workerUrl }
+            val tok = tokenOverride.ifEmpty { c.token }
+            val req = Request.Builder().url("$base/api/sessions")
+                .header("Authorization", "Bearer $tok").get().build()
+            client.newCall(req).execute().use { r ->
+                if (r.code == 401) throw IllegalStateException("401 token ผิด")
+                if (r.code == 404) throw IllegalStateException("404 Worker ยังไม่ deploy?")
+                if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code}")
+                return@withContext (moshi.adapter(Array<SessionRow>::class.java)
+                    .fromJson(r.body!!.source())?.size ?: 0)
+            }
+        }
 
     suspend fun turns(sessionId: String, beforeSeq: Long = Long.MAX_VALUE, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {

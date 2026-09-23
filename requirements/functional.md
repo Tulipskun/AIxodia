@@ -46,7 +46,7 @@
 
 ## Security / config
 
-- AX-030 — Settings screen: daemon WS URL, Worker base URL, auth token
+- AX-030 — Settings screen (implemented as ui/settings/SettingsScreen): daemon WS URL, Worker base URL, auth token
   (stored encrypted), session picker. No hardcoded secrets in git.
 
 ## Update — install over, keep data (AX-04x)

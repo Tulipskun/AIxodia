@@ -30,6 +30,20 @@ class SettingsStore(private val ctx: Context) {
     suspend fun save(ws: String, worker: String, tok: String, sess: String) {
         ctx.ds.edit { it[wsUrl] = ws; it[workerUrl] = worker; it[token] = tok; it[sessionId] = sess }
     }
+
+    /** Switch session only — never touches connection settings. */
+    suspend fun saveSession(sess: String) {
+        ctx.ds.edit { it[sessionId] = sess.ifBlank { "default" } }
+    }
+
+    /** Save connection fields; blank inputs keep the previous value. */
+    suspend fun saveConnection(ws: String, worker: String, tok: String) {
+        ctx.ds.edit {
+            if (ws.isNotBlank()) it[wsUrl] = ws.trim()
+            if (worker.isNotBlank()) it[workerUrl] = worker.trim().trimEnd('/')
+            it[token] = tok // token may be intentionally cleared
+        }
+    }
 }
 
 data class ConnConfig(val wsUrl: String, val workerUrl: String, val token: String, val sessionId: String)

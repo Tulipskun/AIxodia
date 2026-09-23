@@ -20,7 +20,7 @@ requirements/   spec source of truth (read before code)
 
 1. **D1 + Worker**: `wrangler d1 create aixodia` → put id in `worker/wrangler.toml` → `wrangler d1 execute aixodia --file=worker/schema.sql` → `wrangler secret put AIXODIA_TOKEN` → `wrangler deploy`.
 2. **Daemon**: wire `bridge/mobile_ws.go` into `ai` (see `bridge/README.md`), expose `:18789/ws`, mirror turns to Worker ingest.
-3. **App**: open in Android Studio, run `app`. Settings: WS URL, Worker URL, token, session. Needs reachable daemon (LAN/Tailscale) or Worker `/ws` proxy.
+3. **App**: open in Android Studio, run `app`. Settings (gear icon): WS URL, Worker URL, token, session + Worker test. D1 first: `cd worker && ./setup.sh`. Needs reachable daemon (LAN/Tailscale) or Worker `/ws` proxy.
 
 ## Build / update (no uninstall needed)
 

@@ -6,12 +6,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -46,13 +50,16 @@ import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.BuildConfig
+import com.tulipskun.aixodia.data.remote.AiDirectSocket
+import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.ui.settings.SettingsScreen
 import com.tulipskun.aixodia.update.UpdateManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(repo: ChatRepository, settings: SettingsStore) {
+fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryApi, socket: AiDirectSocket) {
     val sessId by settings.sessionFlow.collectAsState(initial = "default")
     val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, sessId) }
     val messages by vm.messages.collectAsState(initial = emptyList())
@@ -62,6 +69,12 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
+    var showSettings by remember { mutableStateOf(false) }
+
+    if (showSettings) {
+        SettingsScreen(settings = settings, history = history, socket = socket, onBack = { showSettings = false })
+        return
+    }
 
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -70,7 +83,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore) {
                 Text("AIxodia sessions", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
                 sessions.forEach { s ->
                     AssistChip(
-                        onClick = { scope.launch { settings.save("", "", "", s.id); drawer.close() } },
+                        onClick = { scope.launch { settings.saveSession(s.id); drawer.close() } },
                         label = { Text("${s.id} • ${s.lastSnippet.take(24)}") },
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
                     )
@@ -84,11 +97,27 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore) {
             topBar = {
                 TopAppBar(
                     title = { Text("AIxodia • $sessId") },
-                    actions = { ConnDot(conn) },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawer.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "menu")
+                        }
+                    },
+                    actions = {
+                        ConnDot(conn)
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "settings")
+                        }
+                    },
                 )
             },
             bottomBar = {
-                Column(Modifier.fillMaxWidth().padding(8.dp)) {
+                // Keep the composer above the NavBar and the keyboard.
+                Column(
+                    Modifier.fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
                     if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.labelSmall)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
