@@ -22,6 +22,14 @@ data class TurnRow(
 data class TurnsPage(@Json(name = "turns") val turns: List<TurnRow> = emptyList())
 
 @JsonClass(generateAdapter = true)
+data class NodeInfo(
+    @Json(name = "tunnel_url") val tunnelUrl: String = "",
+    @Json(name = "version") val version: String = "",
+    @Json(name = "online") val online: Boolean = false,
+    @Json(name = "heartbeat_age_s") val ageS: Long = -1,
+)
+
+@JsonClass(generateAdapter = true)
 data class SessionRow(
     @Json(name = "id") val id: String = "",
     @Json(name = "model") val model: String = "",
@@ -62,6 +70,33 @@ class HistoryApi(private val settings: SettingsStore) {
                     .fromJson(r.body!!.source())?.size ?: 0)
             }
         }
+
+    /**
+     * Quick-tunnel discovery (AX-050): where is the ai daemon right now?
+     * Returns null on network failure; throws on 401/404 like ping().
+     */
+    suspend fun node(workerOverride: String = "", tokenOverride: String = ""): NodeInfo? =
+        withContext(Dispatchers.IO) {
+            val c = settings.current()
+            val base = workerOverride.ifBlank { c.workerUrl }
+            val tok = tokenOverride.ifEmpty { c.token }
+            val req = Request.Builder().url("$base/api/node")
+                .header("Authorization", "Bearer $tok").get().build()
+            try {
+                client.newCall(req).execute().use { r ->
+                    if (r.code == 401) throw IllegalStateException("401 token ผิด")
+                    if (r.code == 404) throw IllegalStateException("404 Worker ยังไม่ deploy?")
+                    if (!r.isSuccessful) return@withContext null
+                    return@withContext moshi.adapter(NodeInfo::class.java)
+                        .fromJson(r.body!!.source())
+                }
+            } catch (e: IllegalStateException) { throw e }
+            catch (_: Exception) { null }
+        }
+
+    /** https://x.trycloudflare.com -> wss://x.trycloudflare.com/ws */
+    fun wsUrlFor(tunnelUrl: String): String =
+        tunnelUrl.replaceFirst("https://", "wss://").trimEnd('/') + "/ws"
 
     suspend fun turns(sessionId: String, beforeSeq: Long = Long.MAX_VALUE, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {

@@ -1,13 +1,23 @@
-// Cloudflare Worker REST for AIxodia D1 history + optional WS proxy.
-// Endpoints (Bearer token compared to AIXODIA_TOKEN secret):
-//   GET  /api/sessions
-//   GET  /api/sessions/:id/turns?before_seq=&limit=
-//   POST /api/sessions/:id/turns   {role, text}  (daemon ingest mirror)
-//   GET  /ws?session= (proxies to AI_DAEMON_WS when phone can't reach daemon)
+// Cloudflare Worker REST for AIxodia: D1 history + quick-tunnel discovery +
+// stateless-ai state + device registry. All /api/* need Bearer AIXODIA_TOKEN.
+// (v1 single shared token; per-device enforcement is the documented next step.)
+//
+//   History:  GET  /api/sessions
+//             GET  /api/sessions/:id/turns?before_seq=&limit=
+//             POST /api/sessions/:id/turns   {role, text}
+//   Node:     POST /api/node/heartbeat  {tunnel_url, version}  (ai daemon)
+//             GET  /api/node  -> {tunnel_url, version, online, heartbeat_age_s}
+//   State:    GET  /api/state/:key  /  PUT /api/state/:key  {value}
+//             (stateless ai: config/provider, sessions/<id>, ...)
+//   Devices:  GET /api/devices  /  POST /api/devices {id, label}
+//             POST /api/devices/:id/revoke
+//   Legacy:   GET  /ws?session= (proxies to AI_DAEMON_WS when set)
 export interface Env { DB: D1Database; AIXODIA_TOKEN: string; AI_DAEMON_WS?: string }
 
 const json = (d: unknown, s = 200) =>
   new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json" } });
+
+const KEY_RE = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -21,6 +31,73 @@ export default {
     if ((req.headers.get("Authorization") ?? "") !== `Bearer ${env.AIXODIA_TOKEN}`)
       return json({ error: "unauthorized" }, 401);
 
+    // ---- node discovery (ai quick-tunnel announcements) ----
+    if (u.pathname === "/api/node" && req.method === "GET") {
+      const n = await env.DB.prepare("SELECT tunnel_url, version, heartbeat FROM nodes WHERE id = 'ai'")
+        .first<{ tunnel_url: string; version: string; heartbeat: number }>();
+      const now = Math.floor(Date.now() / 1000);
+      const age = n ? now - n.heartbeat : -1;
+      return json({
+        tunnel_url: n?.tunnel_url ?? null,
+        version: n?.version ?? "",
+        heartbeat_age_s: age,
+        online: age >= 0 && age < 90,
+      });
+    }
+    if (u.pathname === "/api/node/heartbeat" && req.method === "POST") {
+      const b = await req.json<{ tunnel_url?: string; version?: string }>().catch(() => ({}));
+      if (!b.tunnel_url || !/^https:\/\/[A-Za-z0-9.-]+\.trycloudflare\.com$/.test(b.tunnel_url))
+        return json({ error: "tunnel_url must be https://*.trycloudflare.com" }, 400);
+      await env.DB.prepare(
+        `INSERT INTO nodes(id, tunnel_url, version, heartbeat)
+         VALUES('ai', ?, ?, unixepoch())
+         ON CONFLICT(id) DO UPDATE SET tunnel_url = excluded.tunnel_url,
+           version = excluded.version, heartbeat = unixepoch()`
+      ).bind(b.tunnel_url, b.version ?? "").run();
+      return json({ ok: true });
+    }
+
+    // ---- stateless-ai JSON state ----
+    const sm = u.pathname.match(/^\/api\/state\/([^/]+)$/);
+    if (sm) {
+      const key = decodeURIComponent(sm[1]);
+      if (!KEY_RE.test(key)) return json({ error: "bad key" }, 400);
+      if (req.method === "GET") {
+        const row = await env.DB.prepare("SELECT value, updated_at FROM state WHERE key = ?")
+          .bind(key).first<{ value: string; updated_at: number }>();
+        return json({ key, value: row?.value ?? null, updated_at: row?.updated_at ?? 0 });
+      }
+      if (req.method === "PUT") {
+        const b = await req.json<{ value?: unknown }>().catch(() => ({}));
+        const v = typeof b.value === "string" ? b.value : JSON.stringify(b.value ?? null);
+        if (v.length > 500_000) return json({ error: "too large (500KB max)" }, 413);
+        await env.DB.prepare(
+          `INSERT INTO state(key, value, updated_at) VALUES(?, ?, unixepoch())
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()`
+        ).bind(key, v).run();
+        return json({ ok: true });
+      }
+    }
+
+    // ---- device registry (prepare per-device tokens; v1 informational) ----
+    if (u.pathname === "/api/devices" && req.method === "GET") {
+      const r = await env.DB.prepare("SELECT id, label, created_at, revoked FROM devices ORDER BY created_at DESC LIMIT 100").all();
+      return json(r.results ?? []);
+    }
+    if (u.pathname === "/api/devices" && req.method === "POST") {
+      const b = await req.json<{ id?: string; label?: string }>().catch(() => ({}));
+      if (!b.id || !KEY_RE.test(b.id)) return json({ error: "id required" }, 400);
+      await env.DB.prepare("INSERT OR IGNORE INTO devices(id, label) VALUES(?, ?)")
+        .bind(b.id, b.label ?? "").run();
+      return json({ ok: true });
+    }
+    const dm = u.pathname.match(/^\/api\/devices\/([^/]+)\/revoke$/);
+    if (dm && req.method === "POST") {
+      await env.DB.prepare("UPDATE devices SET revoked = 1 WHERE id = ?").bind(decodeURIComponent(dm[1])).run();
+      return json({ ok: true });
+    }
+
+    // ---- history (unchanged) ----
     if (u.pathname === "/api/sessions" && req.method === "GET") {
       const r = await env.DB.prepare("SELECT id, model, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 200").all();
       return json(r.results ?? []);

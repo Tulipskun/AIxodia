@@ -58,3 +58,16 @@
 - AX-041 — In-app "ตรวจอัปเดต" (drawer): checks latest GitHub Release with the
   stored token, downloads the APK to private storage, fires the installer via
   FileProvider. Old Releases are kept on GitHub (no delete step) for rollback.
+
+## Tunnel + stateless ai (AX-05x)
+
+- AX-050 — Discovery: ai announces its random trycloudflare URL with
+  `POST /api/node/heartbeat` every 30s; app resolves it with `GET /api/node`.
+  Stale heartbeat (>90s) renders "ai ออฟไลน์". Hardcoded daemon IP is fallback.
+- AX-051 — Secret flow: app sends its scoped Worker token in the WS hello
+  frame; ai keeps it in memory only and uses it for Worker REST (history
+  ingest + `/api/state` load/save). Raw Cloudflare API tokens never leave
+  Cloudflare/operator. Tunnel frames without a valid token are rejected.
+- AX-052 — Stateless state: `GET/PUT /api/state/:key` stores opaque JSON
+  (≤500KB, key charset `[A-Za-z0-9:_-]`), e.g. `config/provider`,
+  `sessions/<id>`. Local disk on the ai host is a pure cache, safe to wipe.

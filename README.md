@@ -22,6 +22,15 @@ requirements/   spec source of truth (read before code)
 2. **Daemon**: wire `bridge/mobile_ws.go` into `ai` (see `bridge/README.md`), expose `:18789/ws`, mirror turns to Worker ingest.
 3. **App**: open in Android Studio, run `app`. Settings (gear icon): WS URL, Worker URL, token, session + Worker test. D1 first: `cd worker && ./setup.sh`. Needs reachable daemon (LAN/Tailscale) or Worker `/ws` proxy.
 
+## Architecture (tunnel + stateless ai)
+
+`ai` serves the mobile WS on localhost only and opens a Cloudflare **quick
+tunnel** (`bridge/tunnel.go`); the random trycloudflare URL is heartbeat-announced
+to D1, and the app discovers it via `GET /api/node` (Settings → "ค้นหา ai" →
+"ใช้ URL นี้"). `ai` keeps no local state: config/sessions live as JSON blobs
+in D1 (`/api/state`), and the phone's scoped Worker token (sent in the WS hello,
+memory-only) is its DB credential. Raw Cloudflare API tokens never leave your account.
+
 ## Build / update (no uninstall needed)
 
 CI (`.github/workflows/android.yml`, same shape as Droid-SSH) signs every build

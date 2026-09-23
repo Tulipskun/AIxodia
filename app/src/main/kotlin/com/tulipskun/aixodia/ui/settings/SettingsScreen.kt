@@ -37,6 +37,7 @@ import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.remote.NodeInfo
 import kotlinx.coroutines.launch
 
 /**
@@ -141,6 +142,14 @@ fun SettingsScreen(
                 ) { Text("ทดสอบ Worker") }
             }
             if (msg.isNotEmpty()) Text(msg, style = MaterialTheme.typography.bodyMedium)
+            NodeCard(history = history, workerText = worker, tokenText = token,
+                onUse = { wsUrl ->
+                    ws = wsUrl
+                    scope.launch {
+                        settings.saveConnection(wsUrl, worker.ifBlank { curWorker }, token)
+                        msg = "ใช้ tunnel URL แล้ว — กลับไปแชตได้เลย"
+                    }
+                })
             Text(
                 "สถานะ WebSocket: " + when (conn) {
                     ConnState.ONLINE -> "● online ($curWs)"
@@ -155,5 +164,51 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+    }
+}
+
+@Composable
+private fun NodeCard(
+    history: HistoryApi,
+    workerText: String,
+    tokenText: String,
+    onUse: (String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var node by remember { mutableStateOf<NodeInfo?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf("") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("ai daemon ผ่าน quick tunnel (auto-discovery)", style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    checking = true; err = ""
+                    scope.launch {
+                        try {
+                            node = history.node(workerText, tokenText)
+                            if (node == null) err = "ติดต่อ Worker ไม่ได้ — ตรวจ URL/token"
+                        } catch (e: Exception) {
+                            err = e.message ?: "error"
+                        } finally { checking = false }
+                    }
+                },
+                enabled = !checking,
+            ) { Text("ค้นหา ai") }
+            if (node?.online == true) {
+                Button(onClick = { onUse(history.wsUrlFor(node!!.tunnelUrl)) }) { Text("ใช้ URL นี้") }
+            }
+        }
+        val n = node
+        if (n != null) {
+            Text(
+                if (n.online) "● ai online (${n.tunnelUrl}, heartbeat ${n.ageS}s, ${n.version})"
+                else "● ai ออฟไลน์ (heartbeat ขาดเกิน 90s) — ไปรัน ai ให้เปิด tunnel ก่อน",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (err.isNotEmpty()) Text(err, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
     }
 }
