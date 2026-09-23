@@ -13,7 +13,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Divider
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,12 +38,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.ChatRepository
+import com.tulipskun.aixodia.BuildConfig
+import com.tulipskun.aixodia.update.UpdateManager
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,6 +75,8 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore) {
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
                     )
                 }
+                Divider(Modifier.padding(vertical = 8.dp))
+                UpdateRow(settings)
             }
         }
     ) {
@@ -127,5 +135,36 @@ private fun Bubble(m: ChatMessage) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun UpdateRow(settings: com.tulipskun.aixodia.SettingsStore) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("v" + BuildConfig.VERSION_NAME) }
+    var busy by remember { mutableStateOf(false) }
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
+        Button(
+            onClick = {
+                busy = true; msg = "กำลังตรวจ…"
+                scope.launch {
+                    try {
+                        val token = settings.tokenFlow.first()
+                        val up = UpdateManager.check(token)
+                        if (up == null) { msg = "ล่าสุดแล้ว (v" + BuildConfig.VERSION_NAME + ")"; return@launch }
+                        msg = "พบ ${up.tag} กำลังโหลด…"
+                        val apk = UpdateManager.download(ctx, up, token) { p -> msg = "โหลด $p% (${up.tag})" }
+                        msg = "พร้อมติดตั้ง ${up.tag}"
+                        UpdateManager.install(ctx, apk)
+                    } catch (e: Exception) {
+                        msg = "อัปเดตล้มเหลว: ${e.message}"
+                    } finally { busy = false }
+                }
+            },
+            enabled = !busy,
+        ) { Text("ตรวจอัปเดต") }
+        Text("ติดตั้งทับตัวเดิม ข้อมูลแชตไม่หาย", style = MaterialTheme.typography.labelSmall)
     }
 }

@@ -1,11 +1,95 @@
-name: android
-on: [push, pull_request]
+name: Android build
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
-      - uses: gradle/actions/setup-gradle@v3
-      - run: gradle :app:assembleDebug --stacktrace
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.10.2"
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools"
+
+      - name: Cache Android SDK packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/platforms/android-35
+            ${{ env.ANDROID_HOME }}/build-tools/35.0.0
+          key: android-sdk-35-buildtools-35.0.0
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Prepare stable signing key
+        run: |
+          base64 --decode app/aixodia-debug.keystore.b64 > app/aixodia-debug.keystore
+          chmod 600 app/aixodia-debug.keystore
+
+      - name: Determine release version
+        id: version
+        run: |
+          next="v0.1.${GITHUB_RUN_NUMBER}"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+          echo "versionName=${next#v}" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Set APK version
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.versionName }}
+          VERSION_CODE: ${{ steps.version.outputs.versionCode }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          p = Path("app/build.gradle.kts")
+          s = p.read_text()
+          s = re.sub(r'versionCode = \d+', 'versionCode = ' + os.environ["VERSION_CODE"], s)
+          s = re.sub(r'versionName = "[^"]+"', 'versionName = "' + os.environ["VERSION_NAME"] + '"', s)
+          p.write_text(s)
+          PY
+
+      - name: Build
+        run: gradle assembleDebug
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk AIxodia.apk
+
+      - name: Verify APK signature (must be stable key)
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs AIxodia.apk | grep -i "SHA-256"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs AIxodia.apk | grep -qi "CN=AIxodia"
+
+      - name: Verify APK 16 KB alignment
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 AIxodia.apk
+
+      # NOTE: intentionally NO delete step (unlike Droid-SSH): every build
+      # publishes a new v0.1.<run> tag and keeps all previous releases,
+      # so users can always roll back. Same applicationId + same stable
+      # signature + higher versionCode = installs OVER the old APK,
+      # Room cache and settings are preserved, no uninstall needed.
+      - name: Publish GitHub Release (keep all previous releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" AIxodia.apk --title "AIxodia $RELEASE_TAG" --generate-notes

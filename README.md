@@ -22,4 +22,13 @@ requirements/   spec source of truth (read before code)
 2. **Daemon**: wire `bridge/mobile_ws.go` into `ai` (see `bridge/README.md`), expose `:18789/ws`, mirror turns to Worker ingest.
 3. **App**: open in Android Studio, run `app`. Settings: WS URL, Worker URL, token, session. Needs reachable daemon (LAN/Tailscale) or Worker `/ws` proxy.
 
-Spec: `requirements/` (AX-xxx). Initial change: `requirements/changes.md` AXCH-001.
+## Build / update (no uninstall needed)
+
+CI (`.github/workflows/android.yml`, same shape as Droid-SSH) signs every build
+with the same stable key (`app/aixodia-debug.keystore.b64`) and tags
+`v0.1.<RUN_NUMBER>` with `versionCode=<RUN_NUMBER>`. Installing the new
+`AIxodia.apk` goes OVER the old one — chat cache and settings are kept.
+Unlike Droid-SSH, old Releases are never deleted (rollback possible).
+In-app: drawer → "ตรวจอัปเดต".
+
+Spec: `requirements/` (AX-xxx). Changes: `requirements/changes.md` (AXCH-001/002).

@@ -12,14 +12,45 @@ android {
         applicationId = "com.tulipskun.aixodia"
         minSdk = 26
         targetSdk = 35
+        // CI overwrites both per build (v0.1.<RUN_NUMBER> / versionCode=<RUN_NUMBER>)
+        // so every Release installs OVER the previous one: same applicationId +
+        // same stable signature + higher versionCode = no uninstall, Room cache kept.
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        // Stable key for sideload: every build signs with the SAME key,
+        // updates install over the old APK with data preserved.
+        // Keystore is decoded from aixodia-debug.keystore.b64 in CI
+        // (same pattern as Droid-SSH). Local dev builds without the
+        // keystore fall back to the default debug key.
+        create("stable") {
+            val stableKeystore = file("aixodia-debug.keystore")
+            if (stableKeystore.exists()) {
+                storeFile = stableKeystore
+                storeType = "PKCS12"
+                storePassword = "aixodiadebug"
+                keyAlias = "aixodia-debug"
+                keyPassword = "aixodiadebug"
+            }
+        }
+    }
+
     buildTypes {
+        getByName("debug") {
+            val stableKeystore = file("aixodia-debug.keystore")
+            if (stableKeystore.exists()) {
+                signingConfig = signingConfigs.getByName("stable")
+            }
+        }
         release {
+            val stableKeystore = file("aixodia-debug.keystore")
+            if (stableKeystore.exists()) {
+                signingConfig = signingConfigs.getByName("stable")
+            }
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

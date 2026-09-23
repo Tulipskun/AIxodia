@@ -48,3 +48,13 @@
 
 - AX-030 — Settings screen: daemon WS URL, Worker base URL, auth token
   (stored encrypted), session picker. No hardcoded secrets in git.
+
+## Update — install over, keep data (AX-04x)
+
+- AX-040 — Every CI build signs with the same stable key and bumps
+  `versionCode` (`v0.1.<RUN_NUMBER>`). Same `applicationId` + same signature +
+  higher `versionCode` = Android installs OVER the old APK; Room cache,
+  DataStore settings and backups survive. Uninstall is never required.
+- AX-041 — In-app "ตรวจอัปเดต" (drawer): checks latest GitHub Release with the
+  stored token, downloads the APK to private storage, fires the installer via
+  FileProvider. Old Releases are kept on GitHub (no delete step) for rollback.
