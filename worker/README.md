@@ -1,32 +1,53 @@
-# worker/ — Cloudflare D1 + Worker for AIxodia history
+# worker/ — Cloudflare Worker + D1 (production history store)
 
-The phone never talks to D1 directly. This Worker is the HTTPS front:
-`GET /api/sessions`, `GET /api/sessions/:id/turns`, `POST .../turns` (daemon
-ingest mirror), `GET /ws` (optional proxy to the ai daemon when the phone
-can't reach it directly).
+The phone never talks to D1 directly. This Worker is the HTTPS/WSS front:
+`GET/POST /api/sessions`, `GET/POST /api/sessions/:id/turns`,
+`POST /api/node/heartbeat` + `GET /api/node` (quick-tunnel discovery),
+`GET/PUT /api/state/:key` (stateless-ai blobs), `GET /ws` (optional proxy).
 
-## One-time setup (needs your Cloudflare account)
+## Current deployment
+
+| What | Value |
+|---|---|
+| Account | `3b953d1c…b37b` (config, not a secret) |
+| D1 database | `aixodia` / `e8e746ea-…f29a1` — schema applied (5 tables) |
+| Worker | `aixodia` (deploy needs Workers Scripts: Edit on your token) |
+| App auth | Worker secret `AIXODIA_TOKEN` — set per environment, never in git |
+
+## Runtime config only (no secrets in code)
+
+- `wrangler.toml` — non-secret config (name, D1 binding, optional `AI_DAEMON_WS`).
+- `AIXODIA_TOKEN` — a **Worker secret**: `wrangler secret put AIXODIA_TOKEN`.
+  It is the token the app types in Settings; the daemon uses it for REST.
+- Local `wrangler dev` → copy `.dev.vars.example` → `.dev.vars` (gitignored).
+- The Cloudflare **API token** is only ever an env var (`CLOUDFLARE_API_TOKEN`)
+  in the shell that runs wrangler. It is never stored in the repo.
+- The Android app reads Worker URL + token from DataStore at runtime (gear
+  icon). A fresh install has empty values and shows a setup screen.
+
+## Token permissions needed
+
+Minimum for provisioning/deploy:
+
+- Account → **D1: Edit**
+- Account → **Workers Scripts: Edit** (deploy + `secrets`)
+- Account → **Account Settings: Read** (workers.dev subdomain)
+- Account → **Account Settings: Edit** (only if workers.dev must be enabled)
+
+A user token without these returns 403 (`No access to the specified resource`).
+
+## Provisioning by hand (if you prefer)
 
 ```bash
-cd worker
-wrangler login
-./setup.sh
-# prompts: paste nothing (D1 id auto-filled when possible), type AIXODIA_TOKEN,
-# then it applies schema.sql and deploys.
-# Optional WS proxy: AI_DAEMON_WS=wss://your-host/ws ./setup.sh
+export CLOUDFLARE_API_TOKEN=…        # shell only
+export CLOUDFLARE_ACCOUNT_ID=…
+npx wrangler d1 execute aixodia --remote --file=schema.sql
+npx wrangler secret put AIXODIA_TOKEN
+npx wrangler deploy
 ```
 
-Manual equivalent:
+## Mock parity
 
-```bash
-wrangler d1 create aixodia            # put database_id into wrangler.toml
-wrangler d1 execute aixodia --file=schema.sql
-wrangler secret put AIXODIA_TOKEN
-wrangler deploy
-```
-
-## App side
-
-Settings screen → Worker URL = `https://aixodia.<you>.workers.dev`,
-same token as `AIXODIA_TOKEN` → "ทดสอบ Worker" must print
-`Worker OK — เจอ N sessions ใน D1`. `401` = token ผิด, `404` = ยังไม่ deploy.
+`mock/mockdb` implements the same endpoints in Go, so the app can be tested
+without any of the above. Keep the two in sync: schema + contract changes land
+in `worker/schema.sql`, `worker/src/index.ts`, and `mock/mockdb/db.go`.

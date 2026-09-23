@@ -1,4 +1,9 @@
-# mock/ — run and test the whole AIxodia stack before Cloudflare exists
+# mock/ — offline dev/test stack (NOT the production database)
+
+Production history lives in Cloudflare D1 behind `worker/` (see
+`worker/README.md`). This mock exists so the app can be developed and tested
+without touching Cloudflare; it speaks the same REST + WebSocket contract, so
+switching is a settings change in the app (DB URL + token), never a rebuild.
 
 `mockai` = mock DB (REST, same contract as `worker/src/index.ts`) + mock ai
 daemon (WebSocket + background jobs). The app talks to it exactly like the
@@ -19,7 +24,7 @@ Flags: `-db`, `-ws`, `-token`, `-data` (JSON file = the "database"),
 Default ports are 8787/18789; if something else already owns them, pass your
 own (the examples in this repo used 39117/39118 during CI-style testing).
 
-## App settings for mock mode
+## App settings for mock mode (runtime only, nothing compiled in)
 
 | Field | Android emulator | Physical phone on same WiFi |
 |---|---|---|

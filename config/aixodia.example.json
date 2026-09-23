@@ -1,0 +1,20 @@
+{
+  "_comment": "Runtime config for the AIxodia daemon/bridge. Copy to config/aixodia.json (gitignored) and edit. Secrets belong here at runtime, never in code.",
+
+  "worker_base": "https://aixodia.<your-subdomain>.workers.dev",
+  "node_token_env": "AIXODIA_NODE_TOKEN",
+
+  "mobile_ws": {
+    "listen": "127.0.0.1:18789",
+    "public_listen": "0.0.0.0:18789",
+    "tunnel": true,
+    "cloudflared": "cloudflared"
+  },
+
+  "state_keys": {
+    "provider_config": "config/provider",
+    "system_config": "config/system",
+    "entry_config": "config/entry",
+    "session_prefix": "sessions/"
+  }
+}

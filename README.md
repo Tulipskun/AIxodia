@@ -31,6 +31,17 @@ to D1, and the app discovers it via `GET /api/node` (Settings → "ค้นห�
 in D1 (`/api/state`), and the phone's scoped Worker token (sent in the WS hello,
 memory-only) is its DB credential. Raw Cloudflare API tokens never leave your account.
 
+## Production DB (runtime config, nothing hardcoded)
+
+- Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds sessions/turns/state.
+- The Worker is the only public door; the app authenticates with the Worker
+  secret `AIXODIA_TOKEN` typed in Settings at runtime.
+- The Cloudflare API token used for deploys lives only in the shell
+  (`CLOUDFLARE_API_TOKEN`); the repo contains config (`wrangler.toml`,
+  `config/aixodia.example.json`) and examples (`.dev.vars.example`), no secrets.
+- A fresh app install has empty settings and shows a setup screen instead of
+  silently pointing somewhere.
+
 ## Test it right now (no Cloudflare needed)
 
 ```bash
@@ -41,6 +52,8 @@ go run ./cmd/mockai -token devtoken -db 127.0.0.1:39117 -ws 127.0.0.1:39118 -tun
 Then in the app (gear icon): DB URL `http://<host>:39117`, WS URL
 `ws://<host>:39118/ws` (emulator: `10.0.2.2`), token `devtoken`, or press
 "ค้นหา ai" and use the announced tunnel URL. Details: `mock/README.md`.
+For the real DB, put the deployed Worker URL + `AIXODIA_TOKEN` in the same
+screen — same code path, no rebuild.
 
 ## Build / update (no uninstall needed)
 

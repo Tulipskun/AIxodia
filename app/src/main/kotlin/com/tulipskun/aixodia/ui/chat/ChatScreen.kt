@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
@@ -78,7 +79,11 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryApi, socket: AiDirectSocket) {
-    val sessId by settings.sessionFlow.collectAsState(initial = "work-1")
+    val dbUrl by settings.workerUrlFlow.collectAsState(initial = "")
+    val token by settings.tokenFlow.collectAsState(initial = "")
+    val wsUrl by settings.wsUrlFlow.collectAsState(initial = "")
+    val configured = dbUrl.isNotBlank() && token.isNotBlank() && wsUrl.isNotBlank()
+    val sessId by settings.sessionFlow.collectAsState(initial = "")
     val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, settings, sessId) }
     val messages by vm.messages.collectAsState(initial = emptyList())
     val sessions by vm.sessions.collectAsState(initial = emptyList())
@@ -93,6 +98,11 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
 
     if (showSettings) {
         SettingsScreen(settings = settings, history = history, socket = socket, onBack = { showSettings = false })
+        return
+    }
+
+    if (!configured) {
+        SetupNeeded(dbUrlPresent = dbUrl.isNotBlank(), onOpen = { showSettings = true })
         return
     }
 
@@ -207,6 +217,25 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 items(messages, key = { it.id }) { m -> Bubble(m) }
             }
         }
+    }
+}
+
+@Composable
+private fun SetupNeeded(dbUrlPresent: Boolean, onOpen: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("ยังไม่ได้ตั้งค่าการเชื่อมต่อ", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "AIxodia ไม่มีค่าเชื่อมต่อติดมากับตัวแอป — ต้องใส่ตอนรันบนเครื่องคุณเท่านั้น " +
+                "(ค่าเหล่านี้อยู่ใน runtime config ของเครื่อง ไม่ถูก commit ลง git)",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (dbUrlPresent) {
+            Text("DB/Worker URL: $dbUrl", style = MaterialTheme.typography.bodySmall)
+        }
+        Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("เปิดหน้าตั้งค่า") }
     }
 }
 

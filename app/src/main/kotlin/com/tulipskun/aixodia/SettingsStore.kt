@@ -10,19 +10,22 @@ import kotlinx.coroutines.flow.map
 
 private val Context.ds by preferencesDataStore("aixodia")
 
+/**
+ * Every connection value is runtime configuration entered by the user in the
+ * settings screen — nothing is baked into the app, and no secret ships in the
+ * repo. Defaults are intentionally empty so an unconfigured app asks instead
+ * of silently talking to a wrong endpoint.
+ */
 class SettingsStore(private val ctx: Context) {
     private val wsUrl = stringPreferencesKey("ws_url")
     private val workerUrl = stringPreferencesKey("worker_url")
     private val token = stringPreferencesKey("token")
     private val sessionId = stringPreferencesKey("session_id")
 
-    // Defaults point at the local mock stack (mock/cmd/mockai) so the app is
-    // testable before Cloudflare exists. 10.0.2.2 is the Android emulator's
-    // alias for the host machine; on a real phone use the host's LAN IP.
-    val wsUrlFlow: Flow<String> = ctx.ds.data.map { it[wsUrl] ?: "ws://10.0.2.2:39118/ws" }
-    val workerUrlFlow: Flow<String> = ctx.ds.data.map { it[workerUrl] ?: "http://10.0.2.2:39117" }
-    val tokenFlow: Flow<String> = ctx.ds.data.map { it[token] ?: "devtoken" }
-    val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "work-1" }
+    val wsUrlFlow: Flow<String> = ctx.ds.data.map { it[wsUrl] ?: "" }
+    val workerUrlFlow: Flow<String> = ctx.ds.data.map { it[workerUrl] ?: "" }
+    val tokenFlow: Flow<String> = ctx.ds.data.map { it[token] ?: "" }
+    val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "" }
 
     suspend fun current(): ConnConfig = ConnConfig(
         wsUrl = wsUrlFlow.first(), workerUrl = workerUrlFlow.first(),
@@ -31,16 +34,16 @@ class SettingsStore(private val ctx: Context) {
 
     suspend fun save(ws: String, worker: String, tok: String, sess: String) {
         ctx.ds.edit {
-            it[wsUrl] = ws
-            it[workerUrl] = worker
-            it[token] = tok
-            it[sessionId] = sess.ifBlank { "default" }
+            it[wsUrl] = ws.trim()
+            it[workerUrl] = worker.trim().trimEnd('/')
+            it[token] = tok.trim()
+            it[sessionId] = sess.trim()
         }
     }
 
     /** Switch session only — never touches connection settings. */
     suspend fun saveSession(sess: String) {
-        ctx.ds.edit { it[sessionId] = sess.ifBlank { "default" } }
+        ctx.ds.edit { it[sessionId] = sess.trim() }
     }
 
     /** Save connection fields; blank inputs keep the previous value. */
@@ -48,8 +51,14 @@ class SettingsStore(private val ctx: Context) {
         ctx.ds.edit {
             if (ws.isNotBlank()) it[wsUrl] = ws.trim()
             if (worker.isNotBlank()) it[workerUrl] = worker.trim().trimEnd('/')
-            it[token] = tok // token may be intentionally cleared
+            it[token] = tok.trim() // token may be intentionally cleared
         }
+    }
+
+    /** True when both endpoints + token are set (i.e. the app may connect). */
+    suspend fun isConfigured(): Boolean {
+        val c = current()
+        return c.workerUrl.isNotBlank() && c.token.isNotBlank() && c.wsUrl.isNotBlank()
     }
 }
 

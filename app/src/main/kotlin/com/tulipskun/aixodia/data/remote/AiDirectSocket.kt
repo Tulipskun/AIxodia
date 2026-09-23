@@ -93,6 +93,14 @@ class AiDirectSocket(private val settings: SettingsStore) {
             var opened = false
             try {
                 val c: ConnConfig = settings.current()
+                if (c.wsUrl.isBlank() || c.token.isBlank()) {
+                    // Nothing configured yet (runtime settings are empty on a
+                    // fresh install) — stay offline quietly instead of retrying
+                    // an invalid URL forever.
+                    _state.value = ConnState.OFFLINE
+                    delay(2000)
+                    continue
+                }
                 _state.value = ConnState.CONNECTING
                 val req = Request.Builder().url(c.wsUrl).build()
                 val ready = CompletableDeferred<Unit>()

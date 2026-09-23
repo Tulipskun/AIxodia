@@ -22,7 +22,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.23"
-          cache-dependency-path: mock/go.sum
+          cache-dependency-path: |
+            mock/go.sum
+            bridge/go.sum
 
       - uses: gradle/actions/setup-gradle@v6
         with:
@@ -75,6 +77,10 @@ jobs:
       - name: "Go tests (mock DB + agent - background jobs, sessions, tunnel)"
         working-directory: mock
         run: go vet ./... && go test -count=1 -timeout 120s ./...
+
+      - name: "Go tests (bridge runtime config)"
+        working-directory: bridge
+        run: go vet ./... && go test -count=1 -timeout 60s ./...
 
       - name: Build
         run: gradle assembleDebug

@@ -41,6 +41,21 @@ publishes it as `https://<random>.trycloudflare.com`, phone discovers it via
 data. Alternative with a stable address and end-to-end encryption: Tailscale
 on both machines, then use Mode A with the Tailscale IP/hostname.
 
+## Runtime config (no secrets in code)
+
+`config/aixodia.example.json` → copy to `config/aixodia.json` (gitignored) or
+point `AIXODIA_CONFIG` at your own path. `LoadConfig(path)` reads it; the node
+token comes from the env var the config names (`AIXODIA_NODE_TOKEN` by
+default) or from a paired phone's WS hello, and is never written to disk.
+
+```json
+{
+  "worker_base": "https://aixodia.<subdomain>.workers.dev",
+  "node_token_env": "AIXODIA_NODE_TOKEN",
+  "mobile_ws": { "listen": "127.0.0.1:18789", "tunnel": true }
+}
+```
+
 ## Wire into `ai` (Go daemon)
 
 1. `cloudflared` must be in `PATH` on the daemon host.

@@ -52,3 +52,15 @@
   ค้างเป็น pending แล้ว flush ตอน reconnect; (6) บั๊กจริงที่เจอตอนเทสต์ tunnel:
   cloudflared ต้องการ `--metrics 127.0.0.1:0` ไม่งั้น resolve `localhost`
   ไม่ได้แล้ว tunnel ตายเงียบ (error 1033) — แก้ใน `bridge/tunnel.go` + mock.
+
+- AXCH-006 (2026-09-23) — "ใช้ DB จริง + ห้ามฝังของลับในโค้ด": (1) D1 จริงถูก
+  provision แล้ว (`aixodia`, account 3b953d1c…, id e8e746ea-…f29a1) และลง
+  schema ครบ 5 ตารางผ่าน wrangler — ไม่มี mock เป็น production store; (2) ถอน
+  ค่า default ทั้งหมดออกจากแอป (DB URL/WS URL/token/session ว่างเปล่า แอปใหม่
+  ขึ้นหน้า "ยังไม่ได้ตั้งค่า") และให้ผู้ใช้กรอกเป็น runtime config; (3) secret อยู่
+  นอก git เท่านั้น: `AIXODIA_TOKEN` = Worker secret, Cloudflare API token =
+  env var ของ shell, `config/aixodia.example.json` + `.dev.vars.example` เป็น
+  ตัวอย่างเท่านั้น (gitignore ครอบไฟล์จริง); (4) daemon อ่านค่าจาก
+  `bridge.LoadConfig()` (ไฟล์ JSON/env, มีเทสต์) แทน hardcode; (5) CI เพิ่ม
+  `go test` ของ bridge. สิทธิ์ token ที่ยังขาดและต้องเพิ่ม: Account →
+  Workers Scripts: Edit (deploy/secret) + Account Settings: Read (workers.dev).
