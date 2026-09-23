@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -296,7 +297,9 @@ func TestQuickTunnelAnnouncesURLToDB(t *testing.T) {
 	}
 	db := mockdb.New("", filepath.Join(dir, "db.json"))
 	ag := agent.New(agent.Config{DB: db, Version: "t", TunnelBin: fake, TunnelWait: 5 * time.Second})
-	public, stop, err := ag.RunQuickTunnel(t.Context(), 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	public, stop, err := ag.RunQuickTunnel(ctx, 1)
 	if err != nil {
 		t.Fatalf("RunQuickTunnel: %v", err)
 	}
