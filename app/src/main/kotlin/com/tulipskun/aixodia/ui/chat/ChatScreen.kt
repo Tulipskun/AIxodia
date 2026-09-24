@@ -287,7 +287,11 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                                 shape = MaterialTheme.shapes.extraSmall,
                             ) {
                                 Text(
-                                    text = if (pickedModel.isBlank()) "เลือกโมเดล" else "$pickedProvider · $pickedModel",
+                                    text = when {
+                                        pickedProvider.isBlank() -> "ใช้ค่าของ agent (แตะเพื่อล็อกโมเดล)"
+                                        pickedModel.isBlank() -> "$pickedProvider · เลือก model"
+                                        else -> "$pickedProvider · $pickedModel"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                     maxLines = 1,
@@ -479,6 +483,13 @@ private fun ChatModelSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
+                if (pickedProvider.isBlank()) {
+                    Text(
+                        "แชทนี้ยังใช้ค่าของ agent อยู่ — เลือก provider เพื่อล็อกไว้กับแชทนี้",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -499,6 +510,13 @@ private fun ChatModelSheet(
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (pickedProvider.isBlank()) {
+                    Text(
+                        "เลือก provider ข้างบนก่อน",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 LazyColumn(Modifier.heightIn(max = 300.dp)) {
                     items(filtered) { m ->
                         val selected = m.id == pickedModel

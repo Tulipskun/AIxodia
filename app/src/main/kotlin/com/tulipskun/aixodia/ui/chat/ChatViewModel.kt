@@ -193,9 +193,8 @@ class ChatViewModel(
                         ?: view?.defaultModel.orEmpty()
                 }
             }
-            if (selectedProvider.value.isBlank()) {
-                list.firstOrNull()?.let { pick(it) }
-            }
+            // No stored route means this chat follows the daemon's agent default:
+            // the picker must not invent one and make it look already chosen.
         }
     }
 
