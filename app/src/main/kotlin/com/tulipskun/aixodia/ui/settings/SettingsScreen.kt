@@ -618,7 +618,6 @@ private fun ProviderCard(
                     Text("  ลบ", color = scheme.error)
                 }
             }
-            }
         }
     }
 }
