@@ -170,6 +170,10 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
+            // Opening the list is the moment to pull the current chats.
+            LaunchedEffect(drawer.currentValue) {
+                if (drawer.currentValue != DrawerValue.Closed) vm.refresh()
+            }
             ModalDrawerSheet {
                 Text(
                     "AIxodia • ${sessions.size} แชท",

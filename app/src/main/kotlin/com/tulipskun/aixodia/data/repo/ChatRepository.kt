@@ -53,6 +53,11 @@ class ChatRepository(
                         // were away, then resend anything still queued.
                         refreshLatest(_active.value)
                     }
+                    // The first ONLINE also repairs the chat list: settings can
+                    // be written a moment after the screen is created, so an
+                    // earlier sync would have seen an empty endpoint and pulled
+                    // nothing.
+                    syncSessions()
                     wasOnline = true
                     flushPending()
                 } else if (st == ConnState.OFFLINE) {
