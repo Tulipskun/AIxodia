@@ -84,6 +84,20 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val wsUrl by settings.wsUrlFlow.collectAsState(initial = "")
     val configured = dbUrl.isNotBlank() && token.isNotBlank() && wsUrl.isNotBlank()
     val sessId by settings.sessionFlow.collectAsState(initial = "")
+    var showSettings by remember { mutableStateOf(false) }
+
+    if (showSettings) {
+        SettingsScreen(settings = settings, history = history, socket = socket, onBack = { showSettings = false })
+        return
+    }
+
+    // Unconfigured installs stop here — before the ViewModel exists — so a
+    // first launch cannot reach the network layer and crash.
+    if (!configured) {
+        SetupNeeded(dbUrl = dbUrl, onOpen = { showSettings = true })
+        return
+    }
+
     val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, settings, sessId) }
     val messages by vm.messages.collectAsState(initial = emptyList())
     val sessions by vm.sessions.collectAsState(initial = emptyList())
@@ -95,17 +109,6 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
-    var showSettings by remember { mutableStateOf(false) }
-
-    if (showSettings) {
-        SettingsScreen(settings = settings, history = history, socket = socket, onBack = { showSettings = false })
-        return
-    }
-
-    if (!configured) {
-        SetupNeeded(dbUrl = dbUrl, onOpen = { showSettings = true })
-        return
-    }
 
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {

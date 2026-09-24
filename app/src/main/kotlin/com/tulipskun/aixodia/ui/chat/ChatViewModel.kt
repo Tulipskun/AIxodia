@@ -28,9 +28,16 @@ class ChatViewModel(
     val notice = MutableStateFlow("")
 
     init {
+        // A fresh install has no settings yet, and every call here is network
+        // facing: failures belong in [notice], never as an uncaught exception
+        // (an uncaught one in viewModelScope takes the whole process down).
         viewModelScope.launch {
-            repo.syncSessions()
-            repo.openSession(sessionId)
+            runCatching {
+                repo.syncSessions()
+                repo.openSession(sessionId)
+            }.onFailure { err ->
+                notice.value = "เชื่อมต่อไม่ได้: ${err.message ?: err::class.simpleName}"
+            }
         }
         viewModelScope.launch {
             repo.liveFrames.collect { f ->
@@ -54,8 +61,9 @@ class ChatViewModel(
 
     fun newSession() {
         viewModelScope.launch {
-            val id = repo.createSession("")
-            settings.saveSession(id)
+            runCatching { repo.createSession("") }
+                .onSuccess { settings.saveSession(it) }
+                .onFailure { notice.value = "สร้างเซสชันไม่สำเร็จ: ${it.message}" }
         }
     }
 
@@ -65,11 +73,17 @@ class ChatViewModel(
     }
 
     fun refresh() {
-        viewModelScope.launch { repo.refreshLatest(sessionId) }
+        viewModelScope.launch {
+            runCatching { repo.refreshLatest(sessionId) }
+                .onFailure { notice.value = "ดึงข้อมูลล่าสุดไม่สำเร็จ: ${it.message}" }
+        }
     }
 
     fun loadOlder() {
-        viewModelScope.launch { repo.loadOlder(sessionId) }
+        viewModelScope.launch {
+            runCatching { repo.loadOlder(sessionId) }
+                .onFailure { notice.value = "โหลดประวัติเก่าไม่สำเร็จ: ${it.message}" }
+        }
     }
 
     fun clearNotice() { notice.value = "" }

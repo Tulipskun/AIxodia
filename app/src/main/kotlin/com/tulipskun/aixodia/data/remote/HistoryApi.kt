@@ -54,11 +54,25 @@ class HistoryApi(private val settings: SettingsStore) {
     private val turnsAdapter = moshi.adapter(TurnsPage::class.java)
     private val nodeAdapter = moshi.adapter(NodeInfo::class.java)
 
+    /**
+     * Builds an absolute URL, or null when the app has no endpoint configured
+     * yet. A fresh install has empty settings by design, and that must look
+     * like "not configured", never like a crash: okhttp throws on a relative
+     * URL, and that exception used to escape into the ViewModel scope.
+     */
+    private fun absoluteUrl(raw: String): String? {
+        val base = raw.trim().trimEnd('/')
+        if (base.isEmpty()) return null
+        if (!base.startsWith("http://") && !base.startsWith("https://")) return null
+        return base
+    }
+
     suspend fun sessions(): List<SessionRow> = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val req = Request.Builder().url("${c.workerUrl}/api/sessions")
-            .header("Authorization", "Bearer ${c.token}").get().build()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
         runCatching {
+            val req = Request.Builder().url("$base/api/sessions")
+                .header("Authorization", "Bearer ${c.token}").get().build()
             client.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) return@use emptyList()
                 sessionsAdapter.fromJson(r.body!!.source())?.toList() ?: emptyList()
@@ -69,13 +83,14 @@ class HistoryApi(private val settings: SettingsStore) {
     /** Creates the session on the DB side too, so the daemon and phone agree. */
     suspend fun createSession(id: String, title: String): Boolean = withContext(Dispatchers.IO) {
         val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
         val body = """{"id":"$id","title":"$title"}"""
-        val req = Request.Builder().url("${c.workerUrl}/api/sessions")
-            .header("Authorization", "Bearer ${c.token}")
-            .header("Content-Type", "application/json")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
         runCatching {
+            val req = Request.Builder().url("$base/api/sessions")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
             client.newCall(req).execute().use { it.isSuccessful }
         }.getOrDefault(false)
     }
@@ -86,11 +101,12 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {
             val c = settings.current()
+            val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
             val before = if (beforeSeq <= 0) Long.MAX_VALUE else beforeSeq
-            val url = "${c.workerUrl}/api/sessions/$sessionId/turns?before_seq=$before&limit=$limit"
-            val req = Request.Builder().url(url)
-                .header("Authorization", "Bearer ${c.token}").get().build()
+            val url = "$base/api/sessions/$sessionId/turns?before_seq=$before&limit=$limit"
             runCatching {
+                val req = Request.Builder().url(url)
+                    .header("Authorization", "Bearer ${c.token}").get().build()
                 client.newCall(req).execute().use { r ->
                     if (!r.isSuccessful) return@use emptyList()
                     turnsAdapter.fromJson(r.body!!.source())?.turns ?: emptyList()
@@ -102,7 +118,8 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun ping(workerOverride: String = "", tokenOverride: String = ""): Int =
         withContext(Dispatchers.IO) {
             val c = settings.current()
-            val base = workerOverride.ifBlank { c.workerUrl }
+            val base = absoluteUrl(workerOverride.ifBlank { c.workerUrl })
+                ?: throw IllegalStateException("ยังไม่ได้ใส่ Worker URL")
             val tok = tokenOverride.ifEmpty { c.token }
             val req = Request.Builder().url("$base/api/sessions")
                 .header("Authorization", "Bearer $tok").get().build()
@@ -120,7 +137,8 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun node(workerOverride: String = "", tokenOverride: String = ""): NodeInfo? =
         withContext(Dispatchers.IO) {
             val c = settings.current()
-            val base = workerOverride.ifBlank { c.workerUrl }
+            val base = absoluteUrl(workerOverride.ifBlank { c.workerUrl })
+                ?: throw IllegalStateException("ยังไม่ได้ใส่ Worker URL")
             val tok = tokenOverride.ifEmpty { c.token }
             val req = Request.Builder().url("$base/api/node")
                 .header("Authorization", "Bearer $tok").get().build()

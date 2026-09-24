@@ -89,7 +89,10 @@ class ChatRepository(
 
     /** Session list from the DB (cloud/mock), merged into Room. */
     suspend fun syncSessions() {
-        val rows = history.sessions()
+        // HistoryApi already degrades to "empty" when the app is not
+        // configured; the guard here keeps a transport error from escaping into
+        // the ViewModel scope, where it would crash the process.
+        val rows = try { history.sessions() } catch (_: Exception) { emptyList() }
         if (rows.isEmpty()) return
         db.sessions().upsertAll(
             rows.map {
@@ -106,7 +109,7 @@ class ChatRepository(
     suspend fun openSession(sid: String) {
         _active.value = sid
         if (db.sessions().get(sid) == null) {
-            val row = history.sessions().firstOrNull { it.id == sid }
+            val row = try { history.sessions() } catch (_: Exception) { emptyList() }.firstOrNull { it.id == sid }
             db.sessions().upsert(
                 SessionEntity(
                     id = sid,
@@ -134,14 +137,15 @@ class ChatRepository(
     suspend fun createSession(title: String): String {
         val id = "s" + System.currentTimeMillis().toString(36)
         db.sessions().upsert(SessionEntity(id = id, title = title.ifBlank { "แชตใหม่" }))
-        history.createSession(id, title.ifBlank { "แชตใหม่" })
+        // Local-first: a cloud failure still leaves a usable local session.
+        try { history.createSession(id, title.ifBlank { "แชตใหม่" }) } catch (_: Exception) { }
         openSession(id)
         return id
     }
 
     /** Newest rows from the DB — the "reopen the app" path. */
     suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {
-        val rows = history.latest(sid)
+        val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
         if (rows.isEmpty()) return
         db.messages().insertAll(
             rows.filter { it.seq > skipAtOrBelow }.map { it.toEntity(sid) }
@@ -195,7 +199,8 @@ class ChatRepository(
     suspend fun loadOlder(sid: String) {
         val min = db.messages().minSeq(sid)
         if (min <= 1) return
-        history.turns(sid, beforeSeq = min, limit = 100).takeIf { it.isNotEmpty() }?.let { rows ->
+        (try { history.turns(sid, beforeSeq = min, limit = 100) } catch (_: Exception) { emptyList() })
+            .takeIf { it.isNotEmpty() }?.let { rows ->
             db.messages().insertAll(rows.map { it.toEntity(sid) })
         }
     }
