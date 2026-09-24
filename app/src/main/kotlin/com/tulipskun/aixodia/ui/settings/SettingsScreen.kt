@@ -47,7 +47,10 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.weight
+import androidx.compose.ui.Alignment
+import com.tulipskun.aixodia.data.model.AgentRoute
+import com.tulipskun.aixodia.data.model.AgentSettings
+import com.tulipskun.aixodia.data.model.ProviderStatus
 import androidx.compose.ui.platform.LocalContext
 import com.tulipskun.aixodia.EndpointKind
 import com.tulipskun.aixodia.SettingsStore
@@ -85,11 +88,11 @@ fun SettingsScreen(
     var showToken by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var providers by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
+    var providers by remember { mutableStateOf<List<ProviderStatus>>(emptyList()) }
     var pickedProvider by remember { mutableStateOf("") }
     var pickedModel by remember { mutableStateOf("") }
     var modelsByProvider by remember { mutableStateOf<Map<String, List<ProviderView>>>(emptyMap()) }
-    var agentSettings by remember { mutableStateOf<com.tulipskun.aixodia.data.model.AgentSettings?>(null) }
+    var agentSettings by remember { mutableStateOf<AgentSettings?>(null) }
 
     Scaffold(
         topBar = {
@@ -373,7 +376,7 @@ private fun defaultModelFor(id: String, catalogue: Map<String, List<ProviderView
 
 @Composable
 private fun ProviderRow(
-    provider: com.tulipskun.aixodia.data.model.ProviderStatus,
+    provider: ProviderStatus,
     onAddKey: (String) -> Unit,
     onReplaceKeys: (List<String>) -> Unit,
     onRemoveLast: () -> Unit,
@@ -467,7 +470,7 @@ private fun AddProviderCard(onAdd: (String, String, String, String, Boolean) -> 
 @Composable
 private fun AgentRoutePicker(
     label: String,
-    providers: List<com.tulipskun.aixodia.data.model.ProviderStatus>,
+    providers: List<ProviderStatus>,
     provider: String,
     model: String,
     onProvider: (String) -> Unit,
@@ -479,7 +482,7 @@ private fun AgentRoutePicker(
         val names = providers.map { it.id }
         var open by remember { mutableStateOf(false) }
         Box {
-            OutlinedButton(onClick = { open = true }, modifier = Modifier.weight(1f)) {
+            OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(if (provider.isBlank()) "เลือก provider" else provider)
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -494,7 +497,7 @@ private fun AgentRoutePicker(
         Box {
             OutlinedButton(
                 onClick = { modelOpen = true },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
                 enabled = options.isNotEmpty(),
             ) { Text(if (model.isBlank()) "เลือก model" else model, maxLines = 1) }
             DropdownMenu(expanded = modelOpen, onDismissRequest = { modelOpen = false }) {
