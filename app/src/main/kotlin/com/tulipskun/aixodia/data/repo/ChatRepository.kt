@@ -195,7 +195,14 @@ class ChatRepository(
     fun stopTurn(sid: String): Boolean = socket.cancel(sid)
 
     /** The provider and model the daemon currently offers, for the picker. */
-    suspend fun models(): List<ProviderView> = history.models()
+    suspend     fun models(): List<ProviderView> = history.models()
+
+    /** The provider/model the daemon has stored for one chat, if it has one. */
+    suspend fun sessionRoute(sid: String): Pair<String, String>? =
+        runCatching { history.sessions().firstOrNull { it.id == sid } }
+            .getOrNull()
+            ?.let { it.provider to it.model }
+            ?.takeIf { it.first.isNotBlank() }
 
     /**
      * Pins provider and model for one chat. The daemon validates the pair and

@@ -60,6 +60,11 @@ class ChatViewModel(
             }.onFailure { err ->
                 notice.value = "เชื่อมต่อไม่ได้: ${err.message ?: err::class.simpleName}"
             }
+            // The header shows the route this chat actually uses.
+            runCatching { repo.sessionRoute(sessionId) }.getOrNull()?.let { (provider, model) ->
+                selectedProvider.value = provider
+                selectedModel.value = model
+            }
         }
         viewModelScope.launch {
             repo.liveFrames.collect { f ->
@@ -178,6 +183,16 @@ class ChatViewModel(
         viewModelScope.launch {
             val list = runCatching { repo.models() }.getOrDefault(emptyList())
             providers.value = list
+            // Start from what this chat already uses: the picker must not look
+            // like a pending change just because it was opened.
+            if (selectedProvider.value.isBlank()) {
+                runCatching { repo.sessionRoute(sessionId) }.getOrNull()?.let { (provider, model) ->
+                    val view = list.firstOrNull { it.id == provider }
+                    selectedProvider.value = provider
+                    selectedModel.value = model.takeIf { m -> view?.models?.any { it.id == m } == true }
+                        ?: view?.defaultModel.orEmpty()
+                }
+            }
             if (selectedProvider.value.isBlank()) {
                 list.firstOrNull()?.let { pick(it) }
             }
@@ -234,7 +249,14 @@ class ChatViewModel(
         viewModelScope.launch {
             repo.selectSession(id)
             sessionId = id
+            selectedProvider.value = ""
+            selectedModel.value = ""
             settings.saveSession(id)
+            // The header shows this chat's model, not the daemon default.
+            runCatching { repo.sessionRoute(id) }.getOrNull()?.let { (provider, model) ->
+                selectedProvider.value = provider
+                selectedModel.value = model
+            }
         }
     }
 
