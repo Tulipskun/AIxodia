@@ -139,6 +139,11 @@ func New(cfg Config) *Agent {
 func (a *Agent) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", a.serveWS)
+	if a.cfg.MirrorBase != "" {
+		// One address for the phone: the same tunnel serves history (proxied to
+		// the Worker with the token the phone sent) and the live socket.
+		mux.Handle("/api/", a.historyProxy())
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"ok":true,"agent":"mock"}`))
 	})

@@ -34,10 +34,12 @@ class MainActivity : ComponentActivity() {
      * without hand-typing on a phone:
      *
      *   adb shell am start -n com.tulipskun.aixodia/.MainActivity \
-     *     --es aixodia.worker https://example.workers.dev \
-     *     --es aixodia.ws wss://example.trycloudflare.com/ws \
+     *     --es aixodia.address https://example.trycloudflare.com \
      *     --es aixodia.token <D1 token> \
      *     --es aixodia.session work-1
+     *
+     * `aixodia.ws` / `aixodia.worker` still work as explicit overrides for
+     * anyone who needs to point the two legs at different places.
      *
      * It is compiled out of release builds: BuildConfig.DEBUG is false there,
      * so a shipped APK has no way to receive connection values this way, and
@@ -45,16 +47,27 @@ class MainActivity : ComponentActivity() {
      */
     private fun applyDebugSeed(intent: Intent?) {
         if (!BuildConfig.DEBUG || intent == null) return
+        val address = intent.getStringExtra("aixodia.address").orEmpty()
         val worker = intent.getStringExtra("aixodia.worker").orEmpty()
         val ws = intent.getStringExtra("aixodia.ws").orEmpty()
         val token = intent.getStringExtra("aixodia.token").orEmpty()
         val session = intent.getStringExtra("aixodia.session").orEmpty()
-        if (worker.isBlank() && ws.isBlank() && token.isBlank()) return
+        if (address.isBlank() && worker.isBlank() && ws.isBlank() && token.isBlank()) return
         val settings = (application as AixodiaApp).container.settings
         lifecycleScope.launch {
-            settings.saveConnection(ws, worker, token)
-            if (session.isNotBlank()) settings.saveSession(session)
+            // One address is the normal path: it derives both the live socket
+            // and the history URL, exactly like the settings screen does.
+            if (address.isNotBlank()) {
+                settings.saveEndpoint(address, token, session)
+            }
+            if (worker.isNotBlank() || ws.isNotBlank()) {
+                settings.saveConnection(ws, worker, token)
+            } else if (token.isNotBlank() && address.isBlank()) {
+                settings.saveConnection("", "", token)
+            }
+            if (session.isNotBlank() && address.isBlank()) settings.saveSession(session)
             // Clear the extras so a configuration change does not re-apply them.
+            intent.removeExtra("aixodia.address")
             intent.removeExtra("aixodia.worker")
             intent.removeExtra("aixodia.ws")
             intent.removeExtra("aixodia.token")
