@@ -130,3 +130,26 @@
 - AX-082 — The streaming bubble is never written to the local database: the
   daemon mirrors exactly one row per turn into D1 and the app pulls it when the
   turn closes, so a stream can never become a duplicate history row.
+
+## Provider administration, per-agent models and stop (AX-08x)
+
+- AX-083 — The settings screen owns the provider list: every provider shows its
+  status and last error, the operator can add a provider (id, name, adapter,
+  base URL, first key) and delete one, and a refresh button probes each provider
+  with a single real request so the screen shows the actual reason (`401`
+  invalid key, `403` free tier, `402` out of credit, `503` upstream) instead of
+  a silent failure. The list is a plain `GET /api/providers` over the tunnel.
+- AX-084 — Each provider has a key pool the operator can edit from the phone:
+  add one key, remove one key, or replace the whole pool. The app only ever
+  sends key material; it displays the count and never a key value, because the
+  daemon's admin API is write-only for keys.
+- AX-085 — The main and the sub agent each get their own provider + model,
+  chosen in the settings screen and stored with `PUT /api/settings`; the daemon
+  validates the pair against its router, applies it to the next turn, and
+  re-reads it after a restart.
+- AX-086 — A running turn can be stopped from the phone: while the turn is live
+  the send button becomes a stop button, tapping it sends the `cancel` frame,
+  the bubble shows the stop state (`cancelled`, or that the turn had already
+  finished) and the button only returns to send when `done` arrives — an `ack`
+  must not clear the busy state, or the button would vanish before the turn was
+  actually stopped.
