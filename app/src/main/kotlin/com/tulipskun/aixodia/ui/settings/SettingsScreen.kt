@@ -121,6 +121,7 @@ fun SettingsScreen(
     var busy by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var providers by remember { mutableStateOf<List<ProviderStatus>>(emptyList()) }
+    var probedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
     var subRoute by remember { mutableStateOf(AgentRoute()) }
@@ -134,6 +135,11 @@ fun SettingsScreen(
         providers = runCatching {
             if (probe) history.refreshProviders() else history.providers()
         }.getOrDefault(emptyList())
+        // A daemon that answers the probe knows the verdict, and says so. One that
+        // does not report it is still believed about the providers it just tested.
+        if (probe) {
+            probedIds = providers.filter { it.probed || it.lastError.isNotBlank() }.map { it.id }.toSet()
+        }
         catalogue = runCatching { history.models() }.getOrDefault(emptyList())
         runCatching { history.agentSettings() }.getOrNull()?.let {
             mainRoute = it.main
@@ -263,7 +269,8 @@ fun SettingsScreen(
             SectionCard(
                 "Provider และ key",
                 if (loading) "กำลังโหลด…"
-                else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · key อ่านกลับไม่ได้",
+                else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · " +
+                    "${providers.count { it.reachable }} ใช้ได้ · key อ่านกลับไม่ได้",
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
@@ -375,6 +382,7 @@ fun SettingsScreen(
             ProviderSheet(
                 title = if (isMain) "main agent — provider" else "sub agent — provider",
                 providers = routable,
+                probedIds = probedIds,
                 current = route.provider,
                 onPick = { id ->
                     val models = modelsByProvider[id].orEmpty()
@@ -563,7 +571,7 @@ private fun ProviderCard(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(provider.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                StatusPill(provider)
+                StatusPill(provider, provider.id in probedIds)
             }
             Text(
                 "${provider.adapter} · key ${provider.keyCount} · model ${provider.modelCount}",
@@ -623,10 +631,10 @@ private fun ProviderCard(
 }
 
 @Composable
-private fun StatusPill(provider: ProviderStatus) {
+private fun StatusPill(provider: ProviderStatus, tested: Boolean) {
     val scheme = MaterialTheme.colorScheme
     val (label, bg, fg) = when {
-        !provider.probed -> Triple(
+        !provider.probed && !tested -> Triple(
             "ยังไม่ทดสอบ",
             scheme.surfaceVariant,
             scheme.onSurfaceVariant,
@@ -649,8 +657,8 @@ private fun StatusPill(provider: ProviderStatus) {
 }
 
 /** The pill text a provider row or picker row shows for a status. */
-private fun ProviderStatus.statusLine(): String = when {
-    !probed -> "ยังไม่ทดสอบ"
+private fun ProviderStatus.statusLine(tested: Boolean = false): String = when {
+    !probed && !tested -> "ยังไม่ทดสอบ"
     reachable -> "ใช้ได้"
     else -> "ใช้ไม่ได้"
 }
@@ -660,6 +668,7 @@ private fun ProviderStatus.statusLine(): String = when {
 private fun ProviderSheet(
     title: String,
     providers: List<ProviderStatus>,
+    probedIds: Set<String>,
     current: String,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -697,7 +706,7 @@ private fun ProviderSheet(
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                         )
                         Text(
-                            p.statusLine() + " · key ${p.keyCount} · model ${p.modelCount}",
+                            p.statusLine(p.id in probedIds) + " · key ${p.keyCount} · model ${p.modelCount}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
