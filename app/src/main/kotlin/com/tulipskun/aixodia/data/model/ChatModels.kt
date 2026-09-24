@@ -47,6 +47,35 @@ data class ModelView(
 @JsonClass(generateAdapter = true)
 data class ModelsPage(@Json(name = "providers") val providers: List<ProviderView> = emptyList())
 
+/** One configured provider as the daemon reports it. Keys are never sent back. */
+@JsonClass(generateAdapter = true)
+data class ProviderStatus(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "adapter") val adapter: String = "",
+    @Json(name = "endpoint") val endpoint: String = "",
+    @Json(name = "free_only") val freeOnly: Boolean = false,
+    @Json(name = "key_count") val keyCount: Int = 0,
+    @Json(name = "model_count") val modelCount: Int = 0,
+    @Json(name = "reachable") val reachable: Boolean = false,
+    @Json(name = "last_error") val lastError: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class ProvidersPage(@Json(name = "providers") val providers: List<ProviderStatus> = emptyList())
+
+@JsonClass(generateAdapter = true)
+data class AgentRoute(
+    @Json(name = "provider") val provider: String = "",
+    @Json(name = "model") val model: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class AgentSettings(
+    @Json(name = "main") val main: AgentRoute = AgentRoute(),
+    @Json(name = "sub") val sub: AgentRoute = AgentRoute(),
+    @Json(name = "sub_enabled") val subEnabled: Boolean = true,
+)
+
 /** One tool step of the turn being streamed: call, then its result. */
 data class ToolStep(
     val name: String,

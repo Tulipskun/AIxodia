@@ -5,7 +5,10 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.model.AgentSettings
 import com.tulipskun.aixodia.data.model.ModelsPage
+import com.tulipskun.aixodia.data.model.ProvidersPage
+import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -55,6 +58,8 @@ class HistoryApi(private val settings: SettingsStore) {
     private val sessionsAdapter = moshi.adapter(Array<SessionRow>::class.java)
     private val turnsAdapter = moshi.adapter(TurnsPage::class.java)
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
+    private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
+    private val settingsAdapter = moshi.adapter(AgentSettings::class.java)
     private val nodeAdapter = moshi.adapter(NodeInfo::class.java)
 
     /**
@@ -175,6 +180,125 @@ class HistoryApi(private val settings: SettingsStore) {
                 .build()
             client.newCall(req).execute().use { it.isSuccessful }
         }.getOrDefault(false)
+    }
+
+    /** Every configured provider with its reachability and last error. */
+    suspend fun providers(): List<ProviderStatus> = withContext(Dispatchers.IO) {
+        val base = absoluteUrl(settings.current().workerUrl) ?: return@withContext emptyList()
+        runCatching {
+            val req = Request.Builder().url("$base/api/providers")
+                .header("Authorization", "Bearer ${settings.current().token}").get().build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use emptyList()
+                providersAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Asks the daemon to re-run model discovery and report what is reachable. */
+    suspend fun refreshProviders(): List<ProviderStatus> = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
+        runCatching {
+            val req = Request.Builder().url("$base/api/providers/refresh")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use emptyList()
+                providersAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Adds a provider. The key travels once, in this request, and is never read back. */
+    suspend fun addProvider(
+        id: String, adapter: String, endpoint: String, keys: List<String>, freeOnly: Boolean,
+    ): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val body = buildString {
+            append("""{"id":"$id","adapter":"$adapter","endpoint":"$endpoint","free_only":$freeOnly,"keys":[""")
+            append(keys.joinToString(",") { "\"$it\"" })
+            append("]}")
+        }
+        runCatching {
+            val req = Request.Builder().url("$base/api/providers")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                if (r.isSuccessful) "เพิ่ม $id แล้ว" else "เพิ่มไม่สำเร็จ: HTTP ${r.code}"
+            }
+        }.getOrDefault("เพิ่มไม่สำเร็จ")
+    }
+
+    /** Edits one provider's key pool: add, remove by position, or replace wholesale. */
+    suspend fun changeKeys(
+        providerId: String, add: List<String> = emptyList(), remove: List<Int> = emptyList(), replace: List<String> = emptyList(),
+    ): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val body = buildString {
+            append("{")
+            if (add.isNotEmpty()) append(""""add":["${add.joinToString(",")}"],""")
+            if (remove.isNotEmpty()) append(""""remove":[${remove.joinToString(",")}],""")
+            if (replace.isNotEmpty()) append(""""replace":["${replace.joinToString(",")}"],""")
+            append("}")
+        }
+        runCatching {
+            val req = Request.Builder().url("$base/api/providers/$providerId/keys")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                if (r.isSuccessful) "อัปเดต key ของ $providerId แล้ว" else "อัปเดตไม่สำเร็จ: HTTP ${r.code}"
+            }
+        }.getOrDefault("อัปเดตไม่สำเร็จ")
+    }
+
+    suspend fun removeProvider(providerId: String): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        runCatching {
+            val req = Request.Builder().url("$base/api/providers/$providerId")
+                .header("Authorization", "Bearer ${c.token}").delete().build()
+            client.newCall(req).execute().use { r ->
+                if (r.isSuccessful) "ลบ $providerId แล้ว" else "ลบไม่สำเร็จ: HTTP ${r.code}"
+            }
+        }.getOrDefault("ลบไม่สำเร็จ")
+    }
+
+    /** Saves which provider and model the main and sub agent run on. */
+    suspend fun saveAgentSettings(settingsBody: AgentSettings): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val body = """{"main":{"provider":"${settingsBody.main.provider}","model":"${settingsBody.main.model}"},"sub":{"provider":"${settingsBody.sub.provider}","model":"${settingsBody.sub.model}"},"sub_enabled":${settingsBody.subEnabled}}"""
+        runCatching {
+            val req = Request.Builder().url("$base/api/settings")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .put(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                if (r.isSuccessful) "บันทึกการตั้งค่า agent แล้ว" else "บันทึกไม่สำเร็จ: HTTP ${r.code}"
+            }
+        }.getOrDefault("บันทึกไม่สำเร็จ")
+    }
+
+    suspend fun agentSettings(): AgentSettings? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/api/settings")
+                .header("Authorization", "Bearer ${c.token}").get().build()
+            client.newCall(req).execute().use { r ->
+                if (r.isSuccessful) settingsAdapter.fromJson(r.body!!.source()) else null
+            }
+        }.getOrNull()
     }
 
     /** Connectivity check for the Settings screen: session count or throw. */

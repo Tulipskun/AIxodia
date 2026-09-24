@@ -191,6 +191,9 @@ class ChatRepository(
     }
 
     /** Newest rows from the DB — the "reopen the app" path. */
+    /** Stops the turn the daemon is running for this chat. */
+    fun stopTurn(sid: String): Boolean = socket.cancel(sid)
+
     /** The provider and model the daemon currently offers, for the picker. */
     suspend fun models(): List<ProviderView> = history.models()
 

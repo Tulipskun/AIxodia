@@ -74,6 +74,16 @@ class AiDirectSocket(private val settings: SettingsStore) {
         session = sessionId
     }
 
+    /**
+     * The stop button: asks the daemon to cancel the turn in flight for this
+     * chat. Returns false when the socket is down, in which case there is
+     * nothing running to stop anyway.
+     */
+    fun cancel(sessionId: String): Boolean {
+        val frame = AiInput(type = "cancel", sessionId = sessionId)
+        return ws?.send(inAdapter.toJson(frame)) == true
+    }
+
     fun close() {
         wantOpen = false
         ws?.close(1000, "ui")

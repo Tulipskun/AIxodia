@@ -28,9 +28,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Divider
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
@@ -45,6 +47,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.weight
 import androidx.compose.ui.platform.LocalContext
 import com.tulipskun.aixodia.EndpointKind
 import com.tulipskun.aixodia.SettingsStore
@@ -85,7 +88,8 @@ fun SettingsScreen(
     var providers by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var pickedProvider by remember { mutableStateOf("") }
     var pickedModel by remember { mutableStateOf("") }
-    val selected = providers.firstOrNull { it.id == pickedProvider }
+    var modelsByProvider by remember { mutableStateOf<Map<String, List<ProviderView>>>(emptyMap()) }
+    var agentSettings by remember { mutableStateOf<com.tulipskun.aixodia.data.model.AgentSettings?>(null) }
 
     Scaffold(
         topBar = {
@@ -219,50 +223,134 @@ fun SettingsScreen(
                     })
             }
             Divider(Modifier.padding(vertical = 4.dp))
-            Text("Provider / model", style = MaterialTheme.typography.titleSmall)
+            Text("Provider / key / agent", style = MaterialTheme.typography.titleSmall)
             Text(
-                "รายการมาจาก daemon ตอนนี้ เลือกแล้วบันทึกลงแชทนี้ — แชทเก่าแยกกันเก็บค่าของตัวเอง",
+                "เพิ่ม provider และจัดการ key pool ได้จากที่นี่ — key ถูกส่งไปครั้งเดียวและอ่านกลับไม่ได้",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (providers.isEmpty()) {
+            Row {
                 OutlinedButton(
                     onClick = {
-                        busy = true; msg = "กำลังโหลดรายการ…"
+                        busy = true; msg = "กำลังโหลด…"
                         scope.launch {
-                            providers = runCatching { history.models() }.getOrDefault(emptyList())
-                            val first = providers.firstOrNull()
-                            if (first != null) {
-                                pickedProvider = first.id
-                                pickedModel = first.defaultModel.ifEmpty { first.models.firstOrNull()?.id.orEmpty() }
+                            providers = runCatching { history.providers() }.getOrDefault(emptyList())
+                            val catalogue = runCatching { history.models() }.getOrDefault(emptyList())
+                            modelsByProvider = catalogue.associate { it.id to it }
+                            agentSettings = history.agentSettings()
+                            val current = agentSettings?.main
+                            if (current != null && current.provider.isNotBlank()) {
+                                pickedProvider = current.provider
+                                pickedModel = current.model
                             }
-                            msg = if (providers.isEmpty()) "ยังโหลดไม่ได้ (ต้องต่อ daemon ก่อน)" else "มี ${providers.size} provider"
+                            msg = if (providers.isEmpty()) "โหลด provider ไม่ได้" else "มี ${providers.size} provider"
                             busy = false
                         }
                     },
                     enabled = !busy,
-                ) { Text("โหลดรายการ") }
-            } else {
-                ProviderDropdown(providers, pickedProvider, onPick = { id ->
-                    pickedProvider = id
-                    pickedModel = providers.firstOrNull { it.id == id }?.defaultModel.orEmpty()
-                })
-                Spacer(Modifier.padding(4.dp))
-                ModelDropdown(selected, pickedModel, onPick = { pickedModel = it })
-                Spacer(Modifier.padding(4.dp))
-                Button(
+                ) { Text("โหลด provider") }
+                Spacer(Modifier.padding(horizontal = 4.dp))
+                OutlinedButton(
                     onClick = {
-                        busy = true; msg = "กำลังบันทึก…"
+                        busy = true; msg = "กำลังตรวจการเข้าถึงใหม่…"
                         scope.launch {
-                            val ok = runCatching {
-                                history.setSessionModel(sessionId, pickedProvider, pickedModel)
-                            }.getOrDefault(false)
-                            msg = if (ok) "บันทึกแล้ว: $pickedProvider / $pickedModel" else "บันทึกไม่สำเร็จ (provider/model ใช้ไม่ได้)"
+                            providers = runCatching { history.refreshProviders() }.getOrDefault(emptyList())
+                            val bad = providers.count { !it.reachable }
+                            msg = if (bad == 0) "ทุก provider ใช้งานได้" else "$bad provider ใช้ไม่ได้"
                             busy = false
                         }
                     },
-                    enabled = !busy && pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
-                ) { Text("บันทึกสำหรับแชทนี้") }
+                    enabled = !busy,
+                ) { Text("ทดสอบใหม่") }
+            }
+            providers.forEach { provider ->
+                ProviderRow(
+                    provider = provider,
+                    onAddKey = { key ->
+                        scope.launch {
+                            msg = history.changeKeys(provider.id, add = listOf(key))
+                            providers = runCatching { history.providers() }.getOrDefault(providers)
+                        }
+                    },
+                    onReplaceKeys = { keys ->
+                        scope.launch {
+                            msg = history.changeKeys(provider.id, replace = keys)
+                            providers = runCatching { history.providers() }.getOrDefault(providers)
+                        }
+                    },
+                    onRemoveLast = {
+                        scope.launch {
+                            msg = history.changeKeys(provider.id, remove = listOf(provider.keyCount - 1))
+                            providers = runCatching { history.providers() }.getOrDefault(providers)
+                        }
+                    },
+                    onDelete = {
+                        scope.launch {
+                            msg = history.removeProvider(provider.id)
+                            providers = runCatching { history.providers() }.getOrDefault(providers)
+                        }
+                    },
+                )
+            }
+            AddProviderCard(
+                onAdd = { id, adapter, endpoint, key, freeOnly ->
+                    scope.launch {
+                        msg = history.addProvider(id, adapter, endpoint, listOf(key), freeOnly)
+                        providers = runCatching { history.providers() }.getOrDefault(providers)
+                    }
+                },
+            )
+
+            Divider(Modifier.padding(vertical = 4.dp))
+            Text("โมเดลของแต่ละ agent", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (providers.isEmpty()) {
+                Text("โหลด provider ก่อนจะเลือกโมเดล", style = MaterialTheme.typography.bodySmall)
+            } else {
+                if (providers.none { it.reachable }) {
+                    Text("ยังไม่มี provider ที่ใช้ได้ — key ของบางตัวอาจหมดอายุหรือใช้นอกแอปของผู้ให้บริการไม่ได้", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    val reachable = providers.filter { it.reachable }
+                    val main = agentSettings?.main ?: AgentRoute(
+                        pickedProvider, pickedModel,
+                    )
+                    val sub = agentSettings?.sub ?: AgentRoute()
+                    var subProvider by remember { mutableStateOf(sub.provider) }
+                    var subModel by remember { mutableStateOf(sub.model) }
+                    AgentRoutePicker("main agent", reachable, main.provider, main.model,
+                        onProvider = { id ->
+                            pickedProvider = id
+                            pickedModel = defaultModelFor(id, modelsByProvider)
+                        },
+                        onModel = { pickedModel = it },
+                        models = modelsByProvider)
+                    Spacer(Modifier.padding(4.dp))
+                    AgentRoutePicker("sub agent", reachable, subProvider, subModel,
+                        onProvider = { id -> subProvider = id; subModel = defaultModelFor(id, modelsByProvider) },
+                        onModel = { subModel = it },
+                        models = modelsByProvider)
+                    Spacer(Modifier.padding(4.dp))
+                    Button(
+                        onClick = {
+                            busy = true; msg = "กำลังบันทึก…"
+                            scope.launch {
+                                val mainRoute = AgentRoute(pickedProvider, pickedModel)
+                                val subRoute = AgentRoute(
+                                    subProvider.ifBlank { pickedProvider },
+                                    subModel.ifBlank { pickedModel },
+                                )
+                                msg = history.saveAgentSettings(AgentSettings(mainRoute, subRoute, true))
+                                agentSettings = history.agentSettings()
+                                busy = false
+                            }
+                        },
+                        enabled = !busy && pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
+                    ) { Text("บันทึกโมเดลของ agent") }
+                }
             }
             if (msg.isNotEmpty()) Text(msg, style = MaterialTheme.typography.bodyMedium)
             Divider(Modifier.padding(vertical = 4.dp))
@@ -275,6 +363,145 @@ fun SettingsScreen(
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+    }
+}
+
+/** The provider's default model, which is the first one the daemon found. */
+private fun defaultModelFor(id: String, catalogue: Map<String, List<ProviderView>>): String =
+    catalogue[id]?.firstOrNull()?.defaultModel.orEmpty()
+
+@Composable
+private fun ProviderRow(
+    provider: com.tulipskun.aixodia.data.model.ProviderStatus,
+    onAddKey: (String) -> Unit,
+    onReplaceKeys: (List<String>) -> Unit,
+    onRemoveLast: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var key by remember { mutableStateOf("") }
+    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(provider.id, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (provider.reachable) "ใช้ได้" else "ใช้ไม่ได้",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (provider.reachable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
+            }
+            Text(
+                "${provider.adapter} · ${provider.endpoint} · key ${provider.keyCount} · model ${provider.modelCount}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (provider.lastError.isNotBlank()) {
+                Text(
+                    provider.lastError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    label = { Text("เพิ่ม API key") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.padding(4.dp))
+                Button(onClick = { onAddKey(key.trim()); key = "" }, enabled = key.isNotBlank()) { Text("เพิ่ม") }
+            }
+            Row {
+                TextButton(onClick = onRemoveLast, enabled = provider.keyCount > 0) { Text("ลบ key ตัวสุดท้าย") }
+                TextButton(onClick = onDelete) { Text("ลบ provider") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddProviderCard(onAdd: (String, String, String, String, Boolean) -> Unit) {
+    var id by remember { mutableStateOf("") }
+    var adapter by remember { mutableStateOf("openai") }
+    var endpoint by remember { mutableStateOf("") }
+    var key by remember { mutableStateOf("") }
+    var freeOnly by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(Modifier.padding(10.dp)) {
+            Text("เพิ่ม provider ใหม่", style = MaterialTheme.typography.titleSmall)
+            OutlinedTextField(
+                value = id, onValueChange = { id = it },
+                label = { Text("ชื่อ (เช่น my-gateway)") }, singleLine = true,
+            )
+            OutlinedTextField(
+                value = endpoint, onValueChange = { endpoint = it },
+                label = { Text("endpoint เช่น https://api.example.com/v1") }, singleLine = true,
+            )
+            OutlinedTextField(
+                value = key, onValueChange = { key = it },
+                label = { Text("API key") }, singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
+            Text("adapter: $adapter", style = MaterialTheme.typography.bodySmall)
+            Row {
+                listOf("openai", "anthropic", "gemini", "opencode").forEach { option ->
+                    TextButton(onClick = { adapter = option }) { Text(option) }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = freeOnly, onCheckedChange = { freeOnly = it })
+                Text("ใช้เฉพาะโมเดลฟรี")
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = { onAdd(id.trim(), adapter, endpoint.trim(), key.trim(), freeOnly) },
+                    enabled = id.isNotBlank() && endpoint.startsWith("https://") && key.isNotBlank(),
+                ) { Text("เพิ่ม") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentRoutePicker(
+    label: String,
+    providers: List<com.tulipskun.aixodia.data.model.ProviderStatus>,
+    provider: String,
+    model: String,
+    onProvider: (String) -> Unit,
+    onModel: (String) -> Unit,
+    models: Map<String, List<ProviderView>>,
+) {
+    Text(label, style = MaterialTheme.typography.labelLarge)
+    Row {
+        val names = providers.map { it.id }
+        var open by remember { mutableStateOf(false) }
+        Box {
+            OutlinedButton(onClick = { open = true }, modifier = Modifier.weight(1f)) {
+                Text(if (provider.isBlank()) "เลือก provider" else provider)
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                names.forEach { id ->
+                    DropdownMenuItem(text = { Text(id) }, onClick = { onProvider(id); open = false })
+                }
+            }
+        }
+        Spacer(Modifier.padding(4.dp))
+        var modelOpen by remember { mutableStateOf(false) }
+        val options = models[provider].orEmpty()
+        Box {
+            OutlinedButton(
+                onClick = { modelOpen = true },
+                modifier = Modifier.weight(1f),
+                enabled = options.isNotEmpty(),
+            ) { Text(if (model.isBlank()) "เลือก model" else model, maxLines = 1) }
+            DropdownMenu(expanded = modelOpen, onDismissRequest = { modelOpen = false }) {
+                options.forEach { m ->
+                    DropdownMenuItem(text = { Text(m.id) }, onClick = { onModel(m.id); modelOpen = false })
+                }
+            }
         }
     }
 }

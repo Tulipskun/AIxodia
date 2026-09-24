@@ -72,7 +72,7 @@ class ChatViewModel(
                     // the bubble, so this only confirms it.
                     "message" -> onMessage(f.agent, f.text)
                     "trace" -> onTrace(f)
-                    "done" -> onTurnDone()
+                    "done" -> onTurnDone(f.stage)
                     "error" -> {
                         status.value = ""
                         liveText.value = ""
@@ -140,7 +140,12 @@ class ChatViewModel(
         }
     }
 
-    private fun onTurnDone() {
+    private fun onTurnDone(stage: String) {
+        if (stage == "cancelled") {
+            notice.value = "หยุดการทำงานแล้ว"
+        } else if (stage == "already_done") {
+            notice.value = "งานนั้นจบไปแล้ว"
+        }
         status.value = ""
         val streamed = liveText.value
         liveText.value = ""
@@ -150,6 +155,19 @@ class ChatViewModel(
         // The daemon mirrored the turn into D1; pull it so the bubble is
         // replaced by the stored row instead of a second copy.
         if (streamed.isNotBlank()) refresh()
+    }
+
+    /**
+     * The stop button. The daemon answers with a done frame whose stage says
+     * whether it stopped something, so the phone can say so honestly instead of
+     * pretending the turn finished.
+     */
+    fun stop() {
+        if (!repo.stopTurn(sessionId)) {
+            notice.value = "ยังหยุดไม่ได้ — socket ไม่ออนไลน์"
+            return
+        }
+        status.value = "กำลังหยุด…"
     }
 
     /** Loads the catalogue the picker offers, once the daemon is online. */

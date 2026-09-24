@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -35,6 +36,7 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -132,6 +134,13 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
+    // A streamed answer grows without adding a row, so the thread follows the
+    // live text too instead of leaving it half under the input bar.
+    LaunchedEffect(liveText.length, liveSteps.size) {
+        if (liveText.isNotBlank() || liveSteps.isNotEmpty()) {
+            listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        }
     }
 
     if (pending != null) {
@@ -268,6 +277,13 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                             placeholder = { Text("ส่งงานให้ agent…") },
                             maxLines = 4,
                         )
+                        if (busy) {
+                            // Stop is only meaningful while a turn is running;
+                            // the daemon answers whether it actually stopped one.
+                            FilledTonalIconButton(onClick = { vm.stop() }) {
+                                Icon(Icons.Default.Stop, contentDescription = "หยุดการทำงาน")
+                            }
+                        }
                         IconButton(
                             onClick = { vm.send(draft); draft = "" },
                             enabled = !busy,
@@ -282,7 +298,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             ) {
                 if (messages.isEmpty()) {
                     item {
