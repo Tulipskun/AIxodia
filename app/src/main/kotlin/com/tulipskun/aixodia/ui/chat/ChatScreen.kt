@@ -332,6 +332,7 @@ private fun SetupNeeded(endpoint: String, onOpen: () -> Unit) {
 private fun sessionTitle(sessions: List<ChatSession>, id: String): String =
     sessions.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } ?: id
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SessionRow(
     s: ChatSession,
