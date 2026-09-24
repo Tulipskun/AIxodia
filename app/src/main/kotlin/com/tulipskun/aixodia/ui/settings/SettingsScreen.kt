@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+)
 
 package com.tulipskun.aixodia.ui.settings
 
@@ -7,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -144,7 +148,13 @@ fun SettingsScreen(
     LaunchedEffect(Unit) { load(false) }
 
     val modelsByProvider = remember(catalogue) { catalogue.associate { it.id to it.models } }
-    val routable = remember(providers) { providers.sortedByDescending { it.reachable } }
+    val routable = remember(providers) {
+        providers.sortedBy { when {
+            it.probed && it.reachable -> 0
+            !it.probed -> 1
+            else -> 2
+        } }
+    }
 
     Scaffold(
         topBar = {
@@ -553,7 +563,7 @@ private fun ProviderCard(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(provider.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                StatusPill(provider.reachable, provider.modelCount)
+                StatusPill(provider)
             }
             Text(
                 "${provider.adapter} · key ${provider.keyCount} · model ${provider.modelCount}",
@@ -592,9 +602,12 @@ private fun ProviderCard(
                     modifier = Modifier.padding(start = 8.dp),
                 ) { Icon(Icons.Default.Key, contentDescription = "เพิ่ม key") }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onReplaceKeys) { Text("แทนที่ทั้ง pool") }
-                TextButton(onClick = onRemoveLast, enabled = provider.keyCount > 0) { Text("ลบ key ตัวสุดท้าย") }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                TextButton(onClick = onReplaceKeys) { Text("แทนที่ pool") }
+                TextButton(onClick = onRemoveLast, enabled = provider.keyCount > 0) { Text("ลบ key ท้าย") }
                 TextButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
@@ -605,23 +618,42 @@ private fun ProviderCard(
                     Text("  ลบ", color = scheme.error)
                 }
             }
+            }
         }
     }
 }
 
 @Composable
-private fun StatusPill(reachable: Boolean, modelCount: Int) {
+private fun StatusPill(provider: ProviderStatus) {
     val scheme = MaterialTheme.colorScheme
-    val bg = if (reachable) scheme.primaryContainer else scheme.errorContainer
-    val fg = if (reachable) scheme.onPrimaryContainer else scheme.onErrorContainer
+    val (label, bg, fg) = when {
+        !provider.probed -> Triple(
+            "ยังไม่ทดสอบ",
+            scheme.surfaceVariant,
+            scheme.onSurfaceVariant,
+        )
+        provider.reachable -> Triple(
+            "ใช้ได้ · ${provider.modelCount} model",
+            scheme.primaryContainer,
+            scheme.onPrimaryContainer,
+        )
+        else -> Triple("ใช้ไม่ได้", scheme.errorContainer, scheme.onErrorContainer)
+    }
     Surface(color = bg, contentColor = fg, shape = MaterialTheme.shapes.extraSmall) {
         Text(
-            if (reachable) "ใช้ได้ · $modelCount model" else "ใช้ไม่ได้",
+            label,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         )
     }
+}
+
+/** The pill text a provider row or picker row shows for a status. */
+private fun ProviderStatus.statusLine(): String = when {
+    !probed -> "ยังไม่ทดสอบ"
+    reachable -> "ใช้ได้"
+    else -> "ใช้ไม่ได้"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -666,7 +698,7 @@ private fun ProviderSheet(
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                         )
                         Text(
-                            (if (p.reachable) "ใช้ได้" else "ใช้ไม่ได้") + " · key ${p.keyCount} · model ${p.modelCount}",
+                            p.statusLine() + " · key ${p.keyCount} · model ${p.modelCount}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
