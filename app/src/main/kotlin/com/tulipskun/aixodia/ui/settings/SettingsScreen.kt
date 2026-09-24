@@ -1,66 +1,92 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.tulipskun.aixodia.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import com.tulipskun.aixodia.BuildConfig
-import com.tulipskun.aixodia.update.UpdateManager
-import kotlinx.coroutines.flow.first
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.Divider
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.Alignment
+import com.tulipskun.aixodia.BuildConfig
+import com.tulipskun.aixodia.EndpointKind
+import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AgentRoute
 import com.tulipskun.aixodia.data.model.AgentSettings
 import com.tulipskun.aixodia.data.model.ModelView
 import com.tulipskun.aixodia.data.model.ProviderStatus
-import androidx.compose.ui.platform.LocalContext
-import com.tulipskun.aixodia.EndpointKind
-import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
-import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.NodeInfo
+import com.tulipskun.aixodia.update.UpdateManager
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
 /**
  * Connection settings (AX-030): which daemon / Worker / token / session
@@ -89,65 +115,78 @@ fun SettingsScreen(
     var showToken by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(true) }
     var providers by remember { mutableStateOf<List<ProviderStatus>>(emptyList()) }
-    var pickedProvider by remember { mutableStateOf("") }
-    var pickedModel by remember { mutableStateOf("") }
-    var modelsByProvider by remember { mutableStateOf<Map<String, List<ModelView>>>(emptyMap()) }
-    var agentSettings by remember { mutableStateOf<AgentSettings?>(null) }
+    var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
+    var mainRoute by remember { mutableStateOf(AgentRoute()) }
+    var subRoute by remember { mutableStateOf(AgentRoute()) }
+    var picker by remember { mutableStateOf<Picker?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
+    var deleting by remember { mutableStateOf<ProviderStatus?>(null) }
+
+    val load: suspend (probe: Boolean) -> Unit = { probe ->
+        loading = true
+        providers = runCatching {
+            if (probe) history.refreshProviders() else history.providers()
+        }.getOrDefault(emptyList())
+        catalogue = runCatching { history.models() }.getOrDefault(emptyList())
+        runCatching { history.agentSettings() }.getOrNull()?.let {
+            mainRoute = it.main
+            subRoute = it.sub
+        }
+        loading = false
+    }
+
+    // The provider list, the model catalogue and the saved agent routes are
+    // loaded on entry, so the model picker is never empty just because nobody
+    // pressed a refresh button first.
+    LaunchedEffect(Unit) { load(false) }
+
+    val modelsByProvider = remember(catalogue) { catalogue.associate { it.id to it.models } }
+    val routable = remember(providers) { providers.sortedByDescending { it.reachable } }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ตั้งค่าการเชื่อมต่อ") },
+                title = { Text("ตั้งค่า") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "back")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
                     }
                 },
             )
-        }
+        },
     ) { pad ->
         Column(
-            Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.fillMaxWidth().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Card {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("ใส่แค่ 2 อย่าง", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "1) ที่อยู่: URL ของ tunnel (https://<ชื่อ>.trycloudflare.com) " +
-                            "หรือ URL ของ Worker (https://<ชื่อ>.<คุณ>.workers.dev)\n" +
-                            "2) D1 token\n" +
-                            "ไม่ต้องใส่ account id, provider, session หรือค่าอื่น — " +
-                            "ระบบเดา URL ที่ต้องใช้ให้เอง และเลือกแชทได้จากเมนูในแอป",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-            OutlinedTextField(
-                value = address,
-                onValueChange = { address = it },
-                label = { Text("ที่อยู่ (tunnel หรือ Worker)") },
-                placeholder = { Text("https://xxxx.trycloudflare.com") },
-                supportingText = {
-                    val r = SettingsStore.resolve(address)
-                    when (r.kind) {
-                        EndpointKind.TUNNEL -> Text("tunnel → ประวัติผ่าน ${r.worker}/api • สดที่ ${r.ws}")
-                        EndpointKind.WORKER -> Text("Worker → ประวัติตรง • สดจะค้นหาอัตโนมัติจาก /api/node")
-                        EndpointKind.NONE -> Text("ยังไม่ได้ใส่")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = token, onValueChange = { token = it },
-                label = { Text("D1 token") },
-                supportingText = { Text("token ชุดเดียวของระบบ • ส่งเป็น header ไม่ฝังในแอป") },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
-                visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    Row {
+            if (msg.isNotBlank()) StatusBanner(msg)
+
+            SectionCard("การเชื่อมต่อ", "ใส่แค่ URL ของ tunnel กับ D1 token — ไม่ต้องใส่ account id หรือค่าอื่น") {
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("ที่อยู่ (tunnel หรือ Worker)") },
+                    placeholder = { Text("https://xxxx.trycloudflare.com") },
+                    supportingText = {
+                        when (SettingsStore.resolve(address).kind) {
+                            EndpointKind.TUNNEL -> Text("ใช้ทั้งประวัติและสดผ่าน tunnel นี้")
+                            EndpointKind.WORKER -> Text("Worker: ประวัติตรง สดจะค้นหาจาก /api/node")
+                            EndpointKind.NONE -> Text("ยังไม่ได้ใส่")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = token, onValueChange = { token = it },
+                    label = { Text("D1 token") },
+                    supportingText = { Text("ส่งเป็น header ไม่ฝังในแอป") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
                         val clip = LocalClipboardManager.current
                         IconButton(
                             onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
@@ -156,256 +195,388 @@ fun SettingsScreen(
                         IconButton(onClick = { showToken = !showToken }) {
                             Icon(
                                 if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "toggle token",
+                                contentDescription = if (showToken) "ซ่อน token" else "แสดง token",
                             )
-                        }
-                    }
-                },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        busy = true; msg = "กำลังตรวจ…"
-                        scope.launch {
-                            val r = SettingsStore.resolve(address)
-                            val kindLabel = when (r.kind) {
-                                EndpointKind.TUNNEL -> "tunnel"
-                                EndpointKind.WORKER -> "Worker"
-                                EndpointKind.NONE -> ""
-                            }
-                            if (r.kind == EndpointKind.NONE) {
-                                msg = "ใส่ URL ที่ขึ้นต้นด้วย https:// ก่อน"
-                                busy = false
-                                return@launch
-                            }
-                            // A Worker URL is checked directly; a tunnel URL is
-                            // checked through the proxy the daemon exposes.
-                            val ok = runCatching { history.ping(r.worker, token) }.isSuccess
-                            if (!ok) {
-                                msg = "$kindLabel/token ไม่ผ่าน (401 = token ผิด) — ยังไม่บันทึก"
-                                busy = false
-                                return@launch
-                            }
-                            settings.saveEndpoint(address, token)
-                            msg = if (r.kind == EndpointKind.TUNNEL) {
-                                "บันทึกแล้ว — ใช้ tunnel นี้ทั้งประวัติและสด"
-                            } else {
-                                "บันทึกแล้ว — จะค้นหา URL ของ daemon ให้อัตโนมัติ"
-                            }
-                            busy = false
-                        }
-                    },
-                    enabled = !busy,
-                ) { Text("บันทึก (ตรวจก่อน)") }
-                OutlinedButton(
-                    onClick = {
-                        busy = true; msg = "กำลังทดสอบ…"
-                        scope.launch {
-                            val r = SettingsStore.resolve(address)
-                            msg = try {
-                                val n = history.ping(r.worker, token)
-                                "สำเร็จ — เจอ $n เซสชัน"
-                            } catch (e: Exception) {
-                                "ไม่ผ่าน: ${e.message}"
-                            }
-                            busy = false
-                        }
-                    },
-                    enabled = !busy && address.isNotBlank(),
-                ) { Text("ทดสอบ") }
-            }
-            if (msg.isNotEmpty()) Text(msg, style = MaterialTheme.typography.bodyMedium)
-            val resolved = SettingsStore.resolve(address)
-            if (resolved.kind == EndpointKind.WORKER) {
-                Divider(Modifier.padding(vertical = 4.dp))
-                NodeCard(history = history, workerText = resolved.worker, tokenText = token,
-                    onUse = { wsUrl ->
-                        scope.launch {
-                            settings.saveConnection(wsUrl, resolved.worker, token)
-                            msg = "ใช้ URL ของ daemon แล้ว"
-                        }
-                    })
-            }
-            Divider(Modifier.padding(vertical = 4.dp))
-            Text("Provider / key / agent", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "เพิ่ม provider และจัดการ key pool ได้จากที่นี่ — key ถูกส่งไปครั้งเดียวและอ่านกลับไม่ได้",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row {
-                OutlinedButton(
-                    onClick = {
-                        busy = true; msg = "กำลังโหลด…"
-                        scope.launch {
-                            providers = runCatching { history.providers() }.getOrDefault(emptyList())
-                            val catalogue = runCatching { history.models() }.getOrDefault(emptyList())
-                            modelsByProvider = catalogue.associate { it.id to it.models }
-                            agentSettings = history.agentSettings()
-                            val current = agentSettings?.main
-                            if (current != null && current.provider.isNotBlank()) {
-                                pickedProvider = current.provider
-                                pickedModel = current.model
-                            }
-                            msg = if (providers.isEmpty()) "โหลด provider ไม่ได้" else "มี ${providers.size} provider"
-                            busy = false
-                        }
-                    },
-                    enabled = !busy,
-                ) { Text("โหลด provider") }
-                Spacer(Modifier.padding(horizontal = 4.dp))
-                OutlinedButton(
-                    onClick = {
-                        busy = true; msg = "กำลังตรวจการเข้าถึงใหม่…"
-                        scope.launch {
-                            providers = runCatching { history.refreshProviders() }.getOrDefault(emptyList())
-                            val bad = providers.count { !it.reachable }
-                            msg = if (bad == 0) "ทุก provider ใช้งานได้" else "$bad provider ใช้ไม่ได้"
-                            busy = false
-                        }
-                    },
-                    enabled = !busy,
-                ) { Text("ทดสอบใหม่") }
-            }
-            providers.forEach { provider ->
-                ProviderRow(
-                    provider = provider,
-                    onAddKey = { key ->
-                        scope.launch {
-                            msg = history.changeKeys(provider.id, add = listOf(key))
-                            providers = runCatching { history.providers() }.getOrDefault(providers)
-                        }
-                    },
-                    onReplaceKeys = { keys ->
-                        scope.launch {
-                            msg = history.changeKeys(provider.id, replace = keys)
-                            providers = runCatching { history.providers() }.getOrDefault(providers)
-                        }
-                    },
-                    onRemoveLast = {
-                        scope.launch {
-                            msg = history.changeKeys(provider.id, remove = listOf(provider.keyCount - 1))
-                            providers = runCatching { history.providers() }.getOrDefault(providers)
-                        }
-                    },
-                    onDelete = {
-                        scope.launch {
-                            msg = history.removeProvider(provider.id)
-                            providers = runCatching { history.providers() }.getOrDefault(providers)
                         }
                     },
                 )
-            }
-            AddProviderCard(
-                onAdd = { id, adapter, endpoint, key, freeOnly ->
-                    scope.launch {
-                        msg = history.addProvider(id, adapter, endpoint, listOf(key), freeOnly)
-                        providers = runCatching { history.providers() }.getOrDefault(providers)
-                    }
-                },
-            )
-
-            Divider(Modifier.padding(vertical = 4.dp))
-            Text("โมเดลของแต่ละ agent", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (providers.isEmpty()) {
-                Text("โหลด provider ก่อนจะเลือกโมเดล", style = MaterialTheme.typography.bodySmall)
-            } else {
-                if (providers.none { it.reachable }) {
-                    Text("ยังไม่มี provider ที่ใช้ได้ — key ของบางตัวอาจหมดอายุหรือใช้นอกแอปของผู้ให้บริการไม่ได้", style = MaterialTheme.typography.bodySmall)
-                } else {
-                    val reachable = providers.filter { it.reachable }
-                    val main = agentSettings?.main ?: AgentRoute(
-                        pickedProvider, pickedModel,
-                    )
-                    val sub = agentSettings?.sub ?: AgentRoute()
-                    var subProvider by remember { mutableStateOf(sub.provider) }
-                    var subModel by remember { mutableStateOf(sub.model) }
-                    AgentRoutePicker("main agent", reachable, main.provider, main.model,
-                        onProvider = { id ->
-                            pickedProvider = id
-                            pickedModel = defaultModelFor(id, modelsByProvider)
-                        },
-                        onModel = { pickedModel = it },
-                        models = modelsByProvider)
-                    Spacer(Modifier.padding(4.dp))
-                    AgentRoutePicker("sub agent", reachable, subProvider, subModel,
-                        onProvider = { id -> subProvider = id; subModel = defaultModelFor(id, modelsByProvider) },
-                        onModel = { subModel = it },
-                        models = modelsByProvider)
-                    Spacer(Modifier.padding(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            busy = true; msg = "กำลังบันทึก…"
+                            busy = true; msg = ""
                             scope.launch {
-                                val mainRoute = AgentRoute(pickedProvider, pickedModel)
-                                val subRoute = AgentRoute(
-                                    subProvider.ifBlank { pickedProvider },
-                                    subModel.ifBlank { pickedModel },
-                                )
-                                msg = history.saveAgentSettings(AgentSettings(mainRoute, subRoute, true))
-                                agentSettings = history.agentSettings()
+                                val r = SettingsStore.resolve(address)
+                                if (r.kind == EndpointKind.NONE) {
+                                    msg = "ใส่ URL ที่ขึ้นต้นด้วย https:// ก่อน"
+                                    busy = false
+                                    return@launch
+                                }
+                                if (runCatching { history.ping(r.worker, token) }.isFailure) {
+                                    msg = "URL/token ไม่ผ่าน (401 = token ผิด) — ยังไม่บันทึก"
+                                    busy = false
+                                    return@launch
+                                }
+                                settings.saveEndpoint(address, token)
+                                msg = "บันทึกแล้ว"
+                                load(false)
                                 busy = false
                             }
                         },
-                        enabled = !busy && pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
-                    ) { Text("บันทึกโมเดลของ agent") }
+                        enabled = !busy,
+                    ) { Text("บันทึกและทดสอบ") }
+                    OutlinedButton(
+                        onClick = {
+                            busy = true
+                            scope.launch {
+                                val r = SettingsStore.resolve(address)
+                                msg = runCatching { "ผ่าน — เจอ ${history.ping(r.worker, token)} เซสชัน" }
+                                    .getOrElse { "ไม่ผ่าน: ${it.message}" }
+                                busy = false
+                            }
+                        },
+                        enabled = !busy && address.isNotBlank(),
+                    ) { Text("ทดสอบ") }
+                }
+                val resolved = SettingsStore.resolve(address)
+                if (resolved.kind == EndpointKind.WORKER) {
+                    HorizontalDivider()
+                    NodeCard(history = history, workerText = resolved.worker, tokenText = token,
+                        onUse = { wsUrl ->
+                            scope.launch {
+                                settings.saveConnection(wsUrl, resolved.worker, token)
+                                msg = "ใช้ URL ของ daemon แล้ว"
+                            }
+                        })
                 }
             }
-            if (msg.isNotEmpty()) Text(msg, style = MaterialTheme.typography.bodyMedium)
-            Divider(Modifier.padding(vertical = 4.dp))
-            UpdateRow(settings)
-            Text(
-                "สถานะ WebSocket: " + when (conn) {
-                    ConnState.ONLINE -> "● ออนไลน์ ($curWs)"
-                    ConnState.CONNECTING -> "● กำลังต่อ…"
-                    ConnState.OFFLINE -> "● ออฟไลน์ — ยังไม่ตั้งค่า หรือ daemon ไม่ออนไลน์"
+
+            SectionCard(
+                "Provider และ key",
+                if (loading) "กำลังโหลด…"
+                else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · key อ่านกลับไม่ได้",
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(
+                        onClick = {
+                            busy = true
+                            scope.launch {
+                                load(true)
+                                val bad = providers.count { !it.reachable }
+                                msg = if (bad == 0) "ทุก provider ใช้งานได้" else "$bad provider ใช้ไม่ได้"
+                                busy = false
+                            }
+                        },
+                        enabled = !busy,
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  ทดสอบใหม่")
+                    }
+                    OutlinedButton(onClick = { adding = true }, enabled = !busy) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  เพิ่ม provider")
+                    }
+                }
+                if (!loading && providers.isEmpty()) {
+                    Text(
+                        "ยังไม่มี provider — กด “ทดสอบใหม่” เพื่อให้ daemon รายงาน หรือกด “เพิ่ม provider”",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                providers.forEach { p ->
+                    ProviderCard(
+                        p,
+                        onAddKey = { key ->
+                            scope.launch {
+                                msg = history.changeKeys(p.id, add = listOf(key))
+                                load(false)
+                            }
+                        },
+                        onReplaceKeys = { replacing = p },
+                        onRemoveLast = {
+                            scope.launch {
+                                msg = history.changeKeys(p.id, remove = listOf(p.keyCount - 1))
+                                load(false)
+                            }
+                        },
+                        onDelete = { deleting = p },
+                    )
+                }
+            }
+
+            SectionCard("โมเดลของแต่ละ agent", "main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย") {
+                RouteCard(
+                    title = "main agent",
+                    route = mainRoute,
+                    modelCount = modelsByProvider[mainRoute.provider].orEmpty().size,
+                    onPickProvider = { picker = Picker.MainProvider },
+                    onPickModel = { picker = Picker.MainModel },
+                )
+                RouteCard(
+                    title = "sub agent",
+                    route = subRoute,
+                    modelCount = modelsByProvider[subRoute.provider].orEmpty().size,
+                    onPickProvider = { picker = Picker.SubProvider },
+                    onPickModel = { picker = Picker.SubModel },
+                )
+                if (subRoute.provider.isBlank() || subRoute.model.isBlank()) {
+                    Text(
+                        "ยังไม่ได้เลือกของ sub agent — ถ้าปล่อยว่าง จะใช้ค่าเดียวกับ main",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(
+                    onClick = {
+                        busy = true
+                        scope.launch {
+                            val sub = if (subRoute.provider.isBlank() || subRoute.model.isBlank()) mainRoute else subRoute
+                            msg = history.saveAgentSettings(AgentSettings(mainRoute, sub, true))
+                            subRoute = sub
+                            load(false)
+                            busy = false
+                        }
+                    },
+                    enabled = !busy && mainRoute.provider.isNotBlank() && mainRoute.model.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("บันทึกโมเดลของ agent") }
+            }
+
+            SectionCard("แอป", "เชื่อมต่อกับ daemon: " + when (conn) {
+                ConnState.ONLINE -> "ออนไลน์ ($curWs)"
+                ConnState.CONNECTING -> "กำลังต่อ…"
+                ConnState.OFFLINE -> "ออฟไลน์ — ยังไม่ได้ตั้งค่า หรือ daemon ไม่ออนไลน์"
+            }) {
+                Text(
+                    "session: $curSession · แอป v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                UpdateRow(settings)
+            }
+        }
+    }
+
+    if (picker != null) {
+        val isProvider = picker == Picker.MainProvider || picker == Picker.SubProvider
+        val isMain = picker == Picker.MainProvider || picker == Picker.MainModel
+        val route = if (isMain) mainRoute else subRoute
+        if (isProvider) {
+            ProviderSheet(
+                title = if (isMain) "main agent — provider" else "sub agent — provider",
+                providers = routable,
+                current = route.provider,
+                onPick = { id ->
+                    val models = modelsByProvider[id].orEmpty()
+                    val model = catalogue.firstOrNull { it.id == id }?.defaultModel
+                        ?.takeIf { m -> models.any { it.id == m } }
+                        ?: models.firstOrNull()?.id.orEmpty()
+                    if (isMain) {
+                        mainRoute = AgentRoute(id, model)
+                    } else {
+                        subRoute = AgentRoute(id, model)
+                    }
+                    picker = null
                 },
-                style = MaterialTheme.typography.bodySmall,
+                onDismiss = { picker = null },
             )
+        } else {
+            ModelSheet(
+                title = if (isMain) "main agent — model" else "sub agent — model",
+                provider = route.provider,
+                models = modelsByProvider[route.provider].orEmpty(),
+                current = route.model,
+                onPick = { id ->
+                    if (isMain) {
+                        mainRoute = route.copy(model = id)
+                    } else {
+                        subRoute = route.copy(model = id)
+                    }
+                    picker = null
+                },
+                onDismiss = { picker = null },
+            )
+        }
+    }
+
+    if (adding) {
+        AddProviderDialog(
+            onDismiss = { adding = false },
+            onAdd = { id, adapter, endpoint, key, freeOnly ->
+                adding = false
+                scope.launch {
+                    msg = history.addProvider(id, adapter, endpoint, listOf(key), freeOnly)
+                    load(true)
+                }
+            },
+        )
+    }
+
+    replacing?.let { p ->
+        ReplaceKeysDialog(
+            provider = p,
+            onDismiss = { replacing = null },
+            onReplace = { keys ->
+                replacing = null
+                scope.launch {
+                    msg = history.changeKeys(p.id, replace = keys)
+                    load(false)
+                }
+            },
+        )
+    }
+
+    deleting?.let { p ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("ลบ provider ${p.id}?") },
+            text = { Text("key ทั้งหมดของ ${p.id} จะถูกลบออกจาก daemon และ D1 และเอาออกจากตัวเลือกของ agent") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = null
+                    scope.launch {
+                        msg = history.removeProvider(p.id)
+                        load(false)
+                    }
+                }) { Text("ลบ", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
+        )
+    }
+}
+
+@Composable
+private fun StatusBanner(text: String) {
+    val scheme = MaterialTheme.colorScheme
+    val error = text.contains("ไม่", ignoreCase = true) || text.contains("HTTP", ignoreCase = true) ||
+        text.contains("ผิด", ignoreCase = true) || text.contains("ล้ม", ignoreCase = true)
+    Surface(
+        color = if (error) scheme.errorContainer else scheme.secondaryContainer,
+        contentColor = if (error) scheme.onErrorContainer else scheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (error) Icons.Default.ErrorOutline else Icons.Default.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Text("  $text", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
-/** The provider's default model, which is the first one the daemon found. */
-private fun defaultModelFor(id: String, catalogue: Map<String, List<ModelView>>): String =
-    catalogue[id]?.firstOrNull()?.id.orEmpty()
+@Composable
+private fun SectionCard(
+    title: String,
+    subtitle: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            content()
+        }
+    }
+}
 
 @Composable
-private fun ProviderRow(
+private fun RouteCard(
+    title: String,
+    route: AgentRoute,
+    modelCount: Int,
+    onPickProvider: () -> Unit,
+    onPickModel: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        PickerRow("provider", route.provider.ifBlank { "เลือก provider" }, onPickProvider)
+        PickerRow(
+            label = "model",
+            value = route.model.ifBlank { "เลือก model" },
+            hint = if (route.provider.isBlank()) "เลือก provider ก่อน" else "$modelCount โมเดลใน provider นี้",
+            onPick = onPickModel,
+        )
+    }
+}
+
+@Composable
+private fun PickerRow(label: String, value: String, hint: String = "", onPick: () -> Unit) {
+    Surface(
+        onClick = onPick,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                if (hint.isNotBlank()) {
+                    Text(hint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Icon(Icons.Default.ExpandMore, contentDescription = null)
+        }
+    }
+}
+
+@Composable
+private fun ProviderCard(
     provider: ProviderStatus,
     onAddKey: (String) -> Unit,
-    onReplaceKeys: (List<String>) -> Unit,
+    onReplaceKeys: () -> Unit,
     onRemoveLast: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var key by remember { mutableStateOf("") }
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(Modifier.padding(10.dp)) {
+    val scheme = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainer),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(provider.id, style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    if (provider.reachable) "ใช้ได้" else "ใช้ไม่ได้",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (provider.reachable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                )
+                Text(provider.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                StatusPill(provider.reachable, provider.modelCount)
             }
             Text(
-                "${provider.adapter} · ${provider.endpoint} · key ${provider.keyCount} · model ${provider.modelCount}",
+                "${provider.adapter} · key ${provider.keyCount} · model ${provider.modelCount}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = scheme.onSurfaceVariant,
+            )
+            Text(
+                provider.endpoint,
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
             )
             if (provider.lastError.isNotBlank()) {
-                Text(
-                    provider.lastError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+                Surface(
+                    color = scheme.errorContainer,
+                    contentColor = scheme.onErrorContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        provider.lastError,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(10.dp),
+                    )
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
@@ -415,138 +586,269 @@ private fun ProviderRow(
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.padding(4.dp))
-                Button(onClick = { onAddKey(key.trim()); key = "" }, enabled = key.isNotBlank()) { Text("เพิ่ม") }
+                FilledTonalIconButton(
+                    onClick = { onAddKey(key.trim()); key = "" },
+                    enabled = key.isNotBlank(),
+                    modifier = Modifier.padding(start = 8.dp),
+                ) { Icon(Icons.Default.Key, contentDescription = "เพิ่ม key") }
             }
-            Row {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onReplaceKeys) { Text("แทนที่ทั้ง pool") }
                 TextButton(onClick = onRemoveLast, enabled = provider.keyCount > 0) { Text("ลบ key ตัวสุดท้าย") }
-                TextButton(onClick = onDelete) { Text("ลบ provider") }
+                TextButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = scheme.error,
+                    )
+                    Text("  ลบ", color = scheme.error)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AddProviderCard(onAdd: (String, String, String, String, Boolean) -> Unit) {
+private fun StatusPill(reachable: Boolean, modelCount: Int) {
+    val scheme = MaterialTheme.colorScheme
+    val bg = if (reachable) scheme.primaryContainer else scheme.errorContainer
+    val fg = if (reachable) scheme.onPrimaryContainer else scheme.onErrorContainer
+    Surface(color = bg, contentColor = fg, shape = MaterialTheme.shapes.extraSmall) {
+        Text(
+            if (reachable) "ใช้ได้ · $modelCount model" else "ใช้ไม่ได้",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProviderSheet(
+    title: String,
+    providers: List<ProviderStatus>,
+    current: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            if (providers.isEmpty()) {
+                Text(
+                    "ยังไม่มี provider — เพิ่ม provider หรือกด “ทดสอบใหม่” ก่อน",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            providers.forEach { p ->
+                val selected = p.id == current
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                        )
+                        .clickable { onPick(p.id) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            p.id,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                        Text(
+                            (if (p.reachable) "ใช้ได้" else "ใช้ไม่ได้") + " · key ${p.keyCount} · model ${p.modelCount}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (selected) Icon(Icons.Default.Check, contentDescription = null)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelSheet(
+    title: String,
+    provider: String,
+    models: List<ModelView>,
+    current: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(models, query) {
+        if (query.isBlank()) models else models.filter { it.id.contains(query, true) || it.name.contains(query, true) }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                label = { Text("ค้นหาโมเดล") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            when {
+                provider.isBlank() -> Text(
+                    "เลือก provider ก่อน",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                models.isEmpty() -> Text(
+                    "provider นี้ยังไม่มีโมเดลที่ daemon ค้นพบ — กด “ทดสอบใหม่” เพื่อให้ค้นอีกครั้ง",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                filtered.isEmpty() -> Text(
+                    "ไม่พบโมเดลที่ตรงกับ “$query”",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                items(filtered) { m ->
+                    val selected = m.id == current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable { onPick(m.id) }
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                m.id,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            val tags = buildList {
+                                if (m.supportsStreaming) add("stream")
+                                if (m.supportsTools) add("tools")
+                            }
+                            if (tags.isNotEmpty()) {
+                                Text(
+                                    tags.joinToString(" · "),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        if (selected) Icon(Icons.Default.Check, contentDescription = null)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddProviderDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, String, String, String, Boolean) -> Unit,
+) {
     var id by remember { mutableStateOf("") }
     var adapter by remember { mutableStateOf("openai") }
     var endpoint by remember { mutableStateOf("") }
     var key by remember { mutableStateOf("") }
     var freeOnly by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(Modifier.padding(10.dp)) {
-            Text("เพิ่ม provider ใหม่", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(
-                value = id, onValueChange = { id = it },
-                label = { Text("ชื่อ (เช่น my-gateway)") }, singleLine = true,
-            )
-            OutlinedTextField(
-                value = endpoint, onValueChange = { endpoint = it },
-                label = { Text("endpoint เช่น https://api.example.com/v1") }, singleLine = true,
-            )
-            OutlinedTextField(
-                value = key, onValueChange = { key = it },
-                label = { Text("API key") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-            )
-            Text("adapter: $adapter", style = MaterialTheme.typography.bodySmall)
-            Row {
-                listOf("openai", "anthropic", "gemini", "opencode").forEach { option ->
-                    TextButton(onClick = { adapter = option }) { Text(option) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("เพิ่ม provider") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = id, onValueChange = { id = it },
+                    label = { Text("ชื่อ (เช่น my-gateway)") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = endpoint, onValueChange = { endpoint = it },
+                    label = { Text("endpoint") }, singleLine = true,
+                    placeholder = { Text("https://api.example.com/v1") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = key, onValueChange = { key = it },
+                    label = { Text("API key") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("adapter", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("openai", "anthropic", "gemini", "opencode").forEach { option ->
+                        FilterChip(
+                            selected = adapter == option,
+                            onClick = { adapter = option },
+                            label = { Text(option) },
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = freeOnly, onCheckedChange = { freeOnly = it })
+                    Text("  ใช้เฉพาะโมเดลฟรี", style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = freeOnly, onCheckedChange = { freeOnly = it })
-                Text("ใช้เฉพาะโมเดลฟรี")
-                Spacer(Modifier.weight(1f))
-                Button(
-                    onClick = { onAdd(id.trim(), adapter, endpoint.trim(), key.trim(), freeOnly) },
-                    enabled = id.isNotBlank() && endpoint.startsWith("https://") && key.isNotBlank(),
-                ) { Text("เพิ่ม") }
-            }
-        }
-    }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onAdd(id.trim(), adapter, endpoint.trim(), key.trim(), freeOnly) },
+                enabled = id.isNotBlank() && endpoint.startsWith("https://") && key.isNotBlank(),
+            ) { Text("เพิ่ม") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("ยกเลิก") } },
+    )
 }
 
 @Composable
-private fun AgentRoutePicker(
-    label: String,
-    providers: List<ProviderStatus>,
-    provider: String,
-    model: String,
-    onProvider: (String) -> Unit,
-    onModel: (String) -> Unit,
-    models: Map<String, List<ModelView>>,
+private fun ReplaceKeysDialog(
+    provider: ProviderStatus,
+    onDismiss: () -> Unit,
+    onReplace: (List<String>) -> Unit,
 ) {
-    Text(label, style = MaterialTheme.typography.labelLarge)
-    Row {
-        val names = providers.map { it.id }
-        var open by remember { mutableStateOf(false) }
-        Box {
-            OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (provider.isBlank()) "เลือก provider" else provider)
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                names.forEach { id ->
-                    DropdownMenuItem(text = { Text(id) }, onClick = { onProvider(id); open = false })
-                }
-            }
-        }
-        Spacer(Modifier.padding(4.dp))
-        var modelOpen by remember { mutableStateOf(false) }
-        val options = models[provider].orEmpty()
-        Box {
-            OutlinedButton(
-                onClick = { modelOpen = true },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = options.isNotEmpty(),
-            ) { Text(if (model.isBlank()) "เลือก model" else model, maxLines = 1) }
-            DropdownMenu(expanded = modelOpen, onDismissRequest = { modelOpen = false }) {
-                options.forEach { m ->
-                    DropdownMenuItem(text = { Text(m.id) }, onClick = { onModel(m.id); modelOpen = false })
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProviderDropdown(providers: List<ProviderView>, picked: String, onPick: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(providers.firstOrNull { it.id == picked }?.id ?: "เลือก provider")
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            providers.forEach { p ->
-                DropdownMenuItem(
-                    text = { Text("${p.id} (${p.models.size} models)") },
-                    onClick = { onPick(p.id); open = false },
+    var text by remember { mutableStateOf("") }
+    val keys = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("แทนที่ key ของ ${provider.id}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("ใส่ key ทีละบรรทัด — pool เดิมจะถูกแทนที่ทั้งหมด", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it },
+                    label = { Text("key (บรรทัดละ 1) ตอนนี้ ${provider.keyCount} ตัว") },
+                    minLines = 3,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun ModelDropdown(provider: ProviderView?, picked: String, onPick: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    val models = provider?.models.orEmpty()
-    Box {
-        OutlinedButton(
-            onClick = { open = true },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = models.isNotEmpty(),
-        ) { Text(picked.ifBlank { "เลือก model" }) }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            models.forEach { m ->
-                DropdownMenuItem(
-                    text = { Text(m.id + if (m.supportsStreaming) " •stream" else "") },
-                    onClick = { onPick(m.id); open = false },
-                )
-            }
-        }
-    }
+        },
+        confirmButton = {
+            TextButton(onClick = { onReplace(keys) }, enabled = keys.isNotEmpty()) { Text("แทนที่") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("ยกเลิก") } },
+    )
 }
 
 @Composable
@@ -562,7 +864,7 @@ private fun NodeCard(
     var err by remember { mutableStateOf("") }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("ai daemon ผ่าน quick tunnel (auto-discovery)", style = MaterialTheme.typography.titleSmall)
+        Text("ค้นหา ai daemon ผ่าน /api/node", style = MaterialTheme.typography.titleSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
@@ -577,7 +879,7 @@ private fun NodeCard(
                     }
                 },
                 enabled = !checking,
-            ) { Text("ค้นหา ai") }
+            ) { Text("ค้นหา") }
             if (node?.online == true) {
                 Button(onClick = { onUse(history.wsUrlFor(node!!.tunnelUrl)) }) { Text("ใช้ URL นี้") }
             }
@@ -585,9 +887,10 @@ private fun NodeCard(
         val n = node
         if (n != null) {
             Text(
-                if (n.online) "● ai online (${n.tunnelUrl}, heartbeat ${n.ageS}s, ${n.version})"
-                else "● ai ออฟไลน์ (heartbeat ขาดเกิน 90s) — ไปรัน ai ให้เปิด tunnel ก่อน",
+                if (n.online) "● daemon online (${n.tunnelUrl}, heartbeat ${n.ageS}s, ${n.version})"
+                else "● daemon ออฟไลน์ (heartbeat ขาดเกิน 90s) — ไปรัน ai ให้เปิด tunnel ก่อน",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (err.isNotEmpty()) Text(err, style = MaterialTheme.typography.bodySmall,
@@ -597,11 +900,11 @@ private fun NodeCard(
 
 @Composable
 private fun UpdateRow(settings: SettingsStore) {
-    val ctx = LocalContext.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var msg by remember { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
-    Column(Modifier.padding(vertical = 4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
         FilledTonalButton(
             onClick = {
@@ -625,6 +928,6 @@ private fun UpdateRow(settings: SettingsStore) {
             },
             enabled = !busy,
         ) { Text("ตรวจอัปเดต") }
-        Text("ติดตั้งทับตัวเดิม ข้อมูลแชตไม่หาย", style = MaterialTheme.typography.labelSmall)
+        Text("ติดตั้งทับตัวเดิม ข้อมูลแชทไม่หาย", style = MaterialTheme.typography.labelSmall)
     }
 }

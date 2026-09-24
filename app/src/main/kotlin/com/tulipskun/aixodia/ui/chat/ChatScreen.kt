@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -35,6 +36,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -45,6 +47,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
@@ -59,7 +62,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +82,13 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private val userShape = RoundedCornerShape(
+    topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp,
+)
+private val answerShape = RoundedCornerShape(
+    topStart = 18.dp, topEnd = 18.dp, bottomStart = 6.dp, bottomEnd = 18.dp,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -254,41 +263,65 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 )
             },
             bottomBar = {
-                Column(
-                    Modifier.fillMaxWidth()
-                        .navigationBarsPadding()
-                        .imePadding()
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 2.dp,
                 ) {
-                    if (status.isNotEmpty()) {
-                        Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                    }
-                    if (notice.isNotEmpty()) {
-                        Text(notice, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                    }
-                    if (socketErr.isNotEmpty() && conn != ConnState.ONLINE) {
-                        Text(socketErr, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = draft,
-                            onValueChange = { draft = it },
-                            modifier = Modifier.weight(1f),
-                            placeholder = { Text("ส่งงานให้ agent…") },
-                            maxLines = 4,
-                        )
-                        if (busy) {
-                            // Stop is only meaningful while a turn is running;
-                            // the daemon answers whether it actually stopped one.
-                            FilledTonalIconButton(onClick = { vm.stop() }) {
-                                Icon(Icons.Default.Stop, contentDescription = "หยุดการทำงาน")
-                            }
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .navigationBarsPadding()
+                            .imePadding()
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        if (status.isNotEmpty()) {
+                            Text(
+                                status,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
                         }
-                        IconButton(
-                            onClick = { vm.send(draft); draft = "" },
-                            enabled = !busy,
-                        ) {
-                            Icon(Icons.Default.Send, contentDescription = "ส่ง")
+                        if (notice.isNotEmpty()) {
+                            Text(
+                                notice,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (socketErr.isNotEmpty() && conn != ConnState.ONLINE) {
+                            Text(
+                                socketErr,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            OutlinedTextField(
+                                value = draft,
+                                onValueChange = { draft = it },
+                                modifier = Modifier.weight(1f),
+                                placeholder = { Text("ส่งงานให้ agent…") },
+                                shape = MaterialTheme.shapes.large,
+                                maxLines = 4,
+                            )
+                            Spacer(Modifier.size(8.dp))
+                            if (busy) {
+                                // Stop is only meaningful while a turn is running;
+                                // the daemon answers whether it actually stopped one.
+                                FilledTonalIconButton(
+                                    onClick = { vm.stop() },
+                                    modifier = Modifier.size(48.dp),
+                                ) {
+                                    Icon(Icons.Default.Stop, contentDescription = "หยุดการทำงาน")
+                                }
+                            } else {
+                                FilledIconButton(
+                                    onClick = { vm.send(draft); draft = "" },
+                                    enabled = draft.isNotBlank(),
+                                    modifier = Modifier.size(48.dp),
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = "ส่ง")
+                                }
+                            }
                         }
                     }
                 }
@@ -300,14 +333,29 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             ) {
-                if (messages.isEmpty()) {
+                if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty()) {
                     item {
-                        Text(
-                            "ยังไม่มีข้อความ — agent จะทำงานต่อแม้ปิดแอป แล้วข้อมูลจะมาตอนเปิดใหม่",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(12.dp),
-                        )
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = 48.dp, start = 24.dp, end = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Menu,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                "เริ่มงานกับ agent",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                "พิมพ์งานล่างจอ แล้ว agent จะทำต่อแม้ปิดแอป — ประวัติจะกลับมาตอนเปิดใหม่",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
                 items(messages, key = { it.id }) { m -> Bubble(m) }
@@ -421,12 +469,20 @@ private fun ConnDot(c: ConnState) {
 private fun LiveBubble(text: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Card(
-            modifier = Modifier.widthIn(max = 320.dp),
+            modifier = Modifier.widthIn(max = 360.dp),
+            shape = answerShape,
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
         ) {
-            Column(Modifier.padding(10.dp)) {
-                AgentBadge(ChatMessage(id = "live", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = "main"))
-                Text(text)
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AgentBadge(ChatMessage(id = "live", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = "main"))
+                    Text(
+                        "กำลังตอบ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(text, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -437,20 +493,37 @@ private fun LiveBubble(text: String) {
 private fun ToolSteps(steps: List<com.tulipskun.aixodia.data.model.ToolStep>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
-        Column(Modifier.padding(8.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "เครื่องมือ ${steps.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             steps.forEach { step ->
-                Text(
-                    text = buildString {
-                        append(step.name)
-                        if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
-                        append(if (!step.done) "…" else if (step.isError) " — ล้มเหลว" else " — เสร็จแล้ว")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val (dot, tint) = if (!step.done) {
+                        "●" to MaterialTheme.colorScheme.tertiary
+                    } else if (step.isError) {
+                        "●" to MaterialTheme.colorScheme.error
+                    } else {
+                        "●" to MaterialTheme.colorScheme.primary
+                    }
+                    Text(dot, style = MaterialTheme.typography.labelSmall, color = tint)
+                    Text(
+                        text = buildString {
+                            append("  ")
+                            append(step.name)
+                            if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
+                            if (!step.done) append("…") else if (step.isError) append(" — ล้มเหลว") else append(" — เสร็จแล้ว")
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -462,16 +535,17 @@ private fun Bubble(m: ChatMessage) {
     val isTool = m.role == "tool_call" || m.role == "tool_result"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Card(
-            modifier = Modifier.widthIn(max = 320.dp),
+            modifier = Modifier.widthIn(max = 360.dp),
+            shape = if (mine) userShape else if (isTool) MaterialTheme.shapes.medium else answerShape,
             colors = CardDefaults.cardColors(
                 containerColor = when {
                     mine -> MaterialTheme.colorScheme.primaryContainer
-                    isTool -> MaterialTheme.colorScheme.surfaceVariant
+                    isTool -> MaterialTheme.colorScheme.surfaceContainerHigh
                     else -> MaterialTheme.colorScheme.secondaryContainer
                 }
             ),
         ) {
-            Column(Modifier.padding(10.dp)) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 if (m.agent.isNotBlank() || isTool) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AgentBadge(m)
@@ -485,7 +559,10 @@ private fun Bubble(m: ChatMessage) {
                         }
                     }
                 }
-                Text(m.text.ifBlank { m.toolArgs })
+                Text(
+                    m.text.ifBlank { m.toolArgs },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 Text(
                     buildString {
                         if (m.pending) append("กำลังส่ง…")
@@ -502,23 +579,24 @@ private fun Bubble(m: ChatMessage) {
 
 @Composable
 private fun AgentBadge(m: ChatMessage) {
-    val (label, bg) = when {
-        m.role == "user" -> "คุณ" to MaterialTheme.colorScheme.primary
-        m.agent == "main" -> "MAIN AGENT" to MaterialTheme.colorScheme.primary
-        m.agent == "sub" -> "SUB AGENT" to MaterialTheme.colorScheme.tertiary
-        m.agent == "worker" -> "WORKER" to MaterialTheme.colorScheme.secondary
+    val scheme = MaterialTheme.colorScheme
+    val (label, bg, fg) = when {
+        m.role == "user" -> Triple("คุณ", scheme.primaryContainer, scheme.onPrimaryContainer)
+        m.agent == "main" -> Triple("MAIN AGENT", scheme.primaryContainer, scheme.onPrimaryContainer)
+        m.agent == "sub" -> Triple("SUB AGENT", scheme.tertiaryContainer, scheme.onTertiaryContainer)
+        m.agent == "worker" -> Triple("WORKER", scheme.secondaryContainer, scheme.onSecondaryContainer)
         else -> return
     }
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.Bold,
-        color = Color.White,
+        color = fg,
         modifier = Modifier
-            .padding(end = 6.dp)
-            .clip(RoundedCornerShape(4.dp))
+            .padding(end = 8.dp)
+            .clip(MaterialTheme.shapes.extraSmall)
             .background(bg)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp),
     )
 }
 
