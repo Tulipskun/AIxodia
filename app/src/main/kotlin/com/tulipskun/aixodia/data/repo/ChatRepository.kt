@@ -135,12 +135,53 @@ class ChatRepository(
     }
 
     suspend fun createSession(title: String): String {
-        val id = "s" + System.currentTimeMillis().toString(36)
+        val id = "s" + System.currentTimeMillis().toString(36) +
+            java.util.UUID.randomUUID().toString().take(4)
         db.sessions().upsert(SessionEntity(id = id, title = title.ifBlank { "แชตใหม่" }))
         // Local-first: a cloud failure still leaves a usable local session.
         try { history.createSession(id, title.ifBlank { "แชตใหม่" }) } catch (_: Exception) { }
         openSession(id)
         return id
+    }
+
+    /**
+     * Chat apps do not ask for a session id: they open the last chat, or start
+     * one. This makes that decision here so the UI can stay a plain list.
+     */
+    suspend fun ensureSession(preferred: String): String {
+        val known = try { db.sessions().get(preferred) } catch (_: Exception) { null }
+        if (known != null && preferred.isNotBlank()) {
+            openSession(preferred)
+            return preferred
+        }
+        // Prefer a session that already has messages, else start a new chat.
+        val rows = try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }
+        val withContent = rows.firstOrNull { db.messages().count(it.id) > 0 } ?: rows.firstOrNull()
+        val id = withContent?.id ?: createSession("")
+        openSession(id)
+        return id
+    }
+
+    suspend fun selectSession(id: String) = openSession(id)
+
+    suspend fun renameSession(id: String, title: String) {
+        val clean = title.trim().take(120)
+        if (clean.isEmpty()) return
+        db.sessions().get(id)?.let { db.sessions().upsert(it.copy(title = clean)) }
+        try { history.renameSession(id, clean) } catch (_: Exception) { }
+    }
+
+    /** Deletes on both sides; when the active chat goes, the next one opens. */
+    suspend fun deleteSession(id: String) {
+        try { history.deleteSession(id) } catch (_: Exception) { }
+        db.messages().deleteSession(id)
+        db.sessions().delete(id)
+        if (_active.value == id) {
+            val next = try { db.sessions().observeAll().firstOrNull() } catch (_: Exception) { null }
+            val nextId = next?.id ?: createSession("")
+            _active.value = nextId
+            socket.switchSession(nextId)
+        }
     }
 
     /** Newest rows from the DB — the "reopen the app" path. */

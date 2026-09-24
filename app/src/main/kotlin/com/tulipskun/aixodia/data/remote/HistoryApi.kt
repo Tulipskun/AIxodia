@@ -95,6 +95,34 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault(false)
     }
 
+    /** Renames a chat, the way Gemini/ChatGPT let you retitle a conversation. */
+    suspend fun renameSession(sessionId: String, title: String): Boolean = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
+        val body = """{"title":"${title.replace("\\", "\\\\").replace("\"", "\\\"")}"}"""
+        runCatching {
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .patch(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
+    /** Deletes a chat with its history on both sides. */
+    suspend fun deleteSession(sessionId: String): Boolean = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
+        runCatching {
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}")
+                .delete()
+                .build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
     /** Newest page for a session; the app calls this on open and on reconnect. */
     suspend fun latest(sessionId: String, limit: Int = 200): List<TurnRow> = turns(sessionId, 0, limit)
 

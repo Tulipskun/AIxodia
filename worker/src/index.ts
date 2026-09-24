@@ -3,6 +3,8 @@
 // (v1 single shared token; per-device enforcement is the documented next step.)
 //
 //   History:  GET  /api/sessions
+//             PATCH  /api/sessions/:id  {title}   (rename, like a chat title)
+//             DELETE /api/sessions/:id            (delete chat + its turns)
 //             GET  /api/sessions/:id/turns?before_seq=&limit=
 //             POST /api/sessions/:id/turns   {role, text}
 //   Node:     POST /api/node/heartbeat  {tunnel_url, version}  (ai daemon)
@@ -133,6 +135,29 @@ export default {
       const row = await env.DB.prepare("SELECT id, title, provider, model, created_at, updated_at FROM sessions WHERE id = ?")
         .bind(id).first();
       return json(row ?? { id });
+    }
+    // One session on its own: rename or delete, the way a chat app manages
+    // conversations. DELETE removes the history rows (FK cascade) and the
+    // daemon's state blob for that session.
+    const sm1 = u.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+    if (sm1) {
+      const sid = decodeURIComponent(sm1[1]);
+      if (r.method === "PATCH") {
+        const b = await req.json<{ title?: string }>().catch(() => ({}));
+        const title = (b.title ?? "").trim().slice(0, 120);
+        if (!title) return json({ error: "title required" }, 400);
+        const info = await env.DB.prepare("UPDATE sessions SET title = ?, updated_at = unixepoch() WHERE id = ?")
+          .bind(title, sid).run();
+        if (!info.meta?.changes) return json({ error: "not_found" }, 404);
+        return json({ ok: true, id: sid, title });
+      }
+      if (r.method === "DELETE") {
+        await env.DB.prepare("DELETE FROM turns WHERE session_id = ?").bind(sid).run();
+        await env.DB.prepare("DELETE FROM state WHERE key = ?").bind(`sessions/${sid}`).run();
+        const info = await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sid).run();
+        if (!info.meta?.changes) return json({ error: "not_found" }, 404);
+        return json({ ok: true, id: sid });
+      }
     }
     const m = u.pathname.match(/^\/api\/sessions\/([^/]+)\/turns$/);
     if (m) {

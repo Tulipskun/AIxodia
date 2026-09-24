@@ -136,6 +136,9 @@ func (s *Store) EnsureSession(id, title, model string) Session {
 	return *ses
 }
 
+// SessionKeyPrefix mirrors the daemon's sessions/<id> state keys.
+const SessionKeyPrefix = "sessions/"
+
 func (s *Store) SetTitle(id, title string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -436,6 +439,53 @@ func (s *Store) serveAPI(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(p, "/api/sessions/")
 	if rest != p {
 		parts := strings.Split(rest, "/")
+		if len(parts) == 1 && parts[0] != "" {
+			sid, err := decodePath(parts[0])
+			if err != nil {
+				writeJSON(w, 400, map[string]any{"error": "bad session id"})
+				return
+			}
+			switch r.Method {
+			case http.MethodPatch:
+				var b struct {
+					Title string `json:"title"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&b)
+				title := strings.TrimSpace(b.Title)
+				if title == "" {
+					writeJSON(w, 400, map[string]any{"error": "title required"})
+					return
+				}
+				s.mu.Lock()
+				ses, ok := s.data.Sessions[sid]
+				if ok {
+					ses.Title = title
+					ses.UpdatedAt = now()
+					s.save()
+				}
+				s.mu.Unlock()
+				if !ok {
+					writeJSON(w, 404, map[string]any{"error": "not_found"})
+					return
+				}
+				writeJSON(w, 200, map[string]any{"ok": true, "id": sid, "title": title})
+				return
+			case http.MethodDelete:
+				s.mu.Lock()
+				_, ok := s.data.Sessions[sid]
+				delete(s.data.Sessions, sid)
+				delete(s.data.Turns, sid)
+				delete(s.data.State, SessionKeyPrefix+sid)
+				s.save()
+				s.mu.Unlock()
+				if !ok {
+					writeJSON(w, 404, map[string]any{"error": "not_found"})
+					return
+				}
+				writeJSON(w, 200, map[string]any{"ok": true, "id": sid})
+				return
+			}
+		}
 		if len(parts) == 2 && parts[1] == "turns" {
 			sid, err := decodePath(parts[0])
 			if err != nil {

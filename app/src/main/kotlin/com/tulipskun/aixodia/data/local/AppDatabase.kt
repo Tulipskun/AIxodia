@@ -49,6 +49,9 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
     suspend fun get(id: String): SessionEntity?
 
+    @Query("SELECT * FROM sessions ORDER BY lastAt DESC, id DESC")
+    suspend fun observeAll(): List<SessionEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(s: SessionEntity)
 
@@ -60,6 +63,9 @@ interface SessionDao {
 
     @Query("UPDATE sessions SET unread = unread + 1 WHERE id = :id")
     suspend fun bumpUnread(id: String)
+
+    @Query("DELETE FROM sessions WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -88,8 +94,8 @@ interface MessageDao {
     @Query("UPDATE messages SET pending = 0 WHERE clientMsgId = :clientMsgId")
     suspend fun markAcked(clientMsgId: String)
 
-    @Query("DELETE FROM messages WHERE sessionId = :sid AND seq = :seq")
-    suspend fun delete(sid: String, seq: Long)
+    @Query("DELETE FROM messages WHERE sessionId = :sid")
+    suspend fun deleteSession(sid: String)
 }
 
 @Database(entities = [SessionEntity::class, MessageEntity::class], version = 2, exportSchema = false)

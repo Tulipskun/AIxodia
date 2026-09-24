@@ -72,11 +72,7 @@ fun SettingsScreen(
     val conn by socket.state.collectAsState(initial = ConnState.OFFLINE)
 
     var address by remember(curEndpoint) { mutableStateOf(curEndpoint) }
-    var showAdvanced by remember { mutableStateOf(false) }
-    var ws by remember(curWs) { mutableStateOf(curWs) }
-    var worker by remember(curWorker) { mutableStateOf(curWorker) }
     var token by remember(curToken) { mutableStateOf(curToken) }
-    var session by remember(curSession) { mutableStateOf(curSession) }
     var showToken by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -104,7 +100,8 @@ fun SettingsScreen(
                         "1) ที่อยู่: URL ของ tunnel (https://<ชื่อ>.trycloudflare.com) " +
                             "หรือ URL ของ Worker (https://<ชื่อ>.<คุณ>.workers.dev)\n" +
                             "2) D1 token\n" +
-                            "ไม่ต้องใส่ account id, provider หรือค่าอื่น — ระบบเดา URL ที่ต้องใช้ให้เอง",
+                            "ไม่ต้องใส่ account id, provider, session หรือค่าอื่น — " +
+                            "ระบบเดา URL ที่ต้องใช้ให้เอง และเลือกแชทได้จากเมนูในแอป",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -171,7 +168,7 @@ fun SettingsScreen(
                                 busy = false
                                 return@launch
                             }
-                            settings.saveEndpoint(address, token, session)
+                            settings.saveEndpoint(address, token)
                             msg = if (r.kind == EndpointKind.TUNNEL) {
                                 "บันทึกแล้ว — ใช้ tunnel นี้ทั้งประวัติและสด"
                             } else {
@@ -210,33 +207,6 @@ fun SettingsScreen(
                             msg = "ใช้ URL ของ daemon แล้ว"
                         }
                     })
-            }
-            OutlinedButton(onClick = { showAdvanced = !showAdvanced }) {
-                Text(if (showAdvanced) "ซ่อนตั้งค่าขั้นสูง" else "ตั้งค่าขั้นสูง (แยก URL)")
-            }
-            if (showAdvanced) {
-                OutlinedTextField(
-                    value = session, onValueChange = { session = it }, label = { Text("Session ID") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
-                )
-                OutlinedTextField(
-                    value = ws, onValueChange = { ws = it }, label = { Text("WS URL (ควบคุมเอง)") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
-                )
-                OutlinedTextField(
-                    value = worker, onValueChange = { worker = it }, label = { Text("Worker URL (ควบคุมเอง)") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
-                )
-                Button(
-                    onClick = {
-                        scope.launch {
-                            settings.saveConnection(ws, worker, token)
-                            settings.saveSession(session)
-                            msg = "บันทึกค่าขั้นสูงแล้ว"
-                        }
-                    },
-                    enabled = !busy,
-                ) { Text("บันทึกค่าขั้นสูง") }
             }
             Divider(Modifier.padding(vertical = 4.dp))
             UpdateRow(settings)

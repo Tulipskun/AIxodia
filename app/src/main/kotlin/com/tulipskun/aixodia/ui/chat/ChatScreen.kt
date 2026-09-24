@@ -2,6 +2,9 @@ package com.tulipskun.aixodia.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -108,23 +111,73 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
+    var pending by remember { mutableStateOf<ChatSession?>(null) }
+    var renameTarget by remember { mutableStateOf<ChatSession?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleting by remember { mutableStateOf<ChatSession?>(null) }
 
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
+    if (pending != null) {
+        ChatActionsSheet(
+            session = pending!!,
+            onRename = {
+                renameTarget = pending
+                renameText = pending!!.title
+                pending = null
+            },
+            onDelete = { deleting = pending; pending = null },
+            onDismiss = { pending = null },
+        )
+    }
+    if (renameTarget != null) {
+        var field by remember(renameText) { mutableStateOf(renameText) }
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("เปลี่ยนชื่อแชท") },
+            text = {
+                OutlinedTextField(
+                    value = field, onValueChange = { field = it },
+                    label = { Text("ชื่อแชท") }, singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    renameTarget?.let { vm.renameChat(it.id, field) }
+                    renameTarget = null
+                }) { Text("บันทึก") }
+            },
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("ยกเลิก") } },
+        )
+    }
+    if (deleting != null) {
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("ลบแชทนี้?") },
+            text = { Text("แชท “${deleting!!.title}” และประวัติทั้งหมดจะถูกลบทั้งในเครื่องและบน D1") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.deleteChat(deleting!!.id)
+                    deleting = null
+                }) { Text("ลบ") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
+        )
+    }
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
             ModalDrawerSheet {
                 Text(
-                    "AIxodia • ${sessions.size} เซสชัน",
+                    "AIxodia • ${sessions.size} แชท",
                     modifier = Modifier.padding(16.dp),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 OutlinedButton(
-                    onClick = { vm.newSession(); scope.launch { drawer.close() } },
+                    onClick = { vm.newChat(); scope.launch { drawer.close() } },
                     modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null)
@@ -132,10 +185,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 }
                 Divider(Modifier.padding(vertical = 8.dp))
                 if (sessions.isEmpty()) {
-                    Text("ยังไม่มีเซสชัน — กดเซสชันใหม่ หรือรอ agent สร้างให้", Modifier.padding(16.dp),
+                    Text("ยังไม่มีแชท — กด “แชทใหม่” เพื่อเริ่ม", Modifier.padding(16.dp),
                         style = MaterialTheme.typography.bodySmall)
                 }
-                sessions.forEach { s -> SessionRow(s, active = s.id == sessId) { vm.switchTo(s.id); scope.launch { drawer.close() } } }
+                sessions.forEach { s ->
+                    SessionRow(s, active = s.id == sessId, onOpen = {
+                        vm.openChat(s.id); scope.launch { drawer.close() }
+                    }, onLongPress = { pending = s })
+                }
                 Divider(Modifier.padding(vertical = 8.dp))
                 UpdateRow(settings)
             }
@@ -227,6 +284,33 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
 }
 
 @Composable
+private fun ChatActionsSheet(
+    session: ChatSession,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(session.title, maxLines = 2) },
+        text = {
+            Column {
+                Text("แชทนี้มี ${if (session.lastSnippet.isBlank()) "ยังไม่มี" else session.lastSnippet.take(60)}")
+            }
+        },
+        confirmButton = { TextButton(onClick = onRename) { Text("เปลี่ยนชื่อ") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDelete) {
+                    Text("ลบ", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) { Text("ปิด") }
+            }
+        },
+    )
+}
+
+@Composable
 private fun SetupNeeded(endpoint: String, onOpen: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
@@ -249,9 +333,17 @@ private fun sessionTitle(sessions: List<ChatSession>, id: String): String =
     sessions.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } ?: id
 
 @Composable
-private fun SessionRow(s: ChatSession, active: Boolean, onClick: () -> Unit) {
+private fun SessionRow(
+    s: ChatSession,
+    active: Boolean,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -268,7 +360,7 @@ private fun SessionRow(s: ChatSession, active: Boolean, onClick: () -> Unit) {
             )
         }
         if (s.unread > 0) {
-            AssistChip(onClick = onClick, label = { Text("${s.unread} ใหม่") })
+            AssistChip(onClick = onOpen, label = { Text("${s.unread} ใหม่") })
         }
     }
 }

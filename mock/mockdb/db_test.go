@@ -2,6 +2,7 @@ package mockdb
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -75,5 +76,61 @@ func TestStatePrefixListing(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Fatalf("long prefix: status = %d, want 400", resp2.StatusCode)
+	}
+}
+
+func TestSessionRenameAndDelete(t *testing.T) {
+	s := New("d1-token", filepath.Join(t.TempDir(), "db.json"))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	do := func(method, path, body string) (int, string) {
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		req, _ := http.NewRequest(method, srv.URL+path, reader)
+		req.Header.Set("Authorization", "Bearer d1-token")
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(raw)
+	}
+
+	if code, _ := do(http.MethodPost, "/api/sessions", `{"id":"c1","title":"แชทแรก"}`); code != 200 {
+		t.Fatalf("create status = %d", code)
+	}
+	if code, _ := do(http.MethodPost, "/api/sessions/c1/turns", `{"role":"user","text":"hi"}`); code != 200 {
+		t.Fatalf("turn status = %d", code)
+	}
+	if code, _ := do(http.MethodPatch, "/api/sessions/c1", `{"title":"เปลี่ยนชื่อแล้ว"}`); code != 200 {
+		t.Fatalf("rename status = %d", code)
+	}
+	if s.ListSessions()[0].Title != "เปลี่ยนชื่อแล้ว" {
+		t.Fatalf("title = %q", s.ListSessions()[0].Title)
+	}
+	if code, _ := do(http.MethodPatch, "/api/sessions/missing", `{"title":"x"}`); code != 404 {
+		t.Fatalf("rename missing status = %d, want 404", code)
+	}
+	if code, _ := do(http.MethodPatch, "/api/sessions/c1", `{"title":"  "}`); code != 400 {
+		t.Fatalf("empty title status = %d, want 400", code)
+	}
+	if code, _ := do(http.MethodDelete, "/api/sessions/c1", ""); code != 200 {
+		t.Fatalf("delete status = %d", code)
+	}
+	if len(s.ListSessions()) != 0 {
+		t.Fatalf("session survived delete: %+v", s.ListSessions())
+	}
+	if turns := s.Turns("c1", 0, 10); len(turns) != 0 {
+		t.Fatalf("turns survived delete: %+v", turns)
+	}
+	if code, _ := do(http.MethodDelete, "/api/sessions/c1", ""); code != 404 {
+		t.Fatalf("second delete status = %d, want 404", code)
 	}
 }
