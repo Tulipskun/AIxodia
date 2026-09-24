@@ -153,3 +153,20 @@
   finished) and the button only returns to send when `done` arrives — an `ack`
   must not clear the busy state, or the button would vanish before the turn was
   actually stopped.
+
+## Visual system and pickers (AX-087)
+
+- AX-087 — The app is not allowed to ship the stock Material defaults: it
+  defines its own dark and light colour roles (ink surfaces with a mint primary,
+  amber tertiary, tonal error colour), a type scale, and one shape ramp, and
+  every screen composes those semantic roles instead of raw colours. The
+  settings surface is a scroll of titled sections (connection, providers and
+  keys, per-agent models, app) with one status banner for the result of the last
+  action, and provider actions wrap instead of clipping. Every agent model is
+  chosen from a bottom sheet with a search field and per-model capability tags,
+  and the provider list and the model catalogue are loaded when the screen
+  opens — a model picker must never be empty because nobody pressed refresh.
+- AX-088 — Provider status is three-valued: `ยังไม่ทดสอบ` until a probe has
+  answered for that provider, then `ใช้ได้` or `ใช้ไม่ได้` with the provider's
+  own reason. A provider that has never been probed must not be shown as
+  healthy, and changing its key pool puts it back to untested.

@@ -270,7 +270,7 @@ fun SettingsScreen(
                 "Provider และ key",
                 if (loading) "กำลังโหลด…"
                 else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · " +
-                    "${providers.count { it.reachable }} ใช้ได้ · key อ่านกลับไม่ได้",
+                    "${providers.count { it.reachable && (it.probed || it.id in probedIds) }} ใช้ได้ · key อ่านกลับไม่ได้",
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
