@@ -10,13 +10,14 @@ import (
 // loaded from a JSON file (default config/aixodia.json, override with
 // AIXODIA_CONFIG) so hosts, ports and state keys never live in code.
 //
-// Secrets are NOT stored in this file: the node token is read from the
-// environment variable named by NodeTokenEnv (e.g. AIXODIA_NODE_TOKEN) or from
-// the WS hello frame of a paired phone, and is kept in memory only.
+// This file contains no credentials. The system has exactly ONE token — the
+// D1 access token — and the daemon never stores it: a phone presents it in the
+// Authorization header, the daemon verifies it against the Worker, and keeps
+// it in memory only until the process restarts. No other token exists and
+// none may be created without the operator's explicit approval.
 type MobileWSConfig struct {
-	WorkerBase   string `json:"worker_base"`
-	NodeTokenEnv string `json:"node_token_env"`
-	StateKeys    struct {
+	WorkerBase string `json:"worker_base"`
+	StateKeys  struct {
 		ProviderConfig string `json:"provider_config"`
 		SystemConfig   string `json:"system_config"`
 		EntryConfig    string `json:"entry_config"`
@@ -41,7 +42,7 @@ func LoadConfig(path string) (MobileWSConfig, error) {
 	if path == "" {
 		path = DefaultConfigPath
 	}
-	cfg := MobileWSConfig{NodeTokenEnv: "AIXODIA_NODE_TOKEN"}
+	cfg := MobileWSConfig{}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -58,9 +59,6 @@ func LoadConfig(path string) (MobileWSConfig, error) {
 }
 
 func (c *MobileWSConfig) applyDefaults() {
-	if c.NodeTokenEnv == "" {
-		c.NodeTokenEnv = "AIXODIA_NODE_TOKEN"
-	}
 	if c.MobileWS.Listen == "" {
 		c.MobileWS.Listen = "127.0.0.1:18789"
 	}
@@ -82,13 +80,4 @@ func (c *MobileWSConfig) applyDefaults() {
 	if c.StateKeys.SessionPrefix == "" {
 		c.StateKeys.SessionPrefix = "sessions/"
 	}
-}
-
-// NodeToken returns the token from the environment variable the config names.
-// It is never written to disk by this package.
-func (c MobileWSConfig) NodeToken() string {
-	if c.NodeTokenEnv == "" {
-		return ""
-	}
-	return os.Getenv(c.NodeTokenEnv)
 }

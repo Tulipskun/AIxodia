@@ -1,8 +1,7 @@
 {
-  "_comment": "Runtime config for the AIxodia daemon/bridge. Copy to config/aixodia.json (gitignored) and edit. Secrets belong here at runtime, never in code.",
+  "_comment": "Runtime config for the AIxodia daemon/bridge. Copy to config/aixodia.json (gitignored) and edit. This file holds NO credential: the only token in the system is the D1 access token, typed by the operator in the app and handed to the daemon in the WebSocket Authorization header.",
 
   "worker_base": "https://aixodia.<your-subdomain>.workers.dev",
-  "node_token_env": "AIXODIA_NODE_TOKEN",
 
   "mobile_ws": {
     "listen": "127.0.0.1:18789",

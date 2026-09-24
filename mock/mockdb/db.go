@@ -274,6 +274,21 @@ func (s *Store) Handler() http.Handler {
 	return mux
 }
 
+// prefixOK allows "/" so callers can list a namespace such as "sessions/".
+func prefixOK(p string) bool {
+	if len(p) > 128 {
+		return false
+	}
+	for _, c := range p {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == ':' || c == '_' || c == '-' || c == '/' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 var keyOK = func(k string) bool {
 	if len(k) == 0 || len(k) > 128 {
 		return false
@@ -316,6 +331,33 @@ func (s *Store) serveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		s.SetNode(b.TunnelURL, b.Version)
 		writeJSON(w, 200, map[string]any{"ok": true})
+		return
+	}
+
+	if p == "/api/ping" && r.Method == http.MethodGet {
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "aixodia", "mock": true})
+		return
+	}
+
+	if p == "/api/state" && r.Method == http.MethodGet {
+		prefix := u.Query().Get("prefix")
+		if len(prefix) > 128 || !prefixOK(prefix) {
+			writeJSON(w, 400, map[string]any{"error": "bad prefix"})
+			return
+		}
+		s.mu.Lock()
+		keys := make([]string, 0, len(s.data.State))
+		for k := range s.data.State {
+			if strings.HasPrefix(k, prefix) {
+				keys = append(keys, k)
+			}
+		}
+		s.mu.Unlock()
+		sort.Strings(keys)
+		if len(keys) > 200 {
+			keys = keys[:200]
+		}
+		writeJSON(w, 200, map[string]any{"keys": keys})
 		return
 	}
 

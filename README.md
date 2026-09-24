@@ -31,6 +31,19 @@ to D1, and the app discovers it via `GET /api/node` (Settings → "ค้นห�
 in D1 (`/api/state`), and the phone's scoped Worker token (sent in the WS hello,
 memory-only) is its DB credential. Raw Cloudflare API tokens never leave your account.
 
+## Authentication — one token, two steps
+
+1. The daemon is only reachable through a random `*.trycloudflare.com` quick
+   tunnel (nothing published, no port forwarding).
+2. The app sends the **D1 access token** in the WebSocket handshake header
+   (`Authorization: Bearer …`); the daemon verifies it against the Worker
+   before upgrading and keeps it in memory only.
+
+Missing header → `401` (not counted). Wrong token five times → `429` and a
+30s lockout for that address, then 60/120/240/300s. Worker unreachable →
+`503` (fail closed, not counted). There is **no second token** and none may be
+added without approval; the daemon owns no credential of its own.
+
 ## Production DB (runtime config, nothing hardcoded)
 
 - Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds sessions/turns/state.

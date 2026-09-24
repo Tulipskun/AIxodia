@@ -50,6 +50,7 @@ type Config struct {
 
 type Agent struct {
 	cfg      Config
+	gate     *gate
 	upgrader websocket.Upgrader
 	mu       sync.Mutex
 	subs     map[string]map[*websocket.Conn]struct{}
@@ -127,6 +128,8 @@ func New(cfg Config) *Agent {
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
+	a.gate = newGate()
+	a.gate.verify = storeVerifier{a}.VerifyToken
 	if cfg.MirrorBase != "" {
 		go a.mirrorWorker()
 	}
@@ -142,7 +145,52 @@ func (a *Agent) Handler() http.Handler {
 	return mux
 }
 
+// storeVerifier adapts the mock DB (or the real Worker) to the same
+// "is this D1 token good?" contract the bridge uses.
+type storeVerifier struct{ a *Agent }
+
+func (v storeVerifier) VerifyToken(ctx context.Context, token string) error {
+	if v.a.cfg.MirrorBase != "" {
+		// Real production path: the Worker is the single source of truth.
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			strings.TrimRight(v.a.cfg.MirrorBase, "/")+"/api/ping", nil)
+		if err != nil {
+			return err
+		}
+		if wt := v.a.workerToken(); wt != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return ErrTokenRejected
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("worker ping HTTP %d", resp.StatusCode)
+		}
+		return nil
+	}
+	if !v.a.cfg.DB.VerifyToken(token) {
+		return ErrTokenRejected
+	}
+	return nil
+}
+
+// ErrTokenRejected marks a wrong credential (counted toward lockout), as
+// opposed to a transport failure (fail closed, never counted).
+var ErrTokenRejected = errors.New("mock: token rejected")
+
 func (a *Agent) serveWS(w http.ResponseWriter, r *http.Request) {
+	// Same two-step handshake rule as the production bridge: unguessable
+	// quick-tunnel URL + Authorization: Bearer <D1 token>, checked before the
+	// socket exists, with the 5-failure progressive lockout.
+	if d := a.gate.Check(r); !d.Allowed {
+		a.gate.Write(w, d)
+		return
+	}
 	c, err := a.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -178,13 +226,7 @@ func (a *Agent) serveWS(w http.ResponseWriter, r *http.Request) {
 		// Auth is connection-scoped: the hello (or any first frame) must carry a
 		// valid token; later frames on the same socket inherit it, which keeps
 		// every later frame from carrying the secret again.
-		if !authed {
-			if !a.cfg.DB.VerifyToken(in.Token) {
-				a.send(c, Out{Kind: "error", Text: "unauthorized"})
-				return
-			}
-			authed = true
-		}
+		_ = authed // auth happened at the handshake
 		if in.SessionID == "" {
 			a.send(c, Out{Kind: "error", Text: "session_id required"})
 			return

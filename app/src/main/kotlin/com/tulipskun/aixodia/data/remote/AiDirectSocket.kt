@@ -48,6 +48,10 @@ class AiDirectSocket(private val settings: SettingsStore) {
     private val _state = MutableStateFlow(ConnState.OFFLINE)
     val state: StateFlow<ConnState> = _state
 
+    /** Human-readable reason for the current state (e.g. "401 token ไม่ผ่าน"). */
+    private val _lastError = MutableStateFlow("")
+    val lastError: StateFlow<String> = _lastError
+
     private val _frames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 256)
     val frames: SharedFlow<AiOutput> = _frames
 
@@ -87,6 +91,14 @@ class AiDirectSocket(private val settings: SettingsStore) {
         return ws?.send(inAdapter.toJson(frame)) == true
     }
 
+    private fun describe(r: Response?, t: Throwable): String = when {
+        r == null -> "เชื่อมต่อไม่ได้: ${t.message ?: t::class.simpleName}"
+        r.code == 401 -> "401 token ไม่ผ่าน — daemon ไม่รับ D1 token นี้"
+        r.code == 429 -> "429 ถูกล็อกชั่วคราวจากการเดา token ผิดเกิน 5 ครั้ง"
+        r.code == 503 -> "503 daemon ตรวจ token ไม่ได้ชั่วคราว (Worker/D1 อาจล่ม)"
+        else -> "HTTP ${r.code} ${r.message}".trim()
+    }
+
     private suspend fun loop() {
         var backoff = 1000L
         while (wantOpen) {
@@ -102,15 +114,20 @@ class AiDirectSocket(private val settings: SettingsStore) {
                     continue
                 }
                 _state.value = ConnState.CONNECTING
-                val req = Request.Builder().url(c.wsUrl).build()
+                // The only token in the system travels here: the D1 access
+                // token, in the handshake header. Frames stay token-free.
+                val req = Request.Builder()
+                    .url(c.wsUrl)
+                    .header("Authorization", "Bearer ${c.token}")
+                    .build()
                 val ready = CompletableDeferred<Unit>()
                 ws = client.newWebSocket(req, object : WebSocketListener() {
                     override fun onOpen(w: WebSocket, r: Response) {
+                        _lastError.value = ""
                         val hello = inAdapter.toJson(
                             AiInput(
                                 type = "hello",
                                 sessionId = session,
-                                token = c.token,
                                 content = listOf(ContentPart(text = "resume:$resumeFrom")),
                             )
                         )
@@ -139,10 +156,14 @@ class AiDirectSocket(private val settings: SettingsStore) {
                     override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
                         if (!ready.isCompleted) ready.complete(Unit)
                         _state.value = ConnState.OFFLINE
+                        _lastError.value = describe(r, t)
                     }
 
                     override fun onClosed(w: WebSocket, code: Int, reason: String) {
                         _state.value = ConnState.OFFLINE
+                        if (code == 1008 || reason.isNotEmpty()) {
+                            _lastError.value = "ปิดการเชื่อมต่อ ($code) ${reason}".trim()
+                        }
                     }
 
                     override fun onClosing(w: WebSocket, code: Int, reason: String) {

@@ -73,3 +73,15 @@
   D1 จริงแบบ FIFO (พบบั๊กจริง: mirror แบบ goroutine ต่อ turn ทำให้ seq ซ้ำกัน
   แอปแสดงผิดลำดับ — แก้เป็นคิวเดียว + เทสต์ยืนยันลำดับ user → main → sub →
   main ใน D1 จริง) และแยก credential: local WS token ≠ Worker token.
+
+- AXCH-008 (2026-09-24) — "ไม่เอา token ใดๆเพิ่ม" + verify 2 ขั้น: ระบบมี
+  token อันเดียวคือ D1 access token แอปส่งเป็น `Authorization` header ตอน
+  handshake (ไม่มี token ใน frame แล้ว) daemon ตรวจกับ Worker `GET /api/ping`
+  ก่อน upgrade จึงไม่มี socket ให้คนไม่มีสิทธิ์; ตัด `AIXODIA_NODE_TOKEN` +
+  `AIXODIA_STATE_KEY` + โค้ดเข้ารหัสออกทั้งหมด (stateless = daemon ไม่มี
+  credential ติดตัว ใช้ token ที่มือถือส่งมาใน RAM อย่างเดียว). lockout:
+  ไม่มี header → 401 ไม่นับ, token ผิด 5 ครั้ง → 429 + Retry-After 30 วิ
+  แล้ว 60/120/240/300 (เพดาน) นับตาม CF-Connecting-IP ไม่ใช่ hash(token)
+  (เทสต์จับช่องโหว่: สลับ token หลุดล็อก), Worker ล่ม → 503 ไม่นับ (fail
+  closed). ทดสอบจริงกับ Worker/D1 production แล้ว: 401 → 401×4 → 429 → รอ
+  30 วิ → ผ่าน → turn เข้า D1 ครบ 7 แถวเรียงลำดับถูก.

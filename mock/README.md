@@ -55,12 +55,22 @@ test: it disconnects mid-job and asserts main/sub turns are all in the DB.
 
 ## Use the real D1 with the mock agent
 
+The mock agent enforces the same handshake rule as production: the D1 token in
+the `Authorization` header, verified against the Worker, 5-failure lockout.
+
 ```bash
-export AIXODIA_TOKEN=…            # Worker secret (runtime only)
 go run ./cmd/mockai \
-  -token local-only \
+  -token "$(cat /root/.config/aixodia/app-token)" \
   -worker-base https://aixodia.aixodia.workers.dev \
   -tunnel
+```
+
+Check the rules from a terminal (no phone needed):
+
+```bash
+go run ./cmd/aiclient -url ws://127.0.0.1:18789/ws -no-auth            # 401
+go run ./cmd/aiclient -url ws://127.0.0.1:18789/ws -bad-token          # 401, then 429 on the 5th
+go run ./cmd/aiclient -url ws://127.0.0.1:18789/ws -token "$T"         # works
 ```
 
 `-worker-base` mirrors every turn into the real Cloudflare D1 in job order

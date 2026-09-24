@@ -14,3 +14,13 @@
   bridge can copy rows 1:1 without translation drift.
 - D-007 — Quick tunnel over static IP/port-forward (2026-09-23, user proposal): no NAT/firewall work, free TLS; cost = random URL per boot (solved by D1 discovery) + extra latency via CF edge. Named tunnel later for a stable hostname.
 - D-008 — Scoped Worker token (phone→ai in hello, memory-only) INSTEAD of raw Cloudflare API token: least privilege + revocable; Worker stays the sole D1 policy point. Single shared token v1, devices table reserved for per-device v2.
+- D-009 (2026-09-24) — One token only: the D1 access token, verified live
+  against the Worker. Chosen after review: per-device scoped tokens and a
+  state-encryption key were both rejected by the operator ("no new tokens
+  without approval"). Accepted consequence: anything holding the D1 token can
+  read `config/provider` (API keys) — acceptable for single-operator use.
+  Hardening that does NOT need a new secret: rotate the token (Worker secret)
+  and redeploy; tokens never appear in frames, logs, or error bodies.
+- D-010 (2026-09-24) — Lockout is keyed by client address, never by token
+  hash: a token-keyed counter could be bypassed by rotating credentials, which
+  would defeat the five-failure rule entirely.

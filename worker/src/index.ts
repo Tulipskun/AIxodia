@@ -7,7 +7,9 @@
 //             POST /api/sessions/:id/turns   {role, text}
 //   Node:     POST /api/node/heartbeat  {tunnel_url, version}  (ai daemon)
 //             GET  /api/node  -> {tunnel_url, version, online, heartbeat_age_s}
-//   State:    GET  /api/state/:key  /  PUT /api/state/:key  {value}
+//   Ping:     GET  /api/ping  -> {ok:true}   (daemon verifies a phone token)
+//   State:    GET  /api/state?prefix=        -> {keys:[...]}
+//             GET  /api/state/:key  /  PUT /api/state/:key  {value}
 //             (stateless ai: config/provider, sessions/<id>, ...)
 //   Devices:  GET /api/devices  /  POST /api/devices {id, label}
 //             POST /api/devices/:id/revoke
@@ -57,7 +59,23 @@ export default {
       return json({ ok: true });
     }
 
+    // ---- ping: cheapest possible token check for the WS handshake ----
+    if (u.pathname === "/api/ping" && req.method === "GET") {
+      return json({ ok: true, service: "aixodia" });
+    }
+
     // ---- stateless-ai JSON state ----
+    if (u.pathname === "/api/state" && req.method === "GET") {
+      const prefix = u.searchParams.get("prefix") ?? "";
+      // Prefix may contain "/" (e.g. "sessions/"); the key charset itself is
+      // still restricted by KEY_RE below.
+      if (prefix.length > 128 || !/^[A-Za-z0-9:_/-]*$/.test(prefix))
+        return json({ error: "bad prefix" }, 400);
+      const r = await env.DB.prepare(
+        "SELECT key FROM state WHERE key >= ? ORDER BY key LIMIT 200"
+      ).bind(prefix).all();
+      return json({ keys: (r.results ?? []).map((row) => String(row.key)) });
+    }
     const sm = u.pathname.match(/^\/api\/state\/([^/]+)$/);
     if (sm) {
       const key = decodeURIComponent(sm[1]);

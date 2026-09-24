@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -26,12 +27,27 @@ func main() {
 	text := flag.String("text", "hello", "message text")
 	token := flag.String("token", os.Getenv("AIXODIA_TOKEN"), "bearer token")
 	detach := flag.Bool("detach", false, "close right after ack (proves background jobs)")
+	noAuth := flag.Bool("no-auth", false, "omit the Authorization header (must be rejected)")
+	badToken := flag.Bool("bad-token", false, "send a wrong token (counts toward lockout)")
 	wait := flag.Duration("wait", 30*time.Second, "how long to keep reading frames")
 	flag.Parse()
 
-	c, _, err := websocket.DefaultDialer.Dial(*url, nil)
+	dialer := *websocket.DefaultDialer
+	header := http.Header{}
+	if !*noAuth {
+		tok := *token
+		if *badToken {
+			tok = "wrong-" + tok
+		}
+		header.Set("Authorization", "Bearer "+tok)
+	}
+	c, resp, err := dialer.Dial(*url, header)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "dial:", err)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		fmt.Fprintf(os.Stderr, "dial rejected: %v (HTTP %d)\n", err, status)
 		os.Exit(1)
 	}
 	defer c.Close()
@@ -43,7 +59,7 @@ func main() {
 		}
 	}
 	write(map[string]any{
-		"type": "hello", "session_id": *session, "token": *token,
+		"type": "hello", "session_id": *session,
 		"content": []map[string]string{{"type": "text", "text": "resume:0"}},
 	})
 

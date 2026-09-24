@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -44,14 +45,16 @@ type client struct {
 
 func dial(t *testing.T, url, token, session string) *client {
 	t.Helper()
-	c, _, err := websocket.DefaultDialer.Dial(url, nil)
+	h := http.Header{}
+	h.Set("Authorization", "Bearer "+token)
+	c, _, err := websocket.DefaultDialer.Dial(url, h)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	cl := &client{c: c, t: t, sid: session}
 	cl.send(map[string]any{
-		"type": "hello", "session_id": session, "token": token,
+		"type": "hello", "session_id": session,
 		"content": []map[string]string{{"type": "text", "text": "resume:0"}},
 	})
 	return cl
@@ -211,24 +214,16 @@ func TestMultipleSessionsAreIsolated(t *testing.T) {
 func TestUnauthorizedTokenIsRejected(t *testing.T) {
 	db, agSrv, _ := newStack(t, "right")
 	wsURL := "ws" + strings.TrimPrefix(agSrv.URL, "http") + "/ws"
-	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
+	// Wrong token now fails at the handshake, not after the socket opens.
+	h := http.Header{}
+	h.Set("Authorization", "Bearer wrong")
+	c, resp, err := websocket.DefaultDialer.Dial(wsURL, h)
+	if err == nil {
+		c.Close()
+		t.Fatal("expected handshake rejection for a wrong token")
 	}
-	defer c.Close()
-	_ = c.WriteJSON(map[string]any{
-		"type": "hello", "session_id": "s", "token": "wrong",
-		"content": []map[string]string{{"text": "resume:0"}},
-	})
-	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, raw, err := c.ReadMessage()
-	if err != nil {
-		t.Fatalf("expected error frame, got read error: %v", err)
-	}
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	if out["kind"] != "error" || out["text"] != "unauthorized" {
-		t.Fatalf("frame = %v, want error/unauthorized", out)
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", resp)
 	}
 	if len(db.ListSessions()) != 0 {
 		t.Fatalf("unauthorized hello created a session")
@@ -351,14 +346,19 @@ func TestDBHTTPPParity(t *testing.T) {
 // The mock agent must be able to write into the real Worker (production D1)
 // while the phone talks to it over the local WebSocket.
 func TestTurnsAreMirroredToWorker(t *testing.T) {
-	token := "t0ken"           // Worker credential
-	localToken := "local-only" // WebSocket credential on the LAN
-	db := mockdb.New(localToken, filepath.Join(t.TempDir(), "db.json"))
+	// One token, like production: the phone sends the D1 token in the
+	// handshake header and the daemon verifies it against the Worker.
+	token := "d1-token"
+	db := mockdb.New(token, filepath.Join(t.TempDir(), "db.json"))
 	var mu sync.Mutex
 	var got []map[string]any
 	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if auth := r.Header.Get("Authorization"); auth != "Bearer "+token {
 			w.WriteHeader(401)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/api/ping") {
+			w.WriteHeader(200) // real Worker answers 200 for a valid token
 			return
 		}
 		var body map[string]any
@@ -371,13 +371,13 @@ func TestTurnsAreMirroredToWorker(t *testing.T) {
 	defer mirror.Close()
 
 	ag := agent.New(agent.Config{
-		DB: db, Token: localToken, WorkerToken: token,
-		MirrorBase: mirror.URL, Version: "t", StepDelay: 5 * time.Millisecond,
+		DB: db, Token: token, MirrorBase: mirror.URL,
+		Version: "t", StepDelay: 5 * time.Millisecond,
 	})
 	srv := httptest.NewServer(ag.Handler())
 	defer srv.Close()
 
-	cl := dial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws", localToken, "mirror-1")
+	cl := dial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws", token, "mirror-1")
 	cl.next(2 * time.Second)
 	cl.send(map[string]any{"type": "message", "session_id": "mirror-1",
 		"content": []map[string]string{{"text": "ส่งขึ้น Worker จริง"}}})
@@ -417,5 +417,57 @@ func TestTurnsAreMirroredToWorker(t *testing.T) {
 	last := got[len(got)-1]
 	if txt, _ := last["text"].(string); last["agent"] != "main" || !strings.Contains(txt, "mock mode") {
 		t.Fatalf("last mirrored turn = %v, want the main agent final answer", last)
+	}
+}
+
+// AX-071: the handshake must carry the D1 token in the Authorization header;
+// no header means no socket at all, and a wrong token is counted so five
+// failures lock the client out for 30s.
+func TestHandshakeRequiresHeaderAndLocksOutAfterFiveFailures(t *testing.T) {
+	token := "d1-token"
+	_, agSrv, _ := newStack(t, token)
+	wsURL := "ws" + strings.TrimPrefix(agSrv.URL, "http") + "/ws"
+
+	try := func(auth string) *http.Response {
+		h := http.Header{}
+		if auth != "" {
+			h.Set("Authorization", auth)
+		}
+		_, resp, err := websocket.DefaultDialer.Dial(wsURL, h)
+		if err != nil && resp == nil {
+			t.Fatalf("dial error without response: %v", err)
+		}
+		return resp
+	}
+
+	if resp := try(""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no header: status = %d, want 401", resp.StatusCode)
+	}
+	if resp := try("Basic abc"); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong scheme: status = %d, want 401", resp.StatusCode)
+	}
+
+	var locked *http.Response
+	for i := 1; i <= 6; i++ {
+		resp := try("Bearer wrong-" + strconv.Itoa(i))
+		if i <= 4 && resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status = %d, want 401", i, resp.StatusCode)
+		}
+		if i == 5 {
+			if resp.StatusCode != http.StatusTooManyRequests {
+				t.Fatalf("5th failure: status = %d, want 429", resp.StatusCode)
+			}
+			if ra := resp.Header.Get("Retry-After"); ra == "" || ra == "0" {
+				t.Fatalf("5th failure: Retry-After = %q, want a positive lockout", ra)
+			}
+			locked = resp
+		}
+	}
+	if locked == nil {
+		t.Fatal("never locked out")
+	}
+	// Even the right token is refused while the lockout is active.
+	if resp := try("Bearer " + token); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("valid token during lockout: status = %d, want 429", resp.StatusCode)
 	}
 }

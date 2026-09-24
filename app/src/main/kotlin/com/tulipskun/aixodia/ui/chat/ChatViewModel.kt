@@ -19,6 +19,9 @@ class ChatViewModel(
     val sessions = repo.observeSessions()
     val conn: StateFlow<ConnState> = repo.connState
 
+    /** Why the socket is down, straight from the daemon's HTTP answer. */
+    val socketError = repo.socketError
+
     /** Latest live status line for the thread ("sub: web_fetch …"). */
     val status = MutableStateFlow("")
     val busy = MutableStateFlow(false)

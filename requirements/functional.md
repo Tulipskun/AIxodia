@@ -89,3 +89,25 @@
   messages never cross session boundaries.
 - AX-064 — Offline sends queue in Room (`pending`) and flush on reconnect;
   an ack frame clears the marker.
+
+## Connection auth — one token, two steps (AX-07x)
+
+- AX-070 — Step 1 is the quick-tunnel hostname: the daemon is only reachable
+  through a random `*.trycloudflare.com` URL, so nothing is published.
+- AX-071 — Step 2 is the D1 access token, sent as
+  `Authorization: Bearer <token>` on the WebSocket handshake and verified
+  against the Worker (`GET /api/ping`) BEFORE the socket is upgraded. A missing
+  or malformed header is rejected with 401 and is not counted as a login.
+- AX-072 — Progressive lockout keyed by client address (CF-Connecting-IP, then
+  X-Forwarded-For, then peer address — behind a tunnel the peer is always the
+  local cloudflared process). Five failures lock that address for 30s, then
+  60s, 120s, 240s, 300s (cap). A successful handshake resets it. The key never
+  includes the token, so rotating credentials cannot dodge the lockout.
+- AX-073 — Fail closed: if the Worker cannot be reached the handshake returns
+  503 and is not counted as a failed login. Wrong tokens return 401 and are
+  counted; the daemon owns no credential of its own.
+- AX-074 — Exactly one token exists in the system: the D1 access token. It is
+  created by the operator, entered at runtime (app Settings / daemon env), and
+  kept in the daemon only in memory. No node token, no state-encryption key, no
+  per-device token may be added without explicit approval. State values
+  (`config/provider` with API keys included) are stored as written.

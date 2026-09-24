@@ -5,9 +5,12 @@
 // behind your auth. It mirrors transport/discord gateway liveness policy
 // (hello/resume + replay + backoff on the client side).
 //
-// Protocol (JSON text frames):
+// Protocol (JSON text frames). The D1 token travels in the HTTP Authorization
+// header of the WebSocket handshake, never inside a frame:
 //
-//	C->S hello:   {"type":"hello","session_id":"...","token":"...","content":[{"text":"resume:123"}]}
+//	headers:      Authorization: Bearer <D1 token>
+//
+//	C->S hello:   {"type":"hello","session_id":"...","content":[{"text":"resume:123"}]}
 //	C->S message: {"type":"message","source":"mobile","session_id":"...","role":"user","content":[{"type":"text","text":"..."}]}
 //	S->C message: {"kind":"message","session_id":"...","role":"model","seq":N,"text":"...","content":[...]}
 //	S->C trace:   {"kind":"trace","stage":"tool_running","text":"..."} / {"kind":"done"}
@@ -33,7 +36,6 @@ type MobileIn struct {
 	SessionID string        `json:"session_id"`
 	Role      string        `json:"role"`
 	Content   []ContentPart `json:"content"`
-	Token     string        `json:"token"`
 }
 
 type MobileOut struct {
@@ -49,12 +51,28 @@ type MobileOut struct {
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
 type Hub struct {
-	mu   sync.Mutex
-	subs map[string]map[*websocket.Conn]struct{}
-	seq  atomic.Int64
+	mu    sync.Mutex
+	subs  map[string]map[*websocket.Conn]struct{}
+	seq   atomic.Int64
+	state *StateClient // stateless runtime data in D1 (nil = local disk mode)
+	gate  *Gate        // handshake check + progressive lockout
 }
 
-func NewHub() *Hub { return &Hub{subs: map[string]map[*websocket.Conn]struct{}{}} }
+// NewHub builds the hub. state carries the D1 token verification; when nil the
+// hub only serves the local mock store (development), and Gate is skipped.
+func NewHub(state *StateClient) *Hub {
+	h := &Hub{subs: map[string]map[*websocket.Conn]struct{}{}, state: state}
+	if state != nil {
+		h.gate = NewGate(GateConfig{Verify: state})
+	}
+	return h
+}
+
+// State exposes the D1-backed runtime store (nil when not configured).
+func (h *Hub) State() *StateClient { return h.state }
+
+// Gate exposes the handshake gate (nil in local-only mode).
+func (h *Hub) Gate() *Gate { return h.gate }
 
 // Publish sends one canonical Output-equivalent to every subscriber of a session.
 // Call it from your Harness display func; call IngestD1 (worker POST) alongside
@@ -70,7 +88,23 @@ func (h *Hub) Publish(sessionID, role, text string, content []ContentPart) {
 }
 
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// TODO: verify r (Bearer token) against your entry config before upgrade.
+	// Two-step check, before any socket exists:
+	//   1) the caller already had to guess the unguessable quick-tunnel URL
+	//   2) Authorization: Bearer <D1 token>, verified against the Worker
+	// Missing header → 401 (not counted). Wrong token → 401 and counted, five
+	// failures lock the client for 30s, then 60/120/240/300s. Verifier outage
+	// → 503, never counted. A socket is only created when the gate allows it.
+	var token string
+	if h.gate != nil {
+		d := h.gate.Check(r)
+		if !d.Allowed {
+			h.gate.Write(w, d)
+			return
+		}
+		token = d.Token
+		AdoptPhoneToken(token) // memory only: this is the daemon's D1 credential
+	}
+
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -101,7 +135,8 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m[c] = struct{}{}
 		h.mu.Unlock()
 		if in.Type == "hello" {
-			ack, _ := json.Marshal(MobileOut{Kind: "done", SessionID: session, Stage: "resumed"})
+			// Auth already happened at the handshake; the token is in memory.
+			ack, _ := json.Marshal(MobileOut{Kind: "ack", Role: "system", SessionID: session, Stage: "resumed"})
 			_ = c.WriteMessage(websocket.TextMessage, ack)
 			continue
 		}

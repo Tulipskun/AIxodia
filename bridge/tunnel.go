@@ -39,26 +39,25 @@ import (
 
 var tryURL = regexp.MustCompile(`https://[A-Za-z0-9.-]+\.trycloudflare\.com`)
 
-// memToken is the in-memory scoped Worker token. Set at boot from
-// AIXODIA_NODE_TOKEN, or replaced when a phone hello arrives carrying the
-// device token (see MobileIn.Token). Never persisted to disk (stateless).
+// memToken holds the D1 access token in RAM only. It starts empty (the daemon
+// owns no credential) and is filled only after a phone presents the token in
+// the Authorization header and the Worker confirms it. A restart clears it:
+// the daemon is stateless, so the next connection re-supplies it.
 var memToken atomic.Value // string
 
-func init() { memToken.Store(os.Getenv("AIXODIA_NODE_TOKEN")) }
+func init() { memToken.Store("") }
 
-// TokenFromEnvOrMemory reports the current scoped token ("" = not paired yet).
-func TokenFromEnvOrMemory() string {
+// CurrentToken reports the in-memory D1 token ("" = not paired yet).
+func CurrentToken() string {
 	if v, ok := memToken.Load().(string); ok {
 		return v
 	}
 	return ""
 }
 
-// AcceptPhoneToken stores the scoped token a paired phone sent in its hello
-// frame. Call it from the mobile WS handler after verifying the hello.
-// This is the "phone gives ai its DB-access secret" step: the secret is a
-// revocable Worker-scoped token, valid only in memory until restart.
-func AcceptPhoneToken(tok string) {
+// AdoptPhoneToken stores the D1 token a phone presented after the Worker
+// verified it. Memory only; never written to disk, never logged.
+func AdoptPhoneToken(tok string) {
 	if strings.TrimSpace(tok) != "" {
 		memToken.Store(tok)
 	}
@@ -161,9 +160,9 @@ func startHeartbeat(ctx context.Context, workerBase, public, version string) (fu
 }
 
 func postHeartbeat(workerBase, public, version string) error {
-	tok := TokenFromEnvOrMemory()
+	tok := CurrentToken()
 	if tok == "" {
-		return fmt.Errorf("no token yet (pair a phone or set AIXODIA_NODE_TOKEN)")
+		return fmt.Errorf("no D1 token yet — waiting for a phone to connect")
 	}
 	body, _ := json.Marshal(map[string]string{"tunnel_url": public, "version": version})
 	req, _ := http.NewRequest("POST", strings.TrimRight(workerBase, "/")+"/api/node/heartbeat", bytes.NewReader(body))
@@ -180,11 +179,19 @@ func postHeartbeat(workerBase, public, version string) error {
 	return nil
 }
 
+// NewStateClientFromConfig wires the D1-backed store from the runtime config
+// (Worker base URL) and the in-memory D1 token. It has no credentials of its
+// own: until a phone connects and hands the token over, every call fails with
+// "no token yet" — that is what stateless means here.
+func NewStateClientFromConfig(cfg MobileWSConfig) *StateClient {
+	return NewStateClient(cfg.WorkerBase, CurrentToken)
+}
+
 // LoadState fetches an opaque JSON blob previously saved with SaveState.
 // Use it at boot for config/provider, sessions/<id>, etc. so the daemon can
 // run stateless (nothing under ~/.local/share/ai is required).
 func LoadState(ctx context.Context, workerBase, key string) (string, error) {
-	tok := TokenFromEnvOrMemory()
+	tok := CurrentToken()
 	if tok == "" {
 		return "", fmt.Errorf("bridge: no token")
 	}
@@ -209,7 +216,7 @@ func LoadState(ctx context.Context, workerBase, key string) (string, error) {
 
 // SaveState stores an opaque JSON blob (≤500KB) in D1 via the Worker.
 func SaveState(ctx context.Context, workerBase, key, value string) error {
-	tok := TokenFromEnvOrMemory()
+	tok := CurrentToken()
 	if tok == "" {
 		return fmt.Errorf("bridge: no token")
 	}

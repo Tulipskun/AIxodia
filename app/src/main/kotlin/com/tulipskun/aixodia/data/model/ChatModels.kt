@@ -49,7 +49,6 @@ data class AiInput(
     @Json(name = "role") val role: String = "user",
     @Json(name = "content") val content: List<ContentPart> = emptyList(),
     @Json(name = "client_msg_id") val clientMsgId: String = "",
-    @Json(name = "token") val token: String = "",
 )
 
 @JsonClass(generateAdapter = true)

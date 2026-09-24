@@ -41,6 +41,40 @@ publishes it as `https://<random>.trycloudflare.com`, phone discovers it via
 data. Alternative with a stable address and end-to-end encryption: Tailscale
 on both machines, then use Mode A with the Tailscale IP/hostname.
 
+## Authentication: one token, two steps
+
+1. **URL** — the daemon is only reachable through the random
+   `https://<random>.trycloudflare.com` quick tunnel (nothing is published).
+2. **D1 access token** — the app sends it in the WebSocket handshake:
+
+```http
+GET /ws HTTP/1.1
+Upgrade: websocket
+Authorization: Bearer <D1 access token>
+```
+
+The daemon verifies that token against the Worker (`GET /api/ping`) *before*
+upgrading, then keeps it **in memory only** and uses it for every D1 call
+(`config/*`, `sessions/*`, turn ingest). A restart empties it — the next phone
+that connects supplies it again. That is what stateless means here.
+
+| Attempt | Response |
+|---|---|
+| no / malformed `Authorization` | `401`, not counted |
+| wrong token, attempts 1–4 | `401`, counted |
+| 5th failure | `429` + `Retry-After: 30`, then 60 / 120 / 240 / 300 (cap) |
+| any token while locked out | `429` |
+| Worker unreachable | `503`, not counted (fail closed) |
+| valid token | `101` + hello `ack`, counters reset |
+
+Lockout is keyed by `CF-Connecting-IP` (→ `X-Forwarded-For` → peer), never by
+the token: a token-keyed counter could be dodged by rotating credentials.
+
+**There is no second token.** The daemon holds no credential of its own: no
+node token, no state-encryption key, nothing in the config file. Values in D1
+(including `config/provider` with API keys) are stored as written, so anything
+holding the D1 token can read them — accepted for single-operator use (D-009).
+
 ## Runtime config (no secrets in code)
 
 `config/aixodia.example.json` → copy to `config/aixodia.json` (gitignored) or
@@ -51,7 +85,6 @@ default) or from a paired phone's WS hello, and is never written to disk.
 ```json
 {
   "worker_base": "https://aixodia.<subdomain>.workers.dev",
-  "node_token_env": "AIXODIA_NODE_TOKEN",
   "mobile_ws": { "listen": "127.0.0.1:18789", "tunnel": true }
 }
 ```

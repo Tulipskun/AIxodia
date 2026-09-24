@@ -88,6 +88,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val messages by vm.messages.collectAsState(initial = emptyList())
     val sessions by vm.sessions.collectAsState(initial = emptyList())
     val conn by vm.conn.collectAsState(initial = ConnState.OFFLINE)
+    val socketErr by vm.socketError.collectAsState(initial = "")
     val status by vm.status.collectAsState()
     val notice by vm.notice.collectAsState()
     val busy by vm.busy.collectAsState()
@@ -179,6 +180,9 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                     }
                     if (notice.isNotEmpty()) {
                         Text(notice, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (socketErr.isNotEmpty() && conn != ConnState.ONLINE) {
+                        Text(socketErr, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
