@@ -142,7 +142,7 @@ export default {
     const sm1 = u.pathname.match(/^\/api\/sessions\/([^/]+)$/);
     if (sm1) {
       const sid = decodeURIComponent(sm1[1]);
-      if (r.method === "PATCH") {
+      if (req.method === "PATCH") {
         const b = await req.json<{ title?: string }>().catch(() => ({}));
         const title = (b.title ?? "").trim().slice(0, 120);
         if (!title) return json({ error: "title required" }, 400);
@@ -151,7 +151,7 @@ export default {
         if (!info.meta?.changes) return json({ error: "not_found" }, 404);
         return json({ ok: true, id: sid, title });
       }
-      if (r.method === "DELETE") {
+      if (req.method === "DELETE") {
         await env.DB.prepare("DELETE FROM turns WHERE session_id = ?").bind(sid).run();
         await env.DB.prepare("DELETE FROM state WHERE key = ?").bind(`sessions/${sid}`).run();
         const info = await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sid).run();
