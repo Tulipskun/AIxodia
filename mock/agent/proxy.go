@@ -20,6 +20,19 @@ var allowedProxyPaths = map[string]bool{
 	"/api/ping":     true,
 }
 
+// allowedProxySessionOps matches /api/sessions/<id> for rename (PATCH) and
+// delete (DELETE) — the two actions a chat list needs.
+func allowedProxySessionOps(method, path string) bool {
+	if method != http.MethodPatch && method != http.MethodDelete {
+		return false
+	}
+	rest := strings.TrimPrefix(path, "/api/sessions/")
+	if rest == path {
+		return false
+	}
+	return rest != "" && !strings.Contains(rest, "/")
+}
+
 func allowedProxyTurns(path string) bool {
 	rest := strings.TrimPrefix(path, "/api/sessions/")
 	if rest == path {
@@ -43,7 +56,8 @@ func (a *Agent) historyProxy() http.Handler {
 			_, _ = w.Write([]byte(`{"error":"missing Authorization header"}`))
 			return
 		}
-		if !allowedProxyPaths[r.URL.Path] && !allowedProxyTurns(r.URL.Path) {
+		if !allowedProxyPaths[r.URL.Path] && !allowedProxyTurns(r.URL.Path) &&
+			!allowedProxySessionOps(r.Method, r.URL.Path) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"not proxied"}`))
