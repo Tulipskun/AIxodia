@@ -80,7 +80,10 @@ class ChatViewModel(
                         busy.value = false
                         notice.value = f.text
                     }
-                    "ack" -> { busy.value = false; notice.value = "" }
+                    // The ack only means the message reached the daemon. The
+                    // turn keeps running until `done`, and until then the stop
+                    // button must stay on screen.
+                    "ack" -> { notice.value = "" }
                 }
             }
         }
