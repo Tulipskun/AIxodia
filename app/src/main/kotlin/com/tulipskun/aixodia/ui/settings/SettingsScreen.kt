@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -124,7 +125,7 @@ fun SettingsScreen(
                             onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
                             enabled = !showToken,
                         ) {
-                            Icon(Icons.Default.ContentPaste, contentDescription = "วางจากคลิปบอร์ด")
+                            Icon(Icons.Default.ContentCopy, contentDescription = "วางจากคลิปบอร์ด")
                         }
                         IconButton(onClick = { showToken = !showToken }) {
                             Icon(
