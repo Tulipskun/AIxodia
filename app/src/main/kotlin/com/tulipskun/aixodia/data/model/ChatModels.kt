@@ -20,6 +20,42 @@ data class ToolCall(
     @Json(name = "arguments") val arguments: String = "",
 )
 
+@JsonClass(generateAdapter = true)
+data class ToolResultView(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "name") val name: String = "",
+    @Json(name = "text") val text: String = "",
+    @Json(name = "is_error") val isError: Boolean = false,
+)
+
+/** One provider with the models the daemon can actually route to right now. */
+@JsonClass(generateAdapter = true)
+data class ProviderView(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "name") val name: String = "",
+    @Json(name = "default_model") val defaultModel: String = "",
+    @Json(name = "models") val models: List<ModelView> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class ModelView(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "name") val name: String = "",
+    @Json(name = "supports_streaming") val supportsStreaming: Boolean = false,
+)
+
+@JsonClass(generateAdapter = true)
+data class ModelsPage(@Json(name = "providers") val providers: List<ProviderView> = emptyList())
+
+/** One tool step of the turn being streamed: call, then its result. */
+data class ToolStep(
+    val name: String,
+    val args: String = "",
+    val result: String = "",
+    val isError: Boolean = false,
+    val done: Boolean = false,
+)
+
 // Canonical inbound display frame (ai Output + agent attribution).
 @JsonClass(generateAdapter = true)
 data class AiOutput(
@@ -28,13 +64,14 @@ data class AiOutput(
     @Json(name = "content") val content: List<ContentPart> = emptyList(),
     @Json(name = "text") val text: String = "",
     @Json(name = "stage") val stage: String = "",
-    @Json(name = "kind") val kind: String = "message", // ack | message | trace | done | error
+    @Json(name = "kind") val kind: String = "message", // ack | delta | message | trace | done | error
     @Json(name = "seq") val seq: Long = 0,
     @Json(name = "role") val role: String = "model",
     @Json(name = "agent") val agent: String = "", // main | sub | worker | system
     @Json(name = "job_id") val jobId: String = "",
     @Json(name = "client_msg_id") val clientMsgId: String = "",
     @Json(name = "tool_call") val toolCall: ToolCall? = null,
+    @Json(name = "tool_result") val toolResult: ToolResultView? = null,
     @Json(name = "usage") val usage: Usage? = null,
     @Json(name = "input_tokens") val inputTokens: Int = 0,
     @Json(name = "output_tokens") val outputTokens: Int = 0,

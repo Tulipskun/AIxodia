@@ -5,6 +5,7 @@ import com.tulipskun.aixodia.data.local.MessageEntity
 import com.tulipskun.aixodia.data.local.SessionEntity
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -190,6 +191,17 @@ class ChatRepository(
     }
 
     /** Newest rows from the DB — the "reopen the app" path. */
+    /** The provider and model the daemon currently offers, for the picker. */
+    suspend fun models(): List<ProviderView> = history.models()
+
+    /**
+     * Pins provider and model for one chat. The daemon validates the pair and
+     * stores it on the session, so the choice survives a restart and is shared
+     * with any other phone.
+     */
+    suspend fun setSessionModel(sid: String, provider: String, model: String): Boolean =
+        history.setSessionModel(sid, provider, model)
+
     suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {
         val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
         if (rows.isEmpty()) return

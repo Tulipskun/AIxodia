@@ -5,6 +5,8 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.model.ModelsPage
+import com.tulipskun.aixodia.data.model.ProviderView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -52,6 +54,7 @@ class HistoryApi(private val settings: SettingsStore) {
     private val client = OkHttpClient()
     private val sessionsAdapter = moshi.adapter(Array<SessionRow>::class.java)
     private val turnsAdapter = moshi.adapter(TurnsPage::class.java)
+    private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val nodeAdapter = moshi.adapter(NodeInfo::class.java)
 
     /**
@@ -141,6 +144,38 @@ class HistoryApi(private val settings: SettingsStore) {
                 }
             }.getOrDefault(emptyList())
         }
+
+    /**
+     * The providers and models the daemon can route to right now, so the app
+     * never has to hardcode a model list or a provider name.
+     */
+    suspend fun models(): List<ProviderView> = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
+        runCatching {
+            val req = Request.Builder().url("$base/api/models")
+                .header("Authorization", "Bearer ${c.token}").get().build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use emptyList()
+                modelsAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Pins the provider and model for one chat; the daemon keeps it for good. */
+    suspend fun setSessionModel(sessionId: String, provider: String, model: String): Boolean = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
+        val body = """{"provider":"$provider","model":"$model"}"""
+        runCatching {
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .patch(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
 
     /** Connectivity check for the Settings screen: session count or throw. */
     suspend fun ping(workerOverride: String = "", tokenOverride: String = ""): Int =

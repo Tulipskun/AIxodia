@@ -88,14 +88,17 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val sessId by settings.sessionFlow.collectAsState(initial = "")
     var showSettings by remember { mutableStateOf(false) }
 
-    if (showSettings) {
-        SettingsScreen(settings = settings, history = history, socket = socket, onBack = { showSettings = false })
-        return
-    }
-
     // Unconfigured installs stop here — before the ViewModel exists — so a
-    // first launch cannot reach the network layer and crash.
+    // first launch cannot reach the network layer and crash. The settings
+    // screen still has to open from here, or there would be no way to fix it.
     if (!configured) {
+        if (showSettings) {
+            SettingsScreen(
+                settings = settings, history = history, socket = socket,
+                sessionId = sessId, onBack = { showSettings = false },
+            )
+            return
+        }
         SetupNeeded(endpoint = endpoint, onOpen = { showSettings = true })
         return
     }
@@ -108,6 +111,8 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val status by vm.status.collectAsState()
     val notice by vm.notice.collectAsState()
     val busy by vm.busy.collectAsState()
+    val liveText by vm.liveText.collectAsState()
+    val liveSteps by vm.liveSteps.collectAsState()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
@@ -115,6 +120,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     var renameTarget by remember { mutableStateOf<ChatSession?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<ChatSession?>(null) }
+
+    if (showSettings) {
+        SettingsScreen(
+            settings = settings, history = history, socket = socket,
+            sessionId = vm.sessionId, onBack = { showSettings = false },
+        )
+        return
+    }
 
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
@@ -282,6 +295,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                     }
                 }
                 items(messages, key = { it.id }) { m -> Bubble(m) }
+                // The answer being streamed right now. It is not in the
+                // database yet; the stored row replaces it when the turn ends.
+                if (liveText.isNotBlank()) {
+                    item(key = "live-answer") { LiveBubble(liveText) }
+                }
+                if (liveSteps.isNotEmpty()) {
+                    item(key = "live-steps") { ToolSteps(liveSteps) }
+                }
             }
         }
     }
@@ -378,6 +399,45 @@ private fun ConnDot(c: ConnState) {
         ConnState.OFFLINE -> "● ออฟไลน์" to MaterialTheme.colorScheme.error
     }
     Text(label, style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(end = 4.dp))
+}
+
+@Composable
+private fun LiveBubble(text: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Card(
+            modifier = Modifier.widthIn(max = 320.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        ) {
+            Column(Modifier.padding(10.dp)) {
+                AgentBadge(ChatMessage(id = "live", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = "main"))
+                Text(text)
+            }
+        }
+    }
+}
+
+/** The tool calls of the running turn, one line each, in the order they ran. */
+@Composable
+private fun ToolSteps(steps: List<com.tulipskun.aixodia.data.model.ToolStep>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.padding(8.dp)) {
+            steps.forEach { step ->
+                Text(
+                    text = buildString {
+                        append(step.name)
+                        if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
+                        append(if (!step.done) "…" else if (step.isError) " — ล้มเหลว" else " — เสร็จแล้ว")
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable

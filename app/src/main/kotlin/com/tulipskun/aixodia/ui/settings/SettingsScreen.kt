@@ -1,6 +1,8 @@
 package com.tulipskun.aixodia.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +31,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,6 +51,7 @@ import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import kotlinx.coroutines.launch
 
@@ -61,6 +66,7 @@ fun SettingsScreen(
     settings: SettingsStore,
     history: HistoryApi,
     socket: AiDirectSocket,
+    sessionId: String,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -76,6 +82,10 @@ fun SettingsScreen(
     var showToken by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var providers by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
+    var pickedProvider by remember { mutableStateOf("") }
+    var pickedModel by remember { mutableStateOf("") }
+    val selected = providers.firstOrNull { it.id == pickedProvider }
 
     Scaffold(
         topBar = {
@@ -209,6 +219,53 @@ fun SettingsScreen(
                     })
             }
             Divider(Modifier.padding(vertical = 4.dp))
+            Text("Provider / model", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "รายการมาจาก daemon ตอนนี้ เลือกแล้วบันทึกลงแชทนี้ — แชทเก่าแยกกันเก็บค่าของตัวเอง",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (providers.isEmpty()) {
+                OutlinedButton(
+                    onClick = {
+                        busy = true; msg = "กำลังโหลดรายการ…"
+                        scope.launch {
+                            providers = runCatching { history.models() }.getOrDefault(emptyList())
+                            val first = providers.firstOrNull()
+                            if (first != null) {
+                                pickedProvider = first.id
+                                pickedModel = first.defaultModel.ifEmpty { first.models.firstOrNull()?.id.orEmpty() }
+                            }
+                            msg = if (providers.isEmpty()) "ยังโหลดไม่ได้ (ต้องต่อ daemon ก่อน)" else "มี ${providers.size} provider"
+                            busy = false
+                        }
+                    },
+                    enabled = !busy,
+                ) { Text("โหลดรายการ") }
+            } else {
+                ProviderDropdown(providers, pickedProvider, onPick = { id ->
+                    pickedProvider = id
+                    pickedModel = providers.firstOrNull { it.id == id }?.defaultModel.orEmpty()
+                })
+                Spacer(Modifier.padding(4.dp))
+                ModelDropdown(selected, pickedModel, onPick = { pickedModel = it })
+                Spacer(Modifier.padding(4.dp))
+                Button(
+                    onClick = {
+                        busy = true; msg = "กำลังบันทึก…"
+                        scope.launch {
+                            val ok = runCatching {
+                                history.setSessionModel(sessionId, pickedProvider, pickedModel)
+                            }.getOrDefault(false)
+                            msg = if (ok) "บันทึกแล้ว: $pickedProvider / $pickedModel" else "บันทึกไม่สำเร็จ (provider/model ใช้ไม่ได้)"
+                            busy = false
+                        }
+                    },
+                    enabled = !busy && pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
+                ) { Text("บันทึกสำหรับแชทนี้") }
+            }
+            if (msg.isNotEmpty()) Text(msg, style = MaterialTheme.typography.bodyMedium)
+            Divider(Modifier.padding(vertical = 4.dp))
             UpdateRow(settings)
             Text(
                 "สถานะ WebSocket: " + when (conn) {
@@ -218,6 +275,45 @@ fun SettingsScreen(
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+    }
+}
+
+@Composable
+private fun ProviderDropdown(providers: List<ProviderView>, picked: String, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(providers.firstOrNull { it.id == picked }?.id ?: "เลือก provider")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            providers.forEach { p ->
+                DropdownMenuItem(
+                    text = { Text("${p.id} (${p.models.size} models)") },
+                    onClick = { onPick(p.id); open = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelDropdown(provider: ProviderView?, picked: String, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val models = provider?.models.orEmpty()
+    Box {
+        OutlinedButton(
+            onClick = { open = true },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = models.isNotEmpty(),
+        ) { Text(picked.ifBlank { "เลือก model" }) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            models.forEach { m ->
+                DropdownMenuItem(
+                    text = { Text(m.id + if (m.supportsStreaming) " •stream" else "") },
+                    onClick = { onPick(m.id); open = false },
+                )
+            }
         }
     }
 }

@@ -111,3 +111,22 @@
   kept in the daemon only in memory. No node token, no state-encryption key, no
   per-device token may be added without explicit approval. State values
   (`config/provider` with API keys included) are stored as written.
+
+## Streaming display and per-chat model choice (AX-08x)
+
+- AX-080 — Every turn streams: the daemon asks the provider for a stream
+  (`Request.Stream`), and the mobile frames are `delta` (one streamed chunk),
+  `trace` (progress: request, provider_ready, thinking, retry_wait, tool_call,
+  tool_running, tool_result), `message` (the authoritative answer, sent only
+  when it did not already arrive as deltas) and `done`. The phone appends
+  deltas into one live bubble, draws tool steps as they run, and replaces the
+  bubble with the stored row when the turn closes.
+- AX-081 — The phone can pick the provider and model for a chat: `GET /api/models`
+  returns what the router can actually reach right now, `PATCH /api/sessions/:id`
+  with `{provider, model}` validates the pair against the router, applies it to
+  the live session and stores it on the chat, so the choice survives a restart
+  and follows the session on any phone. A chat that was never configured keeps
+  the daemon's boot default.
+- AX-082 — The streaming bubble is never written to the local database: the
+  daemon mirrors exactly one row per turn into D1 and the app pulls it when the
+  turn closes, so a stream can never become a duplicate history row.

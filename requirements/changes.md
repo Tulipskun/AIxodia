@@ -108,3 +108,6 @@
   `PATCH|DELETE /api/sessions/:id` และแก้ allowlist ของ proxy ให้ผ่านได้แต่ยังไม่ให้
   `/api/state`; ทดสอบจริงบนมือถือผ่าน public tunnel: เห็น 4 แชทจาก D1, เปลี่ยนชื่อและ
   ลบแล้ว D1 เปลี่ยนตามจริง.
+
+- AXCH-012 (2026-09-25) — "เพิ่มให้ตั้งค่า provider/model ได้ ปรับการแสดงผลให้ถูกต้อง ปรับเป็นระบบ stream ทั้งหมดเท่าที่เป็นไปได้":
+  daemon ส่ง `delta` ต่อชิ้นข้อความจริง (ไม่ใช่ `TraceResponseContent` ที่เป็นทั้งก้อน), ส่งข้อความ authoritative เฉพาะตอนที่ไม่ได้ stream มาแล้ว, `trace` มี tool call/result และ `done` ปิด turn เดียว; harness สั่ง `Stream: true` ทุก turn; adapter `openai` เลือก dialect ตาม endpoint (custom base = gateway → `/chat/completions` SSE, มิฉะนั้น `/responses`) พร้อม fallback; เพิ่ม `GET /api/models` + `PATCH /api/sessions/:id {provider, model}` และ session manager ใช้ค่าที่บันทึกไว้เมื่อเปิดแชท; D1 mirror มี turnMirror กันเขียนซ้ำ. แอป: bubble สด + รายการ tool steps, ตัวเลือก provider/model ในหน้าตั้งค่า, ดึงประวัติจาก D1 เมื่อ turn จบ. ทดสอบจริงผ่าน tunnel: 32 delta → done, D1 มี user+model turn พอดี 1 ครั้ง, `/api/models` คืน 6 provider พร้อม model จริง.
