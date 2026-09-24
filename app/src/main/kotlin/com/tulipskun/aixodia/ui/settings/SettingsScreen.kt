@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -109,15 +110,28 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(), singleLine = true,
             )
             OutlinedTextField(
-                value = token, onValueChange = { token = it }, label = { Text("Token") },
+                value = token, onValueChange = { token = it },
+                label = { Text("D1 token (ใช้ทั้งเข้า DB และยืนยันตัวตนกับ daemon)") },
+                supportingText = {
+                    Text("token ชุดเดียวของระบบ • ส่งเป็น header ตอนเชื่อมต่อ ไม่ฝังในแอป")
+                },
                 modifier = Modifier.fillMaxWidth(), singleLine = true,
                 visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    IconButton(onClick = { showToken = !showToken }) {
-                        Icon(
-                            if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = "toggle token",
-                        )
+                    Row {
+                        val clip = LocalClipboardManager.current
+                        IconButton(
+                            onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
+                            enabled = !showToken,
+                        ) {
+                            Icon(Icons.Default.ContentPaste, contentDescription = "วางจากคลิปบอร์ด")
+                        }
+                        IconButton(onClick = { showToken = !showToken }) {
+                            Icon(
+                                if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = "toggle token",
+                            )
+                        }
                     }
                 },
             )
@@ -128,16 +142,29 @@ fun SettingsScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        busy = true; msg = "กำลังบันทึก…"
+                        busy = true; msg = "กำลังตรวจค่า…"
                         scope.launch {
+                            val workerOk = if (worker.isBlank() && curWorker.isNotBlank()) {
+                                runCatching { history.ping("", token) }.isSuccess
+                            } else {
+                                runCatching { history.ping(worker, token) }.fold(
+                                    onSuccess = { true },
+                                    onFailure = { false },
+                                )
+                            }
+                            if (!workerOk) {
+                                msg = "Worker/token ไม่ผ่าน — ยังไม่บันทึก (401 = token ผิด, 404 = ยังไม่ deploy)"
+                                busy = false
+                                return@launch
+                            }
                             settings.saveConnection(ws, worker, token)
                             settings.saveSession(session)
-                            msg = "บันทึกแล้ว — เปิดแชตใหม่จะใช้ค่าชุดนี้"
+                            msg = "บันทึกแล้ว — daemon จะใช้ค่านี้ยืนยันตัวตนและดึง state จาก D1"
                             busy = false
                         }
                     },
                     enabled = !busy,
-                ) { Text("บันทึก") }
+                ) { Text("บันทึก (ตรวจก่อน)") }
                 OutlinedButton(
                     onClick = {
                         busy = true; msg = "กำลังทดสอบ Worker…"
