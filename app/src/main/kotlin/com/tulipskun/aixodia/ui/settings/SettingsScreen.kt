@@ -502,7 +502,7 @@ private fun RouteCard(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall)
-        PickerRow("provider", route.provider.ifBlank { "เลือก provider" }, onPickProvider)
+        PickerRow("provider", route.provider.ifBlank { "เลือก provider" }, onPick = onPickProvider)
         PickerRow(
             label = "model",
             value = route.model.ifBlank { "เลือก model" },

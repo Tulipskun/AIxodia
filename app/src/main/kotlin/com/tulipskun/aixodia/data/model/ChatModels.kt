@@ -42,6 +42,7 @@ data class ModelView(
     @Json(name = "id") val id: String = "",
     @Json(name = "name") val name: String = "",
     @Json(name = "supports_streaming") val supportsStreaming: Boolean = false,
+    @Json(name = "supports_tools") val supportsTools: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)
