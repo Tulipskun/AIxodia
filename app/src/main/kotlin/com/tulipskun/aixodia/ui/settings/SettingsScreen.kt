@@ -326,7 +326,9 @@ fun SettingsScreen(
                                 } else {
                                     msg = "${p.id} ใช้ไม่ได้"
                                 }
-                                providers = providers.map { if (it.id == p.id) status else it }
+                                if (status != null) {
+                                    providers = providers.map { if (it.id == p.id) status else it }
+                                }
                                 testingId = null
                             }
                         },
