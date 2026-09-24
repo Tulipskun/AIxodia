@@ -64,3 +64,12 @@
   `bridge.LoadConfig()` (ไฟล์ JSON/env, มีเทสต์) แทน hardcode; (5) CI เพิ่ม
   `go test` ของ bridge. สิทธิ์ token ที่ยังขาดและต้องเพิ่ม: Account →
   Workers Scripts: Edit (deploy/secret) + Account Settings: Read (workers.dev).
+
+- AXCH-007 (2026-09-24) — Production DB live: จอง workers.dev subdomain
+  `aixodia` + deploy Worker `aixodia` (DB binding → D1 `aixodia`) + ตั้ง
+  `AIXODIA_TOKEN` เป็น Worker secret; ทดสอบจริงผ่าน public URL (401 ไม่มี token,
+  create/list session, เขียน-อ่าน turn ที่มี `agent`/`job_id`, heartbeat ผ่าน
+  `/api/node`). เพิ่ม `-worker-base` / `-worker-token` ให้ mockai เขียนลง
+  D1 จริงแบบ FIFO (พบบั๊กจริง: mirror แบบ goroutine ต่อ turn ทำให้ seq ซ้ำกัน
+  แอปแสดงผิดลำดับ — แก้เป็นคิวเดียว + เทสต์ยืนยันลำดับ user → main → sub →
+  main ใน D1 จริง) และแยก credential: local WS token ≠ Worker token.

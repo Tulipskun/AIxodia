@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -344,5 +345,77 @@ func TestDBHTTPPParity(t *testing.T) {
 	resp, _ = get("/api/node", "t0ken")
 	if resp.StatusCode != 200 {
 		t.Fatalf("node status = %d", resp.StatusCode)
+	}
+}
+
+// The mock agent must be able to write into the real Worker (production D1)
+// while the phone talks to it over the local WebSocket.
+func TestTurnsAreMirroredToWorker(t *testing.T) {
+	token := "t0ken"           // Worker credential
+	localToken := "local-only" // WebSocket credential on the LAN
+	db := mockdb.New(localToken, filepath.Join(t.TempDir(), "db.json"))
+	var mu sync.Mutex
+	var got []map[string]any
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth := r.Header.Get("Authorization"); auth != "Bearer "+token {
+			w.WriteHeader(401)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		got = append(got, body)
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer mirror.Close()
+
+	ag := agent.New(agent.Config{
+		DB: db, Token: localToken, WorkerToken: token,
+		MirrorBase: mirror.URL, Version: "t", StepDelay: 5 * time.Millisecond,
+	})
+	srv := httptest.NewServer(ag.Handler())
+	defer srv.Close()
+
+	cl := dial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws", localToken, "mirror-1")
+	cl.next(2 * time.Second)
+	cl.send(map[string]any{"type": "message", "session_id": "mirror-1",
+		"content": []map[string]string{{"text": "ส่งขึ้น Worker จริง"}}})
+
+	if !waitFor(t, 5*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, b := range got {
+			if txt, ok := b["text"].(string); ok && b["agent"] == "main" && strings.Contains(txt, "mock mode") {
+				return true
+			}
+		}
+		return false
+	}) {
+		mu.Lock()
+		t.Fatalf("nothing mirrored: %v", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	var sawSub, sawMainFinal bool
+	for _, b := range got {
+		if b["agent"] == "sub" {
+			sawSub = true
+		}
+		if txt, ok := b["text"].(string); ok && b["agent"] == "main" && strings.Contains(txt, "mock mode") {
+			sawMainFinal = true
+		}
+	}
+	if !sawSub || !sawMainFinal {
+		t.Fatalf("agent attribution lost in mirror: sub=%v main_final=%v", sawSub, sawMainFinal)
+	}
+	// Order matters: D1 assigns seq on arrival, so the mirror must be FIFO or
+	// the phone renders the thread scrambled.
+	if got[0]["role"] != "user" {
+		t.Fatalf("first mirrored turn = %v, want the user turn", got[0])
+	}
+	last := got[len(got)-1]
+	if txt, _ := last["text"].(string); last["agent"] != "main" || !strings.Contains(txt, "mock mode") {
+		t.Fatalf("last mirrored turn = %v, want the main agent final answer", last)
 	}
 }

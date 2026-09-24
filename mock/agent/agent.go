@@ -7,6 +7,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -26,14 +28,24 @@ import (
 )
 
 type Config struct {
-	DB         *mockdb.Store
-	Token      string
-	DBBase     string // used for heartbeat posts (e.g. http://127.0.0.1:8787)
-	Version    string
-	StepDelay  time.Duration
-	TunnelBin  string        // override for tests; default "cloudflared"
-	TunnelWait time.Duration // how long to wait for the public URL (default 45s)
-	OpenTunnel bool
+	DB     *mockdb.Store
+	Token  string
+	DBBase string // used for heartbeat posts (e.g. http://127.0.0.1:8787)
+	// MirrorBase, when set, is the real AIxodia Worker (Cloudflare D1). Every
+	// turn is mirrored there as well, and tunnel heartbeats are announced
+	// there instead of the local mock DB. That makes the mock agent usable
+	// against production storage without changing the phone app.
+	MirrorBase string
+	// WorkerToken is the credential for MirrorBase (the AIXODIA_TOKEN Worker
+	// secret). It is separate from Token, which is the local WebSocket auth, so
+	// the daemon can accept phones with their own token without giving the
+	// local network the cloud credential (and vice versa).
+	WorkerToken string
+	Version     string
+	StepDelay   time.Duration
+	TunnelBin   string        // override for tests; default "cloudflared"
+	TunnelWait  time.Duration // how long to wait for the public URL (default 45s)
+	OpenTunnel  bool
 }
 
 type Agent struct {
@@ -42,6 +54,19 @@ type Agent struct {
 	mu       sync.Mutex
 	subs     map[string]map[*websocket.Conn]struct{}
 	jobs     atomic.Int64
+	// mirrorCh keeps cloud writes in the exact order the job produced them.
+	// One worker goroutine drains it, so D1 assigns seq in job order and the
+	// app can render the thread straight from seq. Firing one goroutine per
+	// turn races and interleaves (found in the real-D1 test).
+	mirrorCh chan mirrorItem
+}
+
+type mirrorItem struct {
+	session string
+	role    string
+	agent   string
+	jobID   string
+	text    string
 }
 
 type ContentPart struct {
@@ -94,13 +119,18 @@ func New(cfg Config) *Agent {
 	if cfg.TunnelWait == 0 {
 		cfg.TunnelWait = 45 * time.Second
 	}
-	return &Agent{
-		cfg:  cfg,
-		subs: map[string]map[*websocket.Conn]struct{}{},
+	a := &Agent{
+		cfg:      cfg,
+		subs:     map[string]map[*websocket.Conn]struct{}{},
+		mirrorCh: make(chan mirrorItem, 256),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
+	if cfg.MirrorBase != "" {
+		go a.mirrorWorker()
+	}
+	return a
 }
 
 func (a *Agent) Handler() http.Handler {
@@ -230,6 +260,7 @@ func (a *Agent) emit(session, role, agent, stage, text, jobID, clientMsgID strin
 		JobID: jobID,
 		Text:  text,
 	})
+	a.mirror(session, role, agent, jobID, text)
 	a.broadcast(Out{
 		Kind:         kindFor(role, stage),
 		SessionID:    session,
@@ -277,6 +308,7 @@ func (a *Agent) startJob(session, text, clientMsgID string, c *websocket.Conn) {
 		ctx := context.Background()
 		// user turn (author of a title when the session has none)
 		a.cfg.DB.AppendTurn(session, mockdb.Turn{Role: "user", Text: text, JobID: jobID})
+		a.mirror(session, "user", "", jobID, text)
 		sessions := a.cfg.DB.ListSessions()
 		for _, ses := range sessions {
 			if ses.ID == session && (ses.Title == "" || ses.Title == session) {
@@ -448,7 +480,74 @@ func (a *Agent) RunQuickTunnel(ctx context.Context, port int) (string, func(), e
 	}, nil
 }
 
+// mirror queues one finished turn for the real Worker (D1). Writes are
+// serialized in job order; the live display never waits for the cloud.
+func (a *Agent) mirror(session, role, agent, jobID, text string) {
+	if a.cfg.MirrorBase == "" {
+		return
+	}
+	select {
+	case a.mirrorCh <- mirrorItem{session: session, role: role, agent: agent, jobID: jobID, text: text}:
+	default:
+		log.Printf("mirror: queue full, dropping turn for %s", session)
+	}
+}
+
+// mirrorWorker drains mirrorCh in FIFO order, retrying transient failures.
+func (a *Agent) mirrorWorker() {
+	client := &http.Client{Timeout: 20 * time.Second}
+	for item := range a.mirrorCh {
+		body, _ := json.Marshal(map[string]string{
+			"role": item.role, "agent": item.agent, "job_id": item.jobID, "text": item.text,
+		})
+		url := strings.TrimRight(a.cfg.MirrorBase, "/") + "/api/sessions/" + url.PathEscape(item.session) + "/turns"
+		for attempt := 0; attempt < 3; attempt++ {
+			req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+			if err != nil {
+				break
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if wt := a.workerToken(); wt != "" {
+				req.Header.Set("Authorization", "Bearer "+wt)
+			}
+			resp, err := client.Do(req)
+			if err == nil {
+				code := resp.StatusCode
+				_ = resp.Body.Close()
+				if code >= 200 && code < 300 {
+					break
+				}
+				if code < 500 {
+					log.Printf("mirror: %s -> HTTP %d", url, code)
+					break
+				}
+			}
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+		}
+	}
+}
+
+func (a *Agent) workerToken() string {
+	if a.cfg.WorkerToken != "" {
+		return a.cfg.WorkerToken
+	}
+	return a.cfg.Token
+}
+
 func (a *Agent) heartbeat(public string) {
+	if a.cfg.MirrorBase != "" {
+		base := strings.TrimRight(a.cfg.MirrorBase, "/")
+		body, _ := json.Marshal(map[string]string{"tunnel_url": public, "version": a.cfg.Version})
+		req, _ := http.NewRequest("POST", base+"/api/node/heartbeat", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if a.cfg.Token != "" {
+			req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
+		}
+		if resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req); err == nil {
+			_ = resp.Body.Close()
+		}
+		return
+	}
 	if a.cfg.DBBase == "" {
 		a.cfg.DB.SetNode(public, a.cfg.Version)
 		return

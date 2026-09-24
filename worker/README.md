@@ -11,7 +11,7 @@ The phone never talks to D1 directly. This Worker is the HTTPS/WSS front:
 |---|---|
 | Account | `3b953d1c…b37b` (config, not a secret) |
 | D1 database | `aixodia` / `e8e746ea-…f29a1` — schema applied (5 tables) |
-| Worker | `aixodia` (deploy needs Workers Scripts: Edit on your token) |
+| Worker | `aixodia` → **https://aixodia.aixodia.workers.dev** (deployed) |
 | App auth | Worker secret `AIXODIA_TOKEN` — set per environment, never in git |
 
 ## Runtime config only (no secrets in code)
@@ -24,6 +24,16 @@ The phone never talks to D1 directly. This Worker is the HTTPS/WSS front:
   in the shell that runs wrangler. It is never stored in the repo.
 - The Android app reads Worker URL + token from DataStore at runtime (gear
   icon). A fresh install has empty values and shows a setup screen.
+
+## Deployed (2026-09-24)
+
+- workers.dev subdomain `aixodia` registered; Worker `aixodia` deployed with
+  the D1 binding `DB` → `aixodia`.
+- `AIXODIA_TOKEN` set as a Worker secret (value lives only in the operator's
+  shell / 600-mode file, never in git). The app takes it at runtime in
+  Settings; `mockai -worker-token` takes it for daemon-side writes.
+- Verified live: 401 without token, session create/list, turns with
+  `agent` + `job_id`, and tunnel heartbeat via `GET /api/node`.
 
 ## Token permissions needed
 

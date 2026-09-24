@@ -30,19 +30,23 @@ func main() {
 	data := flag.String("data", "mockai-data.json", "JSON file that acts as the database")
 	version := flag.String("version", "mock-1", "version reported by /api/node")
 	tunnel := flag.Bool("tunnel", false, "open a real Cloudflare quick tunnel")
-	cloudflared := flag.String("cloudflared", "cloudflared", "cloudflared binary (or pass /root/cloudflared.so)")
+	workerBase := flag.String("worker-base", "", "real AIxodia Worker base URL; mirrors turns + announces the tunnel there (production D1)")
+	workerToken := flag.String("worker-token", os.Getenv("AIXODIA_TOKEN"), "AIXODIA_TOKEN for the Worker (separate from the local -token)")
+	cloudflaredBin := flag.String("cloudflared", "cloudflared", "cloudflared binary")
 	step := flag.Duration("step", 350*time.Millisecond, "delay between mock agent steps")
 	flag.Parse()
 
 	db := mockdb.New(*token, *data)
 	dbSrv := &http.Server{Addr: *addr, Handler: db.Handler()}
 	ag := agent.New(agent.Config{
-		DB:        db,
-		Token:     *token,
-		DBBase:    "http://" + *addr,
-		Version:   *version,
-		StepDelay: *step,
-		TunnelBin: *cloudflared,
+		DB:          db,
+		Token:       *token,
+		DBBase:      "http://" + *addr,
+		MirrorBase:  *workerBase,
+		WorkerToken: *workerToken,
+		Version:     *version,
+		StepDelay:   *step,
+		TunnelBin:   *cloudflaredBin,
 	})
 	agSrv := &http.Server{Addr: *wsAddr, Handler: ag.Handler()}
 

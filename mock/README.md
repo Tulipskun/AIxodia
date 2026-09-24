@@ -52,3 +52,19 @@ go test ./...    # background jobs, session isolation, auth, tunnel announce
 
 `TestJobContinuesAfterClientDisconnectAndIsReadableFromDB` is the requirement
 test: it disconnects mid-job and asserts main/sub turns are all in the DB.
+
+## Use the real D1 with the mock agent
+
+```bash
+export AIXODIA_TOKEN=…            # Worker secret (runtime only)
+go run ./cmd/mockai \
+  -token local-only \
+  -worker-base https://aixodia.aixodia.workers.dev \
+  -tunnel
+```
+
+`-worker-base` mirrors every turn into the real Cloudflare D1 in job order
+(FIFO, so D1 `seq` matches the thread order) and announces the tunnel through
+`/api/node`; the phone then works against production storage with the mock
+agent as the brain. `-token` stays local: the LAN WebSocket credential and the
+cloud credential are deliberately separate.
