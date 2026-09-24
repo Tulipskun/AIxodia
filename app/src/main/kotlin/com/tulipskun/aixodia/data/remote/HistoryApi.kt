@@ -59,6 +59,7 @@ class HistoryApi(private val settings: SettingsStore) {
     private val turnsAdapter = moshi.adapter(TurnsPage::class.java)
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
+    private val providerAdapter = moshi.adapter(ProviderStatus::class.java)
     private val settingsAdapter = moshi.adapter(AgentSettings::class.java)
     private val nodeAdapter = moshi.adapter(NodeInfo::class.java)
 
@@ -210,6 +211,22 @@ class HistoryApi(private val settings: SettingsStore) {
                 providersAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
             }
         }.getOrDefault(emptyList())
+    }
+
+    /** Tests one provider only, so a dead key does not wait behind five others. */
+    suspend fun refreshProvider(providerId: String): ProviderStatus? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/api/providers/$providerId/refresh")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) null else providerAdapter.fromJson(r.body!!.source())
+            }
+        }.getOrDefault(null)
     }
 
     /** Adds a provider. The key travels once, in this request, and is never read back. */

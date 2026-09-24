@@ -129,6 +129,8 @@ fun SettingsScreen(
     var adding by remember { mutableStateOf(false) }
     var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
     var deleting by remember { mutableStateOf<ProviderStatus?>(null) }
+    var pickingKeyFor by remember { mutableStateOf<ProviderStatus?>(null) }
+    var testingId by remember { mutableStateOf<String?>(null) }
 
     val load: suspend (probe: Boolean) -> Unit = { probe ->
         loading = true
@@ -311,12 +313,24 @@ fun SettingsScreen(
                             }
                         },
                         onReplaceKeys = { replacing = p },
-                        onRemoveLast = {
+                        onPickKeyToRemove = { pickingKeyFor = p },
+                        onTest = {
+                            testingId = p.id
                             scope.launch {
-                                msg = history.changeKeys(p.id, remove = listOf(p.keyCount - 1))
-                                load(false)
+                                val status = history.refreshProvider(p.id)
+                                probedIds = probedIds + p.id
+                                if (status == null) {
+                                    msg = "ทดสอบ ${p.id} ไม่สำเร็จ ( daemon ไม่ตอบ)"
+                                } else if (status.reachable) {
+                                    msg = "${p.id} ใช้ได้ (${status.modelCount} model)"
+                                } else {
+                                    msg = "${p.id} ใช้ไม่ได้"
+                                }
+                                providers = providers.map { if (it.id == p.id) status else it }
+                                testingId = null
                             }
                         },
+                        testing = testingId == p.id,
                         onDelete = { deleting = p },
                     )
                 }
@@ -445,6 +459,37 @@ fun SettingsScreen(
         )
     }
 
+    pickingKeyFor?.let { p ->
+        AlertDialog(
+            onDismissRequest = { pickingKeyFor = null },
+            title = { Text("ลบ key ตัวไหนของ ${p.id}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "key ไม่เคยถูกส่งกลับมาจาก daemon จึงเลือกได้แค่ลำดับ — ลองทีละตัวถ้าตัวสุดท้ายใช้ไม่ได้",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    repeat(p.keyCount) { index ->
+                        val position = p.keyCount - index
+                        TextButton(
+                            onClick = {
+                                pickingKeyFor = null
+                                scope.launch {
+                                    msg = history.changeKeys(p.id, remove = listOf(position - 1))
+                                    load(false)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("ลบ key ตัวที่ $position") }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { pickingKeyFor = null }) { Text("ยกเลิก") } },
+        )
+    }
+
     deleting?.let { p ->
         AlertDialog(
             onDismissRequest = { deleting = null },
@@ -561,7 +606,9 @@ private fun ProviderCard(
     tested: Boolean,
     onAddKey: (String) -> Unit,
     onReplaceKeys: () -> Unit,
-    onRemoveLast: () -> Unit,
+    onPickKeyToRemove: () -> Unit,
+    onTest: () -> Unit,
+    testing: Boolean,
     onDelete: () -> Unit,
 ) {
     var key by remember { mutableStateOf("") }
@@ -599,12 +646,18 @@ private fun ProviderCard(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                val clip = LocalClipboardManager.current
                 OutlinedTextField(
                     value = key,
                     onValueChange = { key = it },
                     label = { Text("เพิ่ม API key") },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            clip.getText()?.text?.let { if (it.isNotBlank()) key = it.trim() }
+                        }) { Icon(Icons.Default.ContentCopy, contentDescription = "วาง key จากคลิปบอร์ด") }
+                    },
                 )
                 FilledTonalIconButton(
                     onClick = { onAddKey(key.trim()); key = "" },
@@ -616,8 +669,23 @@ private fun ProviderCard(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
+                TextButton(onClick = onTest, enabled = !testing) {
+                    if (testing) {
+                        Text("กำลังทดสอบ…")
+                    } else {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text("  ทดสอบ")
+                    }
+                }
                 TextButton(onClick = onReplaceKeys) { Text("แทนที่ pool") }
-                TextButton(onClick = onRemoveLast, enabled = provider.keyCount > 0) { Text("ลบ key ท้าย") }
+                TextButton(
+                    onClick = onPickKeyToRemove,
+                    enabled = provider.keyCount > 0,
+                ) { Text("ลบ key") }
                 TextButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,

@@ -1,5 +1,7 @@
 package com.tulipskun.aixodia.ui.chat
 
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -13,23 +15,28 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
@@ -39,9 +46,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
@@ -49,6 +58,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -62,7 +72,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -124,6 +137,9 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val busy by vm.busy.collectAsState()
     val liveText by vm.liveText.collectAsState()
     val liveSteps by vm.liveSteps.collectAsState()
+    val providers by vm.providers.collectAsState()
+    val pickedProvider by vm.selectedProvider.collectAsState()
+    val pickedModel by vm.selectedModel.collectAsState()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
@@ -131,6 +147,9 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     var renameTarget by remember { mutableStateOf<ChatSession?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<ChatSession?>(null) }
+    var showModelPicker by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf<ChatMessage?>(null) }
+    var toast by remember { mutableStateOf("") }
 
     if (showSettings) {
         SettingsScreen(
@@ -141,6 +160,13 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     }
 
     val listState = rememberLazyListState()
+    val clip = LocalClipboardManager.current
+    LaunchedEffect(toast) {
+        if (toast.isNotBlank()) {
+            kotlinx.coroutines.delay(2200)
+            toast = ""
+        }
+    }
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
@@ -198,6 +224,17 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
         )
     }
+    if (showModelPicker) {
+        ChatModelSheet(
+            providers = providers,
+            pickedProvider = pickedProvider,
+            pickedModel = pickedModel,
+            onProvider = { vm.chooseProvider(it) },
+            onModel = { vm.chooseModel(it) },
+            onSave = { vm.saveModel(); showModelPicker = false },
+            onDismiss = { showModelPicker = false },
+        )
+    }
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
@@ -239,11 +276,23 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                     title = {
                         Column {
                             Text(sessionTitle(sessions, sessId), maxLines = 1)
-                            Text(
-                                "session: $sessId",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            // Which model this chat runs on, and a way to change
+                            // it — the session id is plumbing, not information.
+                            Surface(
+                                onClick = {
+                                    vm.loadProviders()
+                                    showModelPicker = true
+                                },
+                                color = Color.Transparent,
+                                shape = MaterialTheme.shapes.extraSmall,
+                            ) {
+                                Text(
+                                    text = if (pickedModel.isBlank()) "เลือกโมเดล" else "$pickedProvider · $pickedModel",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     },
                     navigationIcon = {
@@ -273,6 +322,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                             .imePadding()
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
+                        if (toast.isNotBlank()) {
+                            Text(
+                                toast,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 2.dp),
+                            )
+                        }
                         if (status.isNotEmpty()) {
                             Text(
                                 status,
@@ -287,12 +344,28 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                                 color = MaterialTheme.colorScheme.error,
                             )
                         }
-                        if (socketErr.isNotEmpty() && conn != ConnState.ONLINE) {
-                            Text(
-                                socketErr,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
+                        if (conn != ConnState.ONLINE) {
+                            // Being unable to talk to the daemon is the one problem
+                            // the user can act on, so it gets a banner and a retry
+                            // instead of a line of grey text.
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                            ) {
+                                Row(
+                                    Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        socketErr.ifBlank { "ต่อ daemon ไม่ได้" },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(onClick = { vm.refresh() }) { Text("ลองใหม่") }
+                                }
+                            }
                         }
                         Row(verticalAlignment = Alignment.Bottom) {
                             OutlinedTextField(
@@ -358,7 +431,12 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                         }
                     }
                 }
-                items(messages, key = { it.id }) { m -> Bubble(m) }
+                items(messages, key = { it.id }) { m ->
+                    Bubble(m, onCopy = {
+                        clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
+                        toast = "คัดลอกข้อความแล้ว"
+                    })
+                }
                 // The answer being streamed right now. It is not in the
                 // database yet; the stored row replaces it when the turn ends.
                 if (liveText.isNotBlank()) {
@@ -368,6 +446,95 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                     item(key = "live-steps") { ToolSteps(liveSteps) }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatModelSheet(
+    providers: List<com.tulipskun.aixodia.data.model.ProviderView>,
+    pickedProvider: String,
+    pickedModel: String,
+    onProvider: (String) -> Unit,
+    onModel: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val models = providers.firstOrNull { it.id == pickedProvider }?.models.orEmpty()
+    val filtered = remember(models, query) {
+        if (query.isBlank()) models else models.filter { it.id.contains(query, true) || it.name.contains(query, true) }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("โมเดลของแชทนี้", style = MaterialTheme.typography.titleMedium)
+            if (providers.isEmpty()) {
+                Text(
+                    "ยังไม่มี provider — เพิ่มหรือทดสอบ provider ในหน้าตั้งค่าก่อน",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    providers.forEach { p ->
+                        FilterChip(
+                            selected = p.id == pickedProvider,
+                            onClick = { onProvider(p.id) },
+                            label = { Text(p.id) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    label = { Text("ค้นหาโมเดล (${models.size})") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                LazyColumn(Modifier.heightIn(max = 300.dp)) {
+                    items(filtered) { m ->
+                        val selected = m.id == pickedModel
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(MaterialTheme.shapes.small)
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                )
+                                .clickable { onModel(m.id) }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                m.id,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (m.supportsStreaming) {
+                                Text(
+                                    "stream",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Button(
+                onClick = onSave,
+                enabled = pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("ใช้กับแชทนี้") }
         }
     }
 }
@@ -530,12 +697,14 @@ private fun ToolSteps(steps: List<com.tulipskun.aixodia.data.model.ToolStep>) {
 }
 
 @Composable
-private fun Bubble(m: ChatMessage) {
+private fun Bubble(m: ChatMessage, onCopy: () -> Unit = {}) {
     val mine = m.role == "user"
     val isTool = m.role == "tool_call" || m.role == "tool_result"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Card(
-            modifier = Modifier.widthIn(max = 360.dp),
+            modifier = Modifier
+                .widthIn(max = 360.dp)
+                .combinedClickable(onClick = {}, onLongClick = onCopy),
             shape = if (mine) userShape else if (isTool) MaterialTheme.shapes.medium else answerShape,
             colors = CardDefaults.cardColors(
                 containerColor = when {
