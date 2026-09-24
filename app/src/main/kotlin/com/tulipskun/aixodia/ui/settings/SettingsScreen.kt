@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Divider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,6 +41,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.tulipskun.aixodia.EndpointKind
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
@@ -203,8 +205,10 @@ fun SettingsScreen(
                 Divider(Modifier.padding(vertical = 4.dp))
                 NodeCard(history = history, workerText = resolved.worker, tokenText = token,
                     onUse = { wsUrl ->
-                        settings.saveConnection(wsUrl, resolved.worker, token)
-                        msg = "ใช้ URL ของ daemon แล้ว"
+                        scope.launch {
+                            settings.saveConnection(wsUrl, resolved.worker, token)
+                            msg = "ใช้ URL ของ daemon แล้ว"
+                        }
                     })
             }
             OutlinedButton(onClick = { showAdvanced = !showAdvanced }) {
