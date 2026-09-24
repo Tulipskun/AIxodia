@@ -90,3 +90,12 @@
   "บันทึก (ตรวจก่อน)" ที่ยิง `/api/sessions` ยืนยันคู่ Worker URL + token ก่อน
  บันทึก (ไม่ผ่าน = ไม่บันทึก พร้อมบอกว่า 401 หรือ 404). ยังไม่มี token อื่นเพิ่ม
  และไม่ฝังค่าใด ๆ ในแอป.
+
+- AXCH-010 (2026-09-24) — ตั้งค่าแอปเหลือ 2 ช่อง: **ที่อยู่ + D1 token** (ไม่มี account id,
+  ไม่มี provider/ค่าอื่น). ถ้าที่อยู่เป็น tunnel → ประวัติวิ่งผ่าน tunnel เดียวกัน
+  (daemon proxy `/api/sessions`, `/api/sessions/:id/turns`, `/api/node`, `/api/ping`
+  → Worker ด้วย header ที่แอปส่งมา; `/api/state` ไม่ถูก proxy จึงไม่มีทางอ่าน API keys
+  ผ่าน tunnel) และสดที่ `wss://<host>/ws`; ถ้าเป็น Worker URL → ประวัติตรง และค้นหา
+  tunnel ผ่าน `/api/node` ให้เอง. เก็บค่าขั้นสูง (แยก WS/Worker, session) ไว้ใต้ปุ่ม
+  "ตั้งค่าขั้นสูง" สำหรับกรณีพิเศษ. ทดสอบจริงบนมือถือ: ใส่ URL tunnel เดียว + token
+  แล้วต่อได้ และดึงประวัติจาก D1 จริงผ่าน tunnel (MAIN/SUB ครบ, ไม่ crash).

@@ -53,6 +53,15 @@ go test ./...    # background jobs, session isolation, auth, tunnel announce
 `TestJobContinuesAfterClientDisconnectAndIsReadableFromDB` is the requirement
 test: it disconnects mid-job and asserts main/sub turns are all in the DB.
 
+## One address for the phone (proxy parity with production)
+
+When `-worker-base` is set, the same tunnel also serves the small history REST
+surface the app needs (`/api/sessions`, `/api/sessions/:id/turns`, `/api/node`,
+`/api/ping`), forwarding each request to the Worker with the `Authorization`
+header the phone already sent. So the app is configured with **one address plus
+the D1 token** — no account id, no second URL. `/api/state` is never proxied, so
+provider keys stay unreachable through the tunnel.
+
 ## Use the real D1 with the mock agent
 
 The mock agent enforces the same handshake rule as production: the D1 token in
