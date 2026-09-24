@@ -263,55 +263,19 @@ class ChatRepository(
         }
     }
 
+    /**
+     * The local table is a mirror of D1, so a live frame must never become a row
+     * here: a streamed answer arrives as dozens of delta frames and would show
+     * up as dozens of bubbles, and the daemon's own mirror would then duplicate
+     * every one of them. Only the ack marker matters locally; the thread is
+     * rebuilt from D1 when the turn closes (AX-082).
+     */
     private suspend fun onFrame(f: AiOutput) {
-        when (f.kind) {
-            "ack" -> {
-                if (f.clientMsgId.isNotBlank()) db.messages().markAcked(f.clientMsgId)
-                return
-            }
-            "error" -> {
-                if (f.text.isNotBlank() && f.sessionId.isNotBlank()) {
-                    record(f, f.sessionId)
-                }
-                return
-            }
-            "done" -> return
+        if (f.kind == "ack" && f.clientMsgId.isNotBlank()) {
+            db.messages().markAcked(f.clientMsgId)
         }
-        val sid = f.sessionId.ifBlank { _active.value }
-        record(f, sid)
     }
 
-    private suspend fun record(f: AiOutput, sid: String) {
-        val text = f.text.ifEmpty { f.content.joinToString("") { it.text } }
-        val hasBody = text.isNotBlank() || f.toolCall != null
-        if (!hasBody) return
-        val seq = if (f.seq > 0) f.seq else db.messages().maxSeq(sid) + 1
-        db.messages().upsert(
-            MessageEntity(
-                sessionId = sid,
-                seq = seq,
-                role = f.role.ifBlank { "model" },
-                text = text,
-                createdAt = System.currentTimeMillis(),
-                clientMsgId = f.clientMsgId,
-                agent = f.agent,
-                jobId = f.jobId,
-                stage = f.stage,
-                toolName = f.toolCall?.name ?: "",
-                toolArgs = f.toolCall?.arguments ?: "",
-                tokensIn = f.inputTokens,
-                tokensOut = f.outputTokens,
-            )
-        )
-        val cur = db.sessions().get(sid)
-        db.sessions().upsert(
-            (cur ?: SessionEntity(id = sid, title = sid)).copy(
-                lastSnippet = text.take(120),
-                lastAt = System.currentTimeMillis(),
-            )
-        )
-        if (sid != _active.value) db.sessions().bumpUnread(sid)
-    }
 
     private fun com.tulipskun.aixodia.data.remote.TurnRow.toEntity(sid: String) = MessageEntity(
         sessionId = sid,
