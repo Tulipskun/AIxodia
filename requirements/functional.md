@@ -170,3 +170,15 @@
   answered for that provider, then `ใช้ได้` or `ใช้ไม่ได้` with the provider's
   own reason. A provider that has never been probed must not be shown as
   healthy, and changing its key pool puts it back to untested.
+
+## Task flow and recovery (AX-089)
+
+- AX-089 — The chat header names the model the chat actually uses (the route
+  stored for it), never a session id; tapping it opens the provider/model sheet,
+  pre-set to that stored route, and a chat with no route says it follows the
+  agent default instead of showing an invented choice. Losing the daemon is a
+  banner above the input with a retry, not grey text. A message can be copied
+  with a long press and confirmed. In settings, a key can be pasted from the
+  clipboard, the operator chooses *which* key to drop (keys are never sent
+  back, so position is the only honest handle), and one provider can be tested
+  on its own instead of waiting for the whole list.
