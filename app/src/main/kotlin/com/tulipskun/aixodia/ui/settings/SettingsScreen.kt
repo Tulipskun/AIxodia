@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import com.tulipskun.aixodia.data.model.AgentRoute
 import com.tulipskun.aixodia.data.model.AgentSettings
+import com.tulipskun.aixodia.data.model.ModelView
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import androidx.compose.ui.platform.LocalContext
 import com.tulipskun.aixodia.EndpointKind
@@ -91,7 +92,7 @@ fun SettingsScreen(
     var providers by remember { mutableStateOf<List<ProviderStatus>>(emptyList()) }
     var pickedProvider by remember { mutableStateOf("") }
     var pickedModel by remember { mutableStateOf("") }
-    var modelsByProvider by remember { mutableStateOf<Map<String, List<ProviderView>>>(emptyMap()) }
+    var modelsByProvider by remember { mutableStateOf<Map<String, List<ModelView>>>(emptyMap()) }
     var agentSettings by remember { mutableStateOf<AgentSettings?>(null) }
 
     Scaffold(
@@ -371,8 +372,8 @@ fun SettingsScreen(
 }
 
 /** The provider's default model, which is the first one the daemon found. */
-private fun defaultModelFor(id: String, catalogue: Map<String, List<ProviderView>>): String =
-    catalogue[id]?.firstOrNull()?.defaultModel.orEmpty()
+private fun defaultModelFor(id: String, catalogue: Map<String, List<ModelView>>): String =
+    catalogue[id]?.firstOrNull()?.id.orEmpty()
 
 @Composable
 private fun ProviderRow(
@@ -475,7 +476,7 @@ private fun AgentRoutePicker(
     model: String,
     onProvider: (String) -> Unit,
     onModel: (String) -> Unit,
-    models: Map<String, List<ProviderView>>,
+    models: Map<String, List<ModelView>>,
 ) {
     Text(label, style = MaterialTheme.typography.labelLarge)
     Row {
