@@ -303,6 +303,7 @@ fun SettingsScreen(
                 providers.forEach { p ->
                     ProviderCard(
                         p,
+                        tested = p.id in probedIds,
                         onAddKey = { key ->
                             scope.launch {
                                 msg = history.changeKeys(p.id, add = listOf(key))
@@ -557,6 +558,7 @@ private fun PickerRow(label: String, value: String, hint: String = "", onPick: (
 @Composable
 private fun ProviderCard(
     provider: ProviderStatus,
+    tested: Boolean,
     onAddKey: (String) -> Unit,
     onReplaceKeys: () -> Unit,
     onRemoveLast: () -> Unit,
@@ -571,7 +573,7 @@ private fun ProviderCard(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(provider.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                StatusPill(provider, provider.id in probedIds)
+                StatusPill(provider, tested)
             }
             Text(
                 "${provider.adapter} · key ${provider.keyCount} · model ${provider.modelCount}",
