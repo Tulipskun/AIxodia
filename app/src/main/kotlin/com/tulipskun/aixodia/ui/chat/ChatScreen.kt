@@ -79,10 +79,9 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryApi, socket: AiDirectSocket) {
-    val dbUrl by settings.workerUrlFlow.collectAsState(initial = "")
+    val endpoint by settings.endpointFlow.collectAsState(initial = "")
     val token by settings.tokenFlow.collectAsState(initial = "")
-    val wsUrl by settings.wsUrlFlow.collectAsState(initial = "")
-    val configured = dbUrl.isNotBlank() && token.isNotBlank() && wsUrl.isNotBlank()
+    val configured = endpoint.isNotBlank() && token.isNotBlank()
     val sessId by settings.sessionFlow.collectAsState(initial = "")
     var showSettings by remember { mutableStateOf(false) }
 
@@ -94,7 +93,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     // Unconfigured installs stop here — before the ViewModel exists — so a
     // first launch cannot reach the network layer and crash.
     if (!configured) {
-        SetupNeeded(dbUrl = dbUrl, onOpen = { showSettings = true })
+        SetupNeeded(endpoint = endpoint, onOpen = { showSettings = true })
         return
     }
 
@@ -228,19 +227,19 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
 }
 
 @Composable
-private fun SetupNeeded(dbUrl: String, onOpen: () -> Unit) {
+private fun SetupNeeded(endpoint: String, onOpen: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("ยังไม่ได้ตั้งค่าการเชื่อมต่อ", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "AIxodia ไม่มีค่าเชื่อมต่อติดมากับตัวแอป — ต้องใส่ตอนรันบนเครื่องคุณเท่านั้น " +
-                "(ค่าเหล่านี้อยู่ใน runtime config ของเครื่อง ไม่ถูก commit ลง git)",
+            "ใส่แค่ 2 อย่างที่หน้าตั้งค่า: URL ของ tunnel หรือ Worker และ D1 token\n" +
+                "(ไม่ต้องใส่ account id — ไม่มีค่าใดฝังในแอป)",
             style = MaterialTheme.typography.bodyMedium,
         )
-        if (dbUrl.isNotBlank()) {
-            Text("DB/Worker URL: $dbUrl", style = MaterialTheme.typography.bodySmall)
+        if (endpoint.isNotBlank()) {
+            Text("ที่อยู่: $endpoint", style = MaterialTheme.typography.bodySmall)
         }
         Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("เปิดหน้าตั้งค่า") }
     }

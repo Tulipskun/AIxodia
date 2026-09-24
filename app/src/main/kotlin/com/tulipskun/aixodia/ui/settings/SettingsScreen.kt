@@ -13,6 +13,10 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import com.tulipskun.aixodia.BuildConfig
+import com.tulipskun.aixodia.update.UpdateManager
+import kotlinx.coroutines.flow.first
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +40,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.tulipskun.aixodia.EndpointKind
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -57,12 +62,15 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val curEndpoint by settings.endpointFlow.collectAsState(initial = "")
     val curWs by settings.wsUrlFlow.collectAsState(initial = "")
     val curWorker by settings.workerUrlFlow.collectAsState(initial = "")
     val curToken by settings.tokenFlow.collectAsState(initial = "")
     val curSession by settings.sessionFlow.collectAsState(initial = "default")
     val conn by socket.state.collectAsState(initial = ConnState.OFFLINE)
 
+    var address by remember(curEndpoint) { mutableStateOf(curEndpoint) }
+    var showAdvanced by remember { mutableStateOf(false) }
     var ws by remember(curWs) { mutableStateOf(curWs) }
     var worker by remember(curWorker) { mutableStateOf(curWorker) }
     var token by remember(curToken) { mutableStateOf(curToken) }
@@ -88,34 +96,37 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Card {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("ทดสอบก่อนได้เลย (mock)", style = MaterialTheme.typography.titleSmall)
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("ใส่แค่ 2 อย่าง", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "บนเครื่องคอม: go run ./mock/cmd/mockai แล้วใช้ค่าด้านล่าง\n" +
-                            "• emulator: ws://10.0.2.2:39118/ws + http://10.0.2.2:39117\n" +
-                            "• มือถือจริง: เปลี่ยน 10.0.2.2 เป็น IP LAN ของเครื่องนั้น",
+                        "1) ที่อยู่: URL ของ tunnel (https://<ชื่อ>.trycloudflare.com) " +
+                            "หรือ URL ของ Worker (https://<ชื่อ>.<คุณ>.workers.dev)\n" +
+                            "2) D1 token\n" +
+                            "ไม่ต้องใส่ account id, provider หรือค่าอื่น — ระบบเดา URL ที่ต้องใช้ให้เอง",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
-            Text("ai daemon (รับสดผ่าน WebSocket โดยตรง)", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(
-                value = ws, onValueChange = { ws = it }, label = { Text("WS URL") },
-                placeholder = { Text("ws://192.168.1.50:18789/ws") },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
-            )
-            Text("Cloudflare Worker (ประวัติเก่าจาก D1)", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(
-                value = worker, onValueChange = { worker = it }, label = { Text("Worker URL") },
-                placeholder = { Text("https://aixodia.<you>.workers.dev") },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                value = address,
+                onValueChange = { address = it },
+                label = { Text("ที่อยู่ (tunnel หรือ Worker)") },
+                placeholder = { Text("https://xxxx.trycloudflare.com") },
+                supportingText = {
+                    val r = SettingsStore.resolve(address)
+                    when (r.kind) {
+                        EndpointKind.TUNNEL -> Text("tunnel → ประวัติผ่าน ${r.worker}/api • สดที่ ${r.ws}")
+                        EndpointKind.WORKER -> Text("Worker → ประวัติตรง • สดจะค้นหาอัตโนมัติจาก /api/node")
+                        EndpointKind.NONE -> Text("ยังไม่ได้ใส่")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
             )
             OutlinedTextField(
                 value = token, onValueChange = { token = it },
-                label = { Text("D1 token (ใช้ทั้งเข้า DB และยืนยันตัวตนกับ daemon)") },
-                supportingText = {
-                    Text("token ชุดเดียวของระบบ • ส่งเป็น header ตอนเชื่อมต่อ ไม่ฝังในแอป")
-                },
+                label = { Text("D1 token") },
+                supportingText = { Text("token ชุดเดียวของระบบ • ส่งเป็น header ไม่ฝังในแอป") },
                 modifier = Modifier.fillMaxWidth(), singleLine = true,
                 visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
@@ -124,9 +135,7 @@ fun SettingsScreen(
                         IconButton(
                             onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
                             enabled = !showToken,
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "วางจากคลิปบอร์ด")
-                        }
+                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "วางจากคลิปบอร์ด") }
                         IconButton(onClick = { showToken = !showToken }) {
                             Icon(
                                 if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
@@ -136,31 +145,36 @@ fun SettingsScreen(
                     }
                 },
             )
-            OutlinedTextField(
-                value = session, onValueChange = { session = it }, label = { Text("Session ID") },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
-            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        busy = true; msg = "กำลังตรวจค่า…"
+                        busy = true; msg = "กำลังตรวจ…"
                         scope.launch {
-                            val workerOk = if (worker.isBlank() && curWorker.isNotBlank()) {
-                                runCatching { history.ping("", token) }.isSuccess
-                            } else {
-                                runCatching { history.ping(worker, token) }.fold(
-                                    onSuccess = { true },
-                                    onFailure = { false },
-                                )
+                            val r = SettingsStore.resolve(address)
+                            val kindLabel = when (r.kind) {
+                                EndpointKind.TUNNEL -> "tunnel"
+                                EndpointKind.WORKER -> "Worker"
+                                EndpointKind.NONE -> ""
                             }
-                            if (!workerOk) {
-                                msg = "Worker/token ไม่ผ่าน — ยังไม่บันทึก (401 = token ผิด, 404 = ยังไม่ deploy)"
+                            if (r.kind == EndpointKind.NONE) {
+                                msg = "ใส่ URL ที่ขึ้นต้นด้วย https:// ก่อน"
                                 busy = false
                                 return@launch
                             }
-                            settings.saveConnection(ws, worker, token)
-                            settings.saveSession(session)
-                            msg = "บันทึกแล้ว — daemon จะใช้ค่านี้ยืนยันตัวตนและดึง state จาก D1"
+                            // A Worker URL is checked directly; a tunnel URL is
+                            // checked through the proxy the daemon exposes.
+                            val ok = runCatching { history.ping(r.worker, token) }.isSuccess
+                            if (!ok) {
+                                msg = "$kindLabel/token ไม่ผ่าน (401 = token ผิด) — ยังไม่บันทึก"
+                                busy = false
+                                return@launch
+                            }
+                            settings.saveEndpoint(address, token, session)
+                            msg = if (r.kind == EndpointKind.TUNNEL) {
+                                "บันทึกแล้ว — ใช้ tunnel นี้ทั้งประวัติและสด"
+                            } else {
+                                "บันทึกแล้ว — จะค้นหา URL ของ daemon ให้อัตโนมัติ"
+                            }
                             busy = false
                         }
                     },
@@ -168,40 +182,67 @@ fun SettingsScreen(
                 ) { Text("บันทึก (ตรวจก่อน)") }
                 OutlinedButton(
                     onClick = {
-                        busy = true; msg = "กำลังทดสอบ Worker…"
+                        busy = true; msg = "กำลังทดสอบ…"
                         scope.launch {
-                            try {
-                                val n = history.ping(worker.ifBlank { curWorker }, token)
-                                msg = "Worker OK — เจอ $n sessions ใน D1"
+                            val r = SettingsStore.resolve(address)
+                            msg = try {
+                                val n = history.ping(r.worker, token)
+                                "สำเร็จ — เจอ $n เซสชัน"
                             } catch (e: Exception) {
-                                msg = "Worker ไม่ผ่าน: ${e.message} — รัน worker/setup.sh หรือยัง?"
-                            } finally { busy = false }
+                                "ไม่ผ่าน: ${e.message}"
+                            }
+                            busy = false
+                        }
+                    },
+                    enabled = !busy && address.isNotBlank(),
+                ) { Text("ทดสอบ") }
+            }
+            if (msg.isNotEmpty()) Text(msg, style = MaterialTheme.typography.bodyMedium)
+            val resolved = SettingsStore.resolve(address)
+            if (resolved.kind == EndpointKind.WORKER) {
+                Divider(Modifier.padding(vertical = 4.dp))
+                NodeCard(history = history, workerText = resolved.worker, tokenText = token,
+                    onUse = { wsUrl ->
+                        settings.saveConnection(wsUrl, resolved.worker, token)
+                        msg = "ใช้ URL ของ daemon แล้ว"
+                    })
+            }
+            OutlinedButton(onClick = { showAdvanced = !showAdvanced }) {
+                Text(if (showAdvanced) "ซ่อนตั้งค่าขั้นสูง" else "ตั้งค่าขั้นสูง (แยก URL)")
+            }
+            if (showAdvanced) {
+                OutlinedTextField(
+                    value = session, onValueChange = { session = it }, label = { Text("Session ID") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                )
+                OutlinedTextField(
+                    value = ws, onValueChange = { ws = it }, label = { Text("WS URL (ควบคุมเอง)") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                )
+                OutlinedTextField(
+                    value = worker, onValueChange = { worker = it }, label = { Text("Worker URL (ควบคุมเอง)") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            settings.saveConnection(ws, worker, token)
+                            settings.saveSession(session)
+                            msg = "บันทึกค่าขั้นสูงแล้ว"
                         }
                     },
                     enabled = !busy,
-                ) { Text("ทดสอบ Worker") }
+                ) { Text("บันทึกค่าขั้นสูง") }
             }
-            if (msg.isNotEmpty()) Text(msg, style = MaterialTheme.typography.bodyMedium)
-            NodeCard(history = history, workerText = worker, tokenText = token,
-                onUse = { wsUrl ->
-                    ws = wsUrl
-                    scope.launch {
-                        settings.saveConnection(wsUrl, worker.ifBlank { curWorker }, token)
-                        msg = "ใช้ tunnel URL แล้ว — กลับไปแชตได้เลย"
-                    }
-                })
+            Divider(Modifier.padding(vertical = 4.dp))
+            UpdateRow(settings)
             Text(
                 "สถานะ WebSocket: " + when (conn) {
-                    ConnState.ONLINE -> "● online ($curWs)"
-                    ConnState.CONNECTING -> "● connecting…"
-                    ConnState.OFFLINE -> "● offline — ตรวจ WS URL ว่าถึง daemon ใน LAN หรือใช้ Worker /ws"
+                    ConnState.ONLINE -> "● ออนไลน์ ($curWs)"
+                    ConnState.CONNECTING -> "● กำลังต่อ…"
+                    ConnState.OFFLINE -> "● ออฟไลน์ — ยังไม่ตั้งค่า หรือ daemon ไม่ออนไลน์"
                 },
                 style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "มือถือเข้า 127.0.0.1 ของตัวเอง ไม่ใช่ของ server — ต้องใส่ IP LAN ของเครื่องที่รัน ai (เช่น ws://192.168.1.50:18789/ws)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
             )
         }
     }
@@ -250,5 +291,39 @@ private fun NodeCard(
         }
         if (err.isNotEmpty()) Text(err, style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error)
+    }
+}
+
+@Composable
+private fun UpdateRow(settings: SettingsStore) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
+    var busy by remember { mutableStateOf(false) }
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
+        FilledTonalButton(
+            onClick = {
+                busy = true; msg = "กำลังตรวจ…"
+                scope.launch {
+                    try {
+                        val token = settings.tokenFlow.first()
+                        val up = UpdateManager.check(token)
+                        if (up == null) {
+                            msg = "ล่าสุดแล้ว (v" + BuildConfig.VERSION_NAME + ")"
+                            return@launch
+                        }
+                        msg = "พบ ${up.tag} กำลังโหลด…"
+                        val apk = UpdateManager.download(ctx, up, token) { p -> msg = "โหลด $p% (${up.tag})" }
+                        msg = "พร้อมติดตั้ง ${up.tag}"
+                        UpdateManager.install(ctx, apk)
+                    } catch (e: Exception) {
+                        msg = "อัปเดตล้มเหลว: ${e.message}"
+                    } finally { busy = false }
+                }
+            },
+            enabled = !busy,
+        ) { Text("ตรวจอัปเดต") }
+        Text("ติดตั้งทับตัวเดิม ข้อมูลแชตไม่หาย", style = MaterialTheme.typography.labelSmall)
     }
 }
