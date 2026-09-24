@@ -241,13 +241,13 @@ class HistoryApi(private val settings: SettingsStore) {
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
-        val body = buildString {
-            append("{")
-            if (add.isNotEmpty()) append(""""add":["${add.joinToString(",")}"],""")
-            if (remove.isNotEmpty()) append(""""remove":[${remove.joinToString(",")}],""")
-            if (replace.isNotEmpty()) append(""""replace":["${replace.joinToString(",")}"],""")
-            append("}")
-        }
+        // Build the object field by field: a trailing comma would make the
+        // daemon reject the whole request with 400.
+        val parts = mutableListOf<String>()
+        if (add.isNotEmpty()) parts += """"add":["${add.joinToString(",")}"]""""
+        if (remove.isNotEmpty()) parts += """"remove":[${remove.joinToString(",")}]""""
+        if (replace.isNotEmpty()) parts += """"replace":["${replace.joinToString(",")}"]""""
+        val body = parts.joinToString(",", prefix = "{", postfix = "}")
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId/keys")
                 .header("Authorization", "Bearer ${c.token}")
