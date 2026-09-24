@@ -239,7 +239,7 @@ fun SettingsScreen(
                         scope.launch {
                             providers = runCatching { history.providers() }.getOrDefault(emptyList())
                             val catalogue = runCatching { history.models() }.getOrDefault(emptyList())
-                            modelsByProvider = catalogue.associate { it.id to it }
+                            modelsByProvider = catalogue.associate { it.id to it.models }
                             agentSettings = history.agentSettings()
                             val current = agentSettings?.main
                             if (current != null && current.provider.isNotBlank()) {
