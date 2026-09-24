@@ -1,6 +1,6 @@
-package com.tulipskun.aixodia.ui.chat
-
 @file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
+package com.tulipskun.aixodia.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
