@@ -1,5 +1,18 @@
 # worker/ — Cloudflare Worker + D1 (production history store)
 
+The Worker is Kotlin: `src/main/kotlin/aixodia/Worker.kt` compiles to an ES
+module with Gradle (`./gradlew buildWorker`) and `build/worker/index.mjs` is the
+entry wrangler loads. There is no TypeScript in this project any more — the app
+is the product, so the whole repo is Kotlin.
+
+## Build
+
+```bash
+cd worker
+gradle buildWorker          # writes build/worker/index.mjs
+npx wrangler deploy         # needs CLOUDFLARE_API_TOKEN in the shell
+```
+
 The phone never talks to D1 directly. This Worker is the HTTPS/WSS front:
 `GET/POST /api/sessions`, `GET/POST /api/sessions/:id/turns`,
 `POST /api/node/heartbeat` + `GET /api/node` (quick-tunnel discovery),
@@ -60,4 +73,4 @@ npx wrangler deploy
 
 `mock/mockdb` implements the same endpoints in Go, so the app can be tested
 without any of the above. Keep the two in sync: schema + contract changes land
-in `worker/schema.sql`, `worker/src/index.ts`, and `mock/mockdb/db.go`.
+in `worker/schema.sql`, `worker/src/main/kotlin/aixodia/Worker.kt`, and `mock/mockdb/db.go`.

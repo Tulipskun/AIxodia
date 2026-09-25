@@ -16,4 +16,6 @@ mock/*.json
 # runtime config + secrets (never commit)
 worker/.dev.vars
 worker/.wrangler/
+worker/build/
+worker/.gradle/
 config/aixodia.json

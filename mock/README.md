@@ -5,7 +5,7 @@ Production history lives in Cloudflare D1 behind `worker/` (see
 without touching Cloudflare; it speaks the same REST + WebSocket contract, so
 switching is a settings change in the app (DB URL + token), never a rebuild.
 
-`mockai` = mock DB (REST, same contract as `worker/src/index.ts`) + mock ai
+`mockai` = mock DB (REST, same contract as the Kotlin Worker (`worker/src/main/kotlin/aixodia/Worker.kt`)) + mock ai
 daemon (WebSocket + background jobs). The app talks to it exactly like the
 real thing, so the phone can be tested for real today.
 
