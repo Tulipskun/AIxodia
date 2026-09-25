@@ -2,6 +2,8 @@ package com.tulipskun.aixodia.data.remote
 
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
+import org.json.JSONArray
+import org.json.JSONObject
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
@@ -172,7 +174,7 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun setSessionModel(sessionId: String, provider: String, model: String): Boolean = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.workerUrl) ?: return@withContext false
-        val body = """{"provider":"$provider","model":"$model"}"""
+        val body = JSONObject().put("provider", provider).put("model", model).toString()
         runCatching {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")
@@ -249,11 +251,13 @@ class HistoryApi(private val settings: SettingsStore) {
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
-        val body = buildString {
-            append("""{"id":"$id","adapter":"$adapter","endpoint":"$endpoint","free_only":$freeOnly,"keys":[""")
-            append(keys.joinToString(",") { "\"$it\"" })
-            append("]}")
-        }
+        val body = JSONObject()
+            .put("id", id)
+            .put("adapter", adapter)
+            .put("endpoint", endpoint)
+            .put("free_only", freeOnly)
+            .put("keys", JSONArray(keys))
+            .toString()
         runCatching {
             val req = Request.Builder().url("$base/api/providers")
                 .header("Authorization", "Bearer ${c.token}")
@@ -272,13 +276,13 @@ class HistoryApi(private val settings: SettingsStore) {
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
-        // Build the object field by field: a trailing comma would make the
-        // daemon reject the whole request with 400.
-        val parts = mutableListOf<String>()
-        if (add.isNotEmpty()) parts += """"add":["${add.joinToString(",")}"]""""
-        if (remove.isNotEmpty()) parts += """"remove":[${remove.joinToString(",")}]""""
-        if (replace.isNotEmpty()) parts += """"replace":["${replace.joinToString(",")}"]""""
-        val body = parts.joinToString(",", prefix = "{", postfix = "}")
+        // Written by a JSON writer, never by string interpolation: a key with a
+        // quote, a backslash or a newline must not corrupt the request.
+        val body = JSONObject().apply {
+            if (add.isNotEmpty()) put("add", JSONArray(add))
+            if (remove.isNotEmpty()) put("remove", JSONArray(remove))
+            if (replace.isNotEmpty()) put("replace", JSONArray(replace))
+        }.toString()
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId/keys")
                 .header("Authorization", "Bearer ${c.token}")
@@ -307,7 +311,11 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun saveAgentSettings(settingsBody: AgentSettings): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
-        val body = """{"main":{"provider":"${settingsBody.main.provider}","model":"${settingsBody.main.model}"},"sub":{"provider":"${settingsBody.sub.provider}","model":"${settingsBody.sub.model}"},"sub_enabled":${settingsBody.subEnabled}}"""
+        val body = JSONObject()
+            .put("main", JSONObject().put("provider", settingsBody.main.provider).put("model", settingsBody.main.model))
+            .put("sub", JSONObject().put("provider", settingsBody.sub.provider).put("model", settingsBody.sub.model))
+            .put("sub_enabled", settingsBody.subEnabled)
+            .toString()
         runCatching {
             val req = Request.Builder().url("$base/api/settings")
                 .header("Authorization", "Bearer ${c.token}")
