@@ -164,7 +164,8 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
             val limit = (url.searchParams.get("limit")?.toString()?.toDoubleOrNull() ?: 50.0).coerceAtMost(200.0)
             val result = all(
                 db,
-                "SELECT seq, role, agent, job_id, text, created_at FROM turns " +
+                "SELECT seq, role, agent, job_id, text, created_at, " +
+                    "model, input_tokens, output_tokens, duration_ms FROM turns " +
                     "WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
                 sid,
                 before.toLong(),
@@ -190,13 +191,18 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
             val seq: Long = next
             run(
                 db,
-                "INSERT INTO turns(session_id, seq, role, agent, job_id, text) VALUES(?,?,?,?,?,?)",
+                "INSERT INTO turns(session_id, seq, role, agent, job_id, text, " +
+                    "model, input_tokens, output_tokens, duration_ms) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 sid,
                 seq,
                 role,
                 payload.agent?.toString() ?: "",
                 payload.job_id?.toString() ?: "",
                 payload.text?.toString() ?: "",
+                payload.model?.toString() ?: "",
+                number(payload.input_tokens).toLong(),
+                number(payload.output_tokens).toLong(),
+                number(payload.duration_ms).toLong(),
             )
             run(db, "UPDATE sessions SET updated_at = unixepoch() WHERE id = ?", sid)
             return json(obj("seq" to seq))

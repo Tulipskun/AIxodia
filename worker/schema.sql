@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS turns (
   job_id TEXT NOT NULL DEFAULT '',  -- groups the steps of one turn
   text TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  -- Footer of an answered turn (AX-095): which model replied, what it cost and
+  -- how long it took, so the app can draw it under that message.
+  model TEXT NOT NULL DEFAULT '',
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
   UNIQUE(session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_turns_session_seq ON turns(session_id, seq);

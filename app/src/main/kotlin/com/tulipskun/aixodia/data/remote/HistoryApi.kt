@@ -33,6 +33,10 @@ data class TurnRow(
     @Json(name = "job_id") val jobId: String = "",
     @Json(name = "text") val text: String = "",
     @Json(name = "created_at") val createdAt: Long = 0,
+    @Json(name = "model") val model: String = "",
+    @Json(name = "input_tokens") val inputTokens: Int = 0,
+    @Json(name = "output_tokens") val outputTokens: Int = 0,
+    @Json(name = "duration_ms") val durationMs: Long = 0,
 )
 
 @JsonClass(generateAdapter = true)

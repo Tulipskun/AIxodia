@@ -39,6 +39,8 @@ data class MessageEntity(
     val toolArgs: String = "",
     val tokensIn: Int = 0,
     val tokensOut: Int = 0,
+    val model: String = "",
+    val durationMs: Long = 0,
 )
 
 @Dao
@@ -98,7 +100,7 @@ interface MessageDao {
     suspend fun deleteSession(sid: String)
 }
 
-@Database(entities = [SessionEntity::class, MessageEntity::class], version = 2, exportSchema = false)
+@Database(entities = [SessionEntity::class, MessageEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessions(): SessionDao
     abstract fun messages(): MessageDao
@@ -119,10 +121,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v3 adds the per-message footer, so a reopened chat still shows which
+        // model answered and what it cost (AX-095).
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN model TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE messages ADD COLUMN durationMs INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 .also { inst = it }
         }

@@ -89,6 +89,8 @@ class ChatRepository(
                 toolArgs = it.toolArgs,
                 tokensIn = it.tokensIn,
                 tokensOut = it.tokensOut,
+                model = it.model,
+                durationMs = it.durationMs,
             )
         }
     }
@@ -298,6 +300,12 @@ class ChatRepository(
         createdAt = if (createdAt > 0) createdAt * 1000 else System.currentTimeMillis(),
         agent = agent,
         jobId = jobId,
+        // The footer travels with the turn, so a chat reopened tomorrow still
+        // shows which model answered and what it cost (AX-095).
+        tokensIn = inputTokens,
+        tokensOut = outputTokens,
+        model = model,
+        durationMs = durationMs,
     )
 
     fun close() = socket.close()

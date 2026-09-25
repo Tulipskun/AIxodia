@@ -107,6 +107,10 @@ data class AiOutput(
     @Json(name = "usage") val usage: Usage? = null,
     @Json(name = "input_tokens") val inputTokens: Int = 0,
     @Json(name = "output_tokens") val outputTokens: Int = 0,
+    // Footer of this one message (AX-095): the model that produced it and how
+    // long it took, straight off the terminal trace.
+    @Json(name = "model") val model: String = "",
+    @Json(name = "duration_ms") val durationMs: Long = 0,
 )
 
 // Canonical outbound frame (ai Input).
@@ -144,6 +148,8 @@ data class ChatMessage(
     val toolArgs: String = "",
     val tokensIn: Int = 0,
     val tokensOut: Int = 0,
+    val model: String = "",
+    val durationMs: Long = 0,
 )
 
 data class ChatSession(

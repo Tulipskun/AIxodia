@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -44,9 +45,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.Button
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -421,7 +420,6 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                                 onStop = { vm.stopSubAgent(it) },
                             )
                         }
-                        TurnFooter(stats = stats, model = routeLabel, nowMs = nowMs)
                         Row(verticalAlignment = Alignment.Bottom) {
                             OutlinedTextField(
                                 value = draft,
@@ -487,7 +485,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                     }
                 }
                 items(messages, key = { it.id }) { m ->
-                    Bubble(m, onCopy = {
+                    MessageBlock(m, onCopy = {
                         clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
                         toast = "คัดลอกข้อความแล้ว"
                     })
@@ -495,7 +493,9 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 // The answer being streamed right now. It is not in the
                 // database yet; the stored row replaces it when the turn ends.
                 if (liveText.isNotBlank()) {
-                    item(key = "live-answer") { LiveBubble(liveText) }
+                    item(key = "live-answer") {
+                        LiveAnswer(liveText, stats, routeLabel, nowMs)
+                    }
                 }
                 if (liveSteps.isNotEmpty()) {
                     item(key = "live-steps") { ToolSteps(liveSteps) }
@@ -530,7 +530,12 @@ private fun ChatModelSheet(
     }
     ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("โมเดลของแชทนี้", style = MaterialTheme.typography.titleMedium)
@@ -575,7 +580,10 @@ private fun ChatModelSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                LazyColumn(Modifier.heightIn(max = 300.dp)) {
+                // The list takes what is left of the sheet, so every model is
+                // reachable above the navigation bar instead of the first one
+                // hiding under it.
+                LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth()) {
                     items(filtered) { m ->
                         val selected = m.id == pickedModel
                         Row(
@@ -776,9 +784,15 @@ private fun SubAgentPanel(
  * numbers are an estimate and say so; when the provider reports its usage they
  * become the real ones.
  */
+/**
+ * The numbers under the answer being streamed. While the answer is still
+ * coming the counts are an estimate and say so with ≈; the provider's own counts
+ * replace them on the closing frame, and the stored message that follows keeps
+ * them (AX-095).
+ */
 @Composable
-private fun TurnFooter(stats: TurnStats, model: String, nowMs: Long) {
-    if (stats.startedAtMs == 0L) return
+private fun TurnStatsLine(stats: TurnStats, model: String, nowMs: Long, live: Boolean) {
+    if (stats.startedAtMs == 0L && model.isBlank()) return
     val elapsed = seconds(stats.elapsedMs(nowMs))
     val tokens = stats.outputTokensNow()
     val rate = stats.tokensPerSecond(nowMs)
@@ -791,12 +805,12 @@ private fun TurnFooter(stats: TurnStats, model: String, nowMs: Long) {
             if (stats.inputTokens > 0) append(" (↑").append(stats.inputTokens).append(")")
             append(" · ").append(elapsed)
             if (rate > 0.0) append(" · ").append(mark).append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
-            if (stats.running) append(" · กำลังทำงาน")
+            if (live && stats.running) append(" · กำลังทำงาน")
         },
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
     )
 }
 
@@ -817,7 +831,7 @@ private fun ConnDot(c: ConnState) {
 }
 
 @Composable
-private fun LiveBubble(text: String) {
+private fun LiveAnswer(text: String, stats: TurnStats, routeLabel: String, nowMs: Long) {
     // A slow pulse on the "กำลังตอบ" line: motion that says the answer is
     // still coming, and stops the moment it has.
     val pulse by rememberInfiniteTransition(label = "live-answer").animateFloat(
@@ -829,116 +843,148 @@ private fun LiveBubble(text: String) {
         ),
         label = "live-answer-alpha",
     )
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-        Card(
-            modifier = Modifier.widthIn(max = 360.dp),
-            shape = answerShape,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AgentBadge(ChatMessage(id = "live", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = "main"))
-                    Text(
-                        "กำลังตอบ",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulse),
-                    )
-                }
-                Text(text, style = MaterialTheme.typography.bodyMedium)
-            }
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AgentBadge(ChatMessage(id = "live", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = "main"))
+            Text(
+                "กำลังตอบ",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulse),
+            )
         }
+        MarkdownText(
+            text = text,
+            modifier = Modifier.padding(top = 2.dp),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f),
+        )
+        TurnStatsLine(stats = stats, model = routeLabel, nowMs = nowMs, live = true)
     }
 }
 
 /** The tool calls of the running turn, one line each, in the order they ran. */
 @Composable
 private fun ToolSteps(steps: List<com.tulipskun.aixodia.data.model.ToolStep>) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-    ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            "เครื่องมือ ${steps.size}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        steps.forEach { step ->
+            val tint = if (!step.done) {
+                MaterialTheme.colorScheme.tertiary
+            } else if (step.isError) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
             Text(
-                "เครื่องมือ ${steps.size}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = buildString {
+                    append("● ")
+                    append(step.name)
+                    if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
+                    append(when {
+                        !step.done -> "…"
+                        step.isError -> " — ล้มเหลว"
+                        else -> " — เสร็จแล้ว"
+                    })
+                },
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = tint,
             )
-            steps.forEach { step ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val (dot, tint) = if (!step.done) {
-                        "●" to MaterialTheme.colorScheme.tertiary
-                    } else if (step.isError) {
-                        "●" to MaterialTheme.colorScheme.error
-                    } else {
-                        "●" to MaterialTheme.colorScheme.primary
-                    }
-                    Text(dot, style = MaterialTheme.typography.labelSmall, color = tint)
+        }
+    }
+}
+
+/**
+ * One message in the thread. The thread is the document: messages run the full
+ * width of the screen with no bubble around them, the model's answer is drawn
+ * as Markdown, and only the agent that spoke and the clock stay small enough to
+ * stay out of the way.
+ */
+@Composable
+private fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
+    val mine = m.role == "user"
+    val isTool = m.role == "tool_call" || m.role == "tool_result"
+    val body = m.text.ifBlank { m.toolArgs }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = {}, onLongClick = onCopy)
+            .padding(vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (m.agent.isNotBlank() || isTool) {
+                AgentBadge(m)
+                if (m.toolName.isNotBlank()) {
                     Text(
-                        text = buildString {
-                            append("  ")
-                            append(step.name)
-                            if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
-                            if (!step.done) append("…") else if (step.isError) append(" — ล้มเหลว") else append(" — เสร็จแล้ว")
-                        },
+                        m.toolName,
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
+            Text(
+                text = buildString {
+                    if (m.pending) append("กำลังส่ง… · ")
+                    append(clock(m.createdAt))
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = if (m.agent.isNotBlank() || isTool) 4.dp else 0.dp),
+            )
+        }
+        if (isTool) {
+            Text(
+                body,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            )
+        } else {
+            MarkdownText(
+                text = body,
+                color = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        if (!mine && !isTool) {
+            MessageFooter(m)
         }
     }
 }
 
+/**
+ * The footer of one answer: which model replied, what it cost, how long it took
+ * and how fast it wrote (AX-095). Nothing is shown for a message that never
+ * carried counts, rather than zeros pretending to be a measurement.
+ */
 @Composable
-private fun Bubble(m: ChatMessage, onCopy: () -> Unit = {}) {
-    val mine = m.role == "user"
-    val isTool = m.role == "tool_call" || m.role == "tool_result"
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
-        Card(
-            modifier = Modifier
-                .widthIn(max = 360.dp)
-                .combinedClickable(onClick = {}, onLongClick = onCopy),
-            shape = if (mine) userShape else if (isTool) MaterialTheme.shapes.medium else answerShape,
-            colors = CardDefaults.cardColors(
-                containerColor = when {
-                    mine -> MaterialTheme.colorScheme.primaryContainer
-                    isTool -> MaterialTheme.colorScheme.surfaceContainerHigh
-                    else -> MaterialTheme.colorScheme.secondaryContainer
-                }
-            ),
-        ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                if (m.agent.isNotBlank() || isTool) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AgentBadge(m)
-                        if (m.toolName.isNotBlank()) {
-                            Text(
-                                m.toolName,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                Text(
-                    m.text.ifBlank { m.toolArgs },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    buildString {
-                        if (m.pending) append("กำลังส่ง…")
-                        append(clock(m.createdAt))
-                        if (m.tokensOut > 0) append(" • ${m.tokensIn}↓ ${m.tokensOut}↑")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+private fun MessageFooter(m: ChatMessage) {
+    val line = buildString {
+        if (m.model.isNotBlank()) append(m.model).append(" · ")
+        if (m.tokensOut > 0 || m.tokensIn > 0) {
+            append(m.tokensOut).append(" token")
+            if (m.tokensIn > 0) append(" (↑").append(m.tokensIn).append(")")
+        }
+        if (m.durationMs > 0L) {
+            if (isNotEmpty()) append(" · ")
+            append(seconds(m.durationMs))
+            val rate = if (m.durationMs > 0) m.tokensOut * 1000.0 / m.durationMs else 0.0
+            if (m.tokensOut > 0 && rate > 0.0) {
+                append(" · ").append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
             }
         }
     }
+    if (line.isBlank()) return
+    Text(
+        line,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    )
 }
 
 @Composable

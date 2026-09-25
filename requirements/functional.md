@@ -222,3 +222,20 @@
   running; the turn's own stop button keeps stopping everything. A row changes
   state only when the daemon says so: `subagent_stopping`, then the worker's own
   final report, or `subagent_not_found` when the job had already ended.
+
+## The thread is the document (AX-095, AX-096)
+
+- AX-095 — Every answer carries its own footer, not the turn. A model message is
+  drawn with the model that produced it, the tokens it used (`out` and, when the
+  provider reported it, `↑in`), how long it took and how fast it wrote. The
+  numbers come from the closing frame of that message — the model and the
+  duration the daemon measured from the request it sent to the event it
+  received — and they are stored with the turn, so a chat reopened tomorrow
+  still shows them. A message with no numbers shows no footer rather than zeros
+  dressed up as a measurement. While an answer is still streaming its footer
+  marks the counts with ≈.
+- AX-096 — The thread has no bubbles. A message runs the full width of the
+  screen with no card around it, an answer is drawn as Markdown (headings,
+  emphasis, inline and fenced code, lists, quotes, rules) and half-written
+  Markdown has to render as something, because the text arrives a few
+  characters at a time. Long-press still copies a message.

@@ -198,12 +198,32 @@ class ChatViewModel(
         if (frame == null) return
         val input = frame.inputTokens
         val output = frame.outputTokens
-        if (input <= 0 && output <= 0) return
-        turnStats.value = turnStats.value.copy(
+        val stats = turnStats.value
+        // The closing frame names the model that actually answered and how long
+        // it took, which is what the footer of that message says (AX-095). The
+        // route stays as the fallback while the answer is still streaming.
+        val model = frame.model.ifBlank { stats.model }
+        if (input <= 0 && output <= 0) {
+            if (model != stats.model) turnStats.value = stats.copy(model = model)
+            return
+        }
+        val started = if (frame.durationMs > 0L && stats.startedAtMs > 0L) {
+            // The daemon measured the provider call, so the wall clock of the
+            // turn (which also covers the phone's own round trip) is replaced by
+            // it rather than being shown next to the counts.
+            SystemClock.elapsedRealtime() - frame.durationMs
+        } else {
+            stats.startedAtMs
+        }
+        turnStats.value = stats.copy(
+            model = model,
             inputTokens = input,
             outputTokens = output,
             exact = true,
             estimatedTokens = output,
+            startedAtMs = started,
+            endedAtMs = if (stats.endedAtMs > 0L) stats.endedAtMs else SystemClock.elapsedRealtime(),
+            running = false,
         )
     }
 

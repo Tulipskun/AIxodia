@@ -166,3 +166,27 @@
   ให้ชี้ที่ daemon ตัวจริง และเปลี่ยนวิธีทดสอบเป็น daemon ตัวจริง + `wrangler dev`
   (เหตุผล: โปรเจคนี้คือ frontend + Worker ที่เขียน Kotlin ทั้งหมด การมี implementation
   ที่สองของสัญญาเดียวกันแยกภาษาคือแหล่งที่ drift และไม่ได้ใช้งานจริงแล้ว).
+
+## CHANGE-075: footer อยู่ใต้ข้อความ และ thread เป็นเอกสารเต็มจอ
+New: ย้ายตัวเลขจากแถบ global เหนือช่องพิมพ์ไปอยู่ใต้ข้อความคำตอบของแต่ละข้อความ (AX-095)
+และเลิกใช้กล่อง bubble — ข้อความเต็มความกว้าง ตัวอักษรเป็น Markdown (AX-096) ของ
+model message รับ `model`/`input_tokens`/`output_tokens`/`duration_ms` จากเฟรมปิด
+ของตัวเอง ซึ่ง daemon อ่านจาก trace (ตาม REQ-033 ไม่ใช่เวลาที่วาด) และเก็บลง D1 ผ่าน
+คอลัมน์ใหม่ `turns.model/input_tokens/output_tokens/duration_ms`
+(`worker/migrations/0002_turn_footer.sql` สำหรับฐานที่มีอยู่แล้ว) Room เป็น v3
+(`MIGRATION_2_3` เพิ่ม `model`, `durationMs`) และเขียน `MarkdownText.kt` เองเพราะ
+โปรเจคไม่มี dependency ด้าน markdown และต้องรับข้อความที่ยังพิมพ์ไม่จบ
+(`**` ที่ยังไม่มีคู่, ``` ที่ยังไม่ปิด) ให้แสดงผลได้ ไม่กะพริบ พร้อมแก้ model sheet ที่ราย
+โมเดลแรกถูก nav bar บังจนกดไม่โดน
+Reason: ผู้ใช้ต้องการอ่าน thread เป็นเอกสาร และ footer ต่อ turn เดียวทำให้โมเดลที่ตอบ
+จริงกับตัวเลขไม่ตรงกันเมื่อคุยกันหลายโมเดล
+Impact: app `ui/chat/ChatScreen.kt` (MessageBlock, MessageFooter, TurnStatsLine,
+LiveAnswer, ToolSteps, model sheet), `ui/chat/MarkdownText.kt` (ใหม่),
+`ui/chat/ChatViewModel.kt` (recordUsage ใช้ model/duration ของเฟรม),
+`data/model/ChatModels.kt`, `data/local/AppDatabase.kt` (v3), `data/repo/
+ChatRepository.kt`, `data/remote/HistoryApi.kt`, `worker/schema.sql`,
+`worker/migrations/0002_turn_footer.sql`, `worker/src/jsMain/kotlin/aixodia/
+Worker.kt`, requirements/functional.md (AX-095, AX-096)
+Validation: `gradle assembleDebug` ใน CI; จริงบนมือถือ: ส่ง "ping" ด้วย nemotron-3-ultra-free
+แล้วเห็น footer ผูกกับข้อความนั้น และเปิดแชทใหม่แล้วตัวเลขยังอยู่
+Status: accepted
