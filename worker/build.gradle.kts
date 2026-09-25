@@ -31,7 +31,7 @@ kotlin {
 val bundleWorker by tasks.registering {
     val entry = layout.buildDirectory.file("worker/index.mjs")
     val dist = layout.buildDirectory.dir("dist/js")
-    dependsOn("jsProductionExecutable")
+    dependsOn("assemble")
     outputs.file(entry)
     outputs.upToDateWhen { false }
     doLast {
