@@ -40,4 +40,4 @@ jobs:
         run: |
           test -f build/worker/index.mjs
           grep -q "export default" build/worker/index.mjs
-          ls build/dist/js/productionExecutable/*.mjs build/dist/js/productionLibrary/*.mjs 2>/dev/null | grep -q mjs
+          grep -rq "handleFetch" build/js/packages --include=*.mjs
