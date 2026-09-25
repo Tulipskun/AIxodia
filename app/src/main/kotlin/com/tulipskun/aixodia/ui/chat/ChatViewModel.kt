@@ -314,6 +314,23 @@ class ChatViewModel(
                 subAgents.value = rows.map { if (it.jobId == jobId) it.copy(stopping = false) else it }
                 notice.value = "หยุด sub agent ไม่สำเร็จ"
             }
+            // The daemon says how each worker ended. A row that only ever saw
+            // its own deltas would keep claiming it is still running.
+            "subagent_stopped", "subagent_completed", "subagent_failed" -> {
+                val ended = frame.stage.removePrefix("subagent_")
+                subAgents.value = rows.map {
+                    if (it.jobId != jobId) it
+                    else it.copy(
+                        running = false,
+                        stopping = false,
+                        detail = when (ended) {
+                            "stopped" -> "หยุดแล้ว"
+                            "failed" -> "ล้มเหลว"
+                            else -> "เสร็จแล้ว"
+                        },
+                    )
+                }
+            }
         }
     }
 
