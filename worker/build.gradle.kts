@@ -31,9 +31,9 @@ kotlin {
 val bundleWorker by tasks.registering {
     val entry = layout.buildDirectory.file("worker/index.mjs")
     val dist = layout.buildDirectory.dir("dist/js")
-    dependsOn("assemble")
-    inputs.dir(dist)
+    dependsOn("jsProductionExecutable")
     outputs.file(entry)
+    outputs.upToDateWhen { false }
     doLast {
         val compiled = dist.get().asFile.walkTopDown()
             .filter { it.isFile && it.extension == "mjs" }
