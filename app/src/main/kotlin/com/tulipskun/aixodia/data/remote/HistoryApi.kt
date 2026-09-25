@@ -229,6 +229,20 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault(null)
     }
 
+    /**
+     * The daemon's own reason for a rejected write. "HTTP 400" on its own tells
+     * the operator nothing, and the reason is already in the body.
+     */
+    private fun failure(ok: String, r: okhttp3.Response): String {
+        if (r.isSuccessful) return ok
+        val reason = runCatching {
+            r.body?.string()?.takeIf { it.isNotBlank() }?.let { body ->
+                Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+            }
+        }.getOrNull()
+        return if (reason.isNullOrBlank()) "HTTP ${r.code}" else "HTTP ${r.code}: $reason"
+    }
+
     /** Adds a provider. The key travels once, in this request, and is never read back. */
     suspend fun addProvider(
         id: String, adapter: String, endpoint: String, keys: List<String>, freeOnly: Boolean,
@@ -247,7 +261,7 @@ class HistoryApi(private val settings: SettingsStore) {
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
-                if (r.isSuccessful) "เพิ่ม $id แล้ว" else "เพิ่มไม่สำเร็จ: HTTP ${r.code}"
+                failure("เพิ่ม $id แล้ว", r).let { if (r.isSuccessful) it else "เพิ่มไม่สำเร็จ: $it" }
             }
         }.getOrDefault("เพิ่มไม่สำเร็จ")
     }
@@ -272,7 +286,7 @@ class HistoryApi(private val settings: SettingsStore) {
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
-                if (r.isSuccessful) "อัปเดต key ของ $providerId แล้ว" else "อัปเดตไม่สำเร็จ: HTTP ${r.code}"
+                failure("อัปเดต key ของ $providerId แล้ว", r).let { if (r.isSuccessful) it else "อัปเดตไม่สำเร็จ: $it" }
             }
         }.getOrDefault("อัปเดตไม่สำเร็จ")
     }
@@ -284,7 +298,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/providers/$providerId")
                 .header("Authorization", "Bearer ${c.token}").delete().build()
             client.newCall(req).execute().use { r ->
-                if (r.isSuccessful) "ลบ $providerId แล้ว" else "ลบไม่สำเร็จ: HTTP ${r.code}"
+                failure("ลบ $providerId แล้ว", r).let { if (r.isSuccessful) it else "ลบไม่สำเร็จ: $it" }
             }
         }.getOrDefault("ลบไม่สำเร็จ")
     }
@@ -301,7 +315,7 @@ class HistoryApi(private val settings: SettingsStore) {
                 .put(body.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
-                if (r.isSuccessful) "บันทึกการตั้งค่า agent แล้ว" else "บันทึกไม่สำเร็จ: HTTP ${r.code}"
+                failure("บันทึกการตั้งค่า agent แล้ว", r).let { if (r.isSuccessful) it else "บันทึกไม่สำเร็จ: $it" }
             }
         }.getOrDefault("บันทึกไม่สำเร็จ")
     }
