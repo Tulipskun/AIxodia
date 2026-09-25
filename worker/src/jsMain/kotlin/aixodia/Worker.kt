@@ -229,13 +229,13 @@ private fun obj(vararg pairs: Pair<String, Any?>): dynamic {
     return target
 }
 
-private fun stringify(value: Any?): String = js("JSON.stringify")(value) as String
+private fun stringify(value: Any?): String = js("JSON.stringify")(value).toString()
 
-private fun encode(value: String): String = js("encodeURIComponent")(value) as String
+private fun encode(value: String): String = js("encodeURIComponent")(value).toString()
 
-private fun decode(value: String): String = js("decodeURIComponent")(value) as String
+private fun decode(value: String): String = js("decodeURIComponent")(value).toString()
 
-private fun typeOf(value: Any?): String = js("typeof")(value) as String
+private fun typeOf(value: Any?): String = js("typeof")(value).toString()
 
 private fun isString(value: Any?): Boolean = typeOf(value) == "string"
 
