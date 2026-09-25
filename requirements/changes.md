@@ -190,3 +190,13 @@ Worker.kt`, requirements/functional.md (AX-095, AX-096)
 Validation: `gradle assembleDebug` ใน CI; จริงบนมือถือ: ส่ง "ping" ด้วย nemotron-3-ultra-free
 แล้วเห็น footer ผูกกับข้อความนั้น และเปิดแชทใหม่แล้วตัวเลขยังอยู่
 Status: accepted
+
+- AXCH-021 (2026-09-26) — "กด back จากตั้งค่ากลับหน้าแชท ไม่ใช่ออกจากแอป + จัดหมวด provider/model session/global + key add/remove/edit + token/cache/stream/tool/reasoning ให้ถูก":
+  เพิ่ม AX-097..AX-099 และแก้ AX-080/081/084/085/089/095 — หน้าตั้งค่าเป็นสาขาของหน้าแชท
+  (ปุ่มย้อนบน toolbar และปุ่ม back ของระบบกลับหน้าแชทเสมอ), ชีตแชทล็อก/ล้างโมเดลเฉพาะแชท
+  (`PATCH {"clear_model":true}` ล้าง pin ใน D1 และลืม session สดให้ turn ถัดไปใช้ค่าเริ่มต้นสากล),
+  หน้าตั้งค่าเป็นเจ้าของ provider/key pool/ค่าเริ่มต้น main/sub สากล, key เป็น write-only จึงไม่มี
+  edit ค่าเดิม (เพิ่ม/ลบตามลำดับพร้อมยืนยันซ้ำ/แทนที่ทั้ง pool) และ provider สร้างแล้วเปลี่ยนตัวตนไม่ได้;
+  footer เก็บ `cache_read/cache_write` พร้อม in/out/duration, streaming ประมาณมี `≈`, tool มี
+  ชื่อ/สถานะ/args/เวลา, reasoning เป็นตัวจับเวลาชั่วคราวโดยไม่บันทึกเนื้อหา. ฝั่ง daemon ตรงกับ
+  CHANGE-077/D-012.

@@ -89,6 +89,8 @@ class ChatRepository(
                 toolArgs = it.toolArgs,
                 tokensIn = it.tokensIn,
                 tokensOut = it.tokensOut,
+                cacheRead = it.cacheRead,
+                cacheWrite = it.cacheWrite,
                 model = it.model,
                 durationMs = it.durationMs,
             )
@@ -202,6 +204,9 @@ class ChatRepository(
     /** The provider and model the daemon currently offers, for the picker. */
     suspend     fun models(): List<ProviderView> = history.models()
 
+    /** Global provider health/key counts for the session picker caption. */
+    suspend fun providerStatuses(): List<com.tulipskun.aixodia.data.model.ProviderStatus> = history.providers()
+
     /** The provider/model the daemon has stored for one chat, if it has one. */
     suspend fun sessionRoute(sid: String): Pair<String, String>? =
         runCatching { history.sessions().firstOrNull { it.id == sid } }
@@ -216,6 +221,9 @@ class ChatRepository(
      */
     suspend fun setSessionModel(sid: String, provider: String, model: String): Boolean =
         history.setSessionModel(sid, provider, model)
+
+    /** Removes one chat's stored route; the daemon then uses the agent defaults. */
+    suspend fun clearSessionModel(sid: String): Boolean = history.clearSessionModel(sid)
 
     suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {
         val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
@@ -304,6 +312,8 @@ class ChatRepository(
         // shows which model answered and what it cost (AX-095).
         tokensIn = inputTokens,
         tokensOut = outputTokens,
+        cacheRead = cacheRead,
+        cacheWrite = cacheWrite,
         model = model,
         durationMs = durationMs,
     )

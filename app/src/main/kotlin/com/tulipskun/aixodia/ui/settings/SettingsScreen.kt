@@ -130,6 +130,7 @@ fun SettingsScreen(
     var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
     var deleting by remember { mutableStateOf<ProviderStatus?>(null) }
     var pickingKeyFor by remember { mutableStateOf<ProviderStatus?>(null) }
+    var confirmingRemove by remember { mutableStateOf<Pair<ProviderStatus, Int>?>(null) }
     var testingId by remember { mutableStateOf<String?>(null) }
 
     // load reports whether the daemon answered. A failed read keeps the list it
@@ -280,10 +281,10 @@ fun SettingsScreen(
             }
 
             SectionCard(
-                "Provider และ key",
+                "Provider และ key (ทั้งระบบ)",
                 if (loading) "กำลังโหลด…"
                 else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · " +
-                    "${providers.count { it.reachable && (it.probed || it.id in probedIds) }} ใช้ได้ · key อ่านกลับไม่ได้",
+                    "${providers.count { it.reachable && (it.probed || it.id in probedIds) }} ใช้ได้ · key อ่านกลับไม่ได้ · ตัวตนของ provider สร้างแล้วเปลี่ยนไม่ได้",
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
@@ -354,16 +355,16 @@ fun SettingsScreen(
                 }
             }
 
-            SectionCard("โมเดลของแต่ละ agent", "main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย") {
+            SectionCard("โมเดลค่าเริ่มต้นของ agent (สากล)", "ค่าที่นี่ใช้กับทุกแชทที่ไม่ได้ล็อก provider/model ไว้เอง main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย") {
                 RouteCard(
-                    title = "main agent",
+                    title = "ค่าเริ่มต้นสากล — main agent",
                     route = mainRoute,
                     modelCount = modelsByProvider[mainRoute.provider].orEmpty().size,
                     onPickProvider = { picker = Picker.MainProvider },
                     onPickModel = { picker = Picker.MainModel },
                 )
                 RouteCard(
-                    title = "sub agent",
+                    title = "ค่าเริ่มต้นสากล — sub agent",
                     route = subRoute,
                     modelCount = modelsByProvider[subRoute.provider].orEmpty().size,
                     onPickProvider = { picker = Picker.SubProvider },
@@ -491,13 +492,7 @@ fun SettingsScreen(
                     repeat(p.keyCount) { index ->
                         val position = p.keyCount - index
                         TextButton(
-                            onClick = {
-                                pickingKeyFor = null
-                                scope.launch {
-                                    msg = history.changeKeys(p.id, remove = listOf(position - 1))
-                                    load(false)
-                                }
-                            },
+                            onClick = { confirmingRemove = p to position },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("ลบ key ตัวที่ $position") }
                     }
@@ -505,6 +500,30 @@ fun SettingsScreen(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { pickingKeyFor = null }) { Text("ยกเลิก") } },
+        )
+    }
+
+    confirmingRemove?.let { (provider, position) ->
+        AlertDialog(
+            onDismissRequest = { confirmingRemove = null },
+            title = { Text("ลบ key ตัวที่ $position ของ ${provider.id}?") },
+            text = {
+                Text(
+                    "การลบย้อนกลับไม่ได้ และ daemon จะลืมผลทดสอบเดิมของ provider นี้ เลขลำดับนี้อ้างอิงตำแหน่งใน pool ปัจจุบัน ไม่ใช่ค่าของ key",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingRemove = null
+                    pickingKeyFor = null
+                    scope.launch {
+                        msg = history.changeKeys(provider.id, remove = listOf(position - 1))
+                        load(false)
+                    }
+                }) { Text("ลบ", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmingRemove = null }) { Text("ยกเลิก") } },
         )
     }
 
@@ -721,6 +740,11 @@ private fun ProviderCard(
                     Text("  ลบ", color = scheme.error)
                 }
             }
+            Text(
+                "key เดิมแก้ไขค่าตรง ๆ ไม่ได้ เพราะ daemon ไม่ส่งค่ากลับ — เพิ่ม key ใหม่ ลบตามลำดับ หรือแทนที่ทั้ง pool เท่านั้น",
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+            )
         }
     }
 }

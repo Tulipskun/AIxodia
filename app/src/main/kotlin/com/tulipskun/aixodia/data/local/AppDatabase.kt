@@ -39,6 +39,8 @@ data class MessageEntity(
     val toolArgs: String = "",
     val tokensIn: Int = 0,
     val tokensOut: Int = 0,
+    val cacheRead: Int = 0,
+    val cacheWrite: Int = 0,
     val model: String = "",
     val durationMs: Long = 0,
 )
@@ -100,7 +102,7 @@ interface MessageDao {
     suspend fun deleteSession(sid: String)
 }
 
-@Database(entities = [SessionEntity::class, MessageEntity::class], version = 3, exportSchema = false)
+@Database(entities = [SessionEntity::class, MessageEntity::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessions(): SessionDao
     abstract fun messages(): MessageDao
@@ -130,10 +132,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v4 adds cached usage to that footer. Old rows keep zeros and simply
+        // show no cache line (AX-099).
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN cacheRead INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN cacheWrite INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { inst = it }
         }

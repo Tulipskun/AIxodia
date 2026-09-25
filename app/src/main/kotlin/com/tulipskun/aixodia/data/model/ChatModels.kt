@@ -86,6 +86,7 @@ data class ToolStep(
     val result: String = "",
     val isError: Boolean = false,
     val done: Boolean = false,
+    val durationMs: Long = 0,
 )
 
 // Canonical inbound display frame (ai Output + agent attribution).
@@ -107,6 +108,10 @@ data class AiOutput(
     @Json(name = "usage") val usage: Usage? = null,
     @Json(name = "input_tokens") val inputTokens: Int = 0,
     @Json(name = "output_tokens") val outputTokens: Int = 0,
+    @Json(name = "cache_read_tokens") val cacheRead: Int = 0,
+    @Json(name = "cache_write_tokens") val cacheWrite: Int = 0,
+    @Json(name = "reasoning_ms") val reasoningMs: Long = 0,
+    @Json(name = "tool_duration_ms") val toolDurationMs: Long = 0,
     // Footer of this one message (AX-095): the model that produced it and how
     // long it took, straight off the terminal trace.
     @Json(name = "model") val model: String = "",
@@ -131,6 +136,9 @@ data class AiInput(
 data class Usage(
     @Json(name = "input_tokens") val inputTokens: Int = 0,
     @Json(name = "output_tokens") val outputTokens: Int = 0,
+    @Json(name = "total_tokens") val totalTokens: Int = 0,
+    @Json(name = "cache_read_tokens") val cacheRead: Int = 0,
+    @Json(name = "cache_write_tokens") val cacheWrite: Int = 0,
 )
 
 data class ChatMessage(
@@ -148,6 +156,8 @@ data class ChatMessage(
     val toolArgs: String = "",
     val tokensIn: Int = 0,
     val tokensOut: Int = 0,
+    val cacheRead: Int = 0,
+    val cacheWrite: Int = 0,
     val model: String = "",
     val durationMs: Long = 0,
 )

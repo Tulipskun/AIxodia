@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import android.os.SystemClock
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
+import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -12,6 +13,7 @@ import com.tulipskun.aixodia.data.repo.ChatRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 /** One sub agent the daemon is running (or just finished) for this chat. */
 data class SubAgentActivity(
@@ -36,6 +38,8 @@ data class TurnStats(
     val model: String = "",
     val inputTokens: Int = 0,
     val outputTokens: Int = 0,
+    val cacheRead: Int = 0,
+    val cacheWrite: Int = 0,
     val exact: Boolean = false,
     val startedAtMs: Long = 0L,
     val endedAtMs: Long = 0L,
@@ -86,7 +90,13 @@ class ChatViewModel(
     val liveText = MutableStateFlow("")
     val liveAgent = MutableStateFlow("main")
     val liveSteps = MutableStateFlow<List<ToolStep>>(emptyList())
+    /** Recorded thinking time for the current reasoning event, if the daemon sent one. */
+    val liveThinkingMs = MutableStateFlow(0L)
+    /** Which agent that thinking event belongs to; raw reasoning never leaves the daemon. */
+    val liveThinkingAgent = MutableStateFlow("main")
     val providers = MutableStateFlow<List<ProviderView>>(emptyList())
+    /** Same catalogue's global health/key counts, shown as a caption in the session sheet. */
+    val providerStatuses = MutableStateFlow<List<ProviderStatus>>(emptyList())
 
     /** The sub agents this turn started, newest last, each with its own stop. */
     val subAgents = MutableStateFlow<List<SubAgentActivity>>(emptyList())
@@ -97,6 +107,8 @@ class ChatViewModel(
     private var liveChars = 0
     val selectedProvider = MutableStateFlow("")
     val selectedModel = MutableStateFlow("")
+    /** Whether the open chat has a stored pin, as opposed to a draft selection. */
+    val hasStoredRoute = MutableStateFlow(false)
 
     init {
         // A fresh install has no settings yet, and every call here is network
@@ -116,6 +128,7 @@ class ChatViewModel(
             runCatching { repo.sessionRoute(sessionId) }.getOrNull()?.let { (provider, model) ->
                 selectedProvider.value = provider
                 selectedModel.value = model
+                hasStoredRoute.value = true
             }
         }
         viewModelScope.launch {
@@ -134,6 +147,7 @@ class ChatViewModel(
                         status.value = ""
                         liveText.value = ""
                         liveSteps.value = emptyList()
+                        liveThinkingMs.value = 0L
                         busy.value = false
                         notice.value = f.text
                         finishStats()
@@ -149,6 +163,7 @@ class ChatViewModel(
 
     private fun onDelta(agent: String, chunk: String, frame: AiOutput? = null) {
         if (chunk.isEmpty()) return
+        liveThinkingMs.value = 0L
         if (agent.isNotEmpty() && agent != "main") {
             status.value = "${if (agent == "sub") "sub" else agent}: " + (liveSubText + chunk).take(80)
             liveSubText += chunk
@@ -185,6 +200,7 @@ class ChatViewModel(
         // Replace whatever streamed in with the daemon's own copy: it is the one
         // that also lands in D1.
         liveText.value = text
+        liveThinkingMs.value = 0L
         recordUsage(frame)
         busy.value = true
     }
@@ -198,12 +214,14 @@ class ChatViewModel(
         if (frame == null) return
         val input = frame.inputTokens
         val output = frame.outputTokens
+        val cacheRead = frame.cacheRead
+        val cacheWrite = frame.cacheWrite
         val stats = turnStats.value
         // The closing frame names the model that actually answered and how long
         // it took, which is what the footer of that message says (AX-095). The
         // route stays as the fallback while the answer is still streaming.
         val model = frame.model.ifBlank { stats.model }
-        if (input <= 0 && output <= 0) {
+        if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0) {
             if (model != stats.model) turnStats.value = stats.copy(model = model)
             return
         }
@@ -219,6 +237,8 @@ class ChatViewModel(
             model = model,
             inputTokens = input,
             outputTokens = output,
+            cacheRead = cacheRead,
+            cacheWrite = cacheWrite,
             exact = true,
             estimatedTokens = output,
             startedAtMs = started,
@@ -242,13 +262,15 @@ class ChatViewModel(
         when (f.stage) {
             "tool_call", "tool_running" -> {
                 val name = f.toolCall?.name ?: return
+                liveThinkingMs.value = 0L
                 liveSteps.value = liveSteps.value.filterNot { it.name == name } +
-                    ToolStep(name = name, args = f.toolCall?.arguments.orEmpty())
+                    ToolStep(name = name, args = f.toolCall?.arguments.orEmpty(), durationMs = f.toolDurationMs)
                 status.value = "$name…"
             }
             "tool_result" -> {
                 val name = f.toolResult?.name ?: f.toolCall?.name ?: return
                 val result = f.toolResult?.text.orEmpty()
+                liveThinkingMs.value = 0L
                 liveSteps.value = liveSteps.value.filterNot { it.name == name } +
                     ToolStep(
                         name = name,
@@ -256,10 +278,19 @@ class ChatViewModel(
                         result = result.take(160),
                         isError = f.toolResult?.isError ?: false,
                         done = true,
+                        durationMs = f.toolDurationMs,
                     )
                 status.value = if (f.toolResult?.isError == true) "$name ล้มเหลว" else "$name เสร็จแล้ว"
             }
-            "response_text" -> status.value = "กำลังคิด…"
+            "response_text" -> {
+                liveThinkingMs.value = f.reasoningMs
+                liveThinkingAgent.value = f.agent.ifEmpty { "main" }
+                status.value = if (f.reasoningMs > 0) {
+                    "กำลังคิด · " + String.format(Locale.US, "%.1fs", f.reasoningMs / 1000.0)
+                } else {
+                    "กำลังคิด…"
+                }
+            }
             "retry_wait" -> status.value = "รอสลองใหม่…"
             "request" -> status.value = "กำลังส่งให้ provider…"
             "provider_ready" -> status.value = "provider รับแล้ว กำลังประมวลผล"
@@ -285,6 +316,7 @@ class ChatViewModel(
         liveText.value = ""
         liveSubText = ""
         liveSteps.value = emptyList()
+        liveThinkingMs.value = 0L
         busy.value = false
         subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
@@ -387,6 +419,7 @@ class ChatViewModel(
         viewModelScope.launch {
             val list = runCatching { repo.models() }.getOrDefault(emptyList())
             providers.value = list
+            providerStatuses.value = runCatching { repo.providerStatuses() }.getOrDefault(emptyList())
             // Start from what this chat already uses: the picker must not look
             // like a pending change just because it was opened.
             if (selectedProvider.value.isBlank()) {
@@ -395,7 +428,10 @@ class ChatViewModel(
                     selectedProvider.value = provider
                     selectedModel.value = model.takeIf { m -> view?.models?.any { it.id == m } == true }
                         ?: view?.defaultModel.orEmpty()
+                    hasStoredRoute.value = true
                 }
+            }
+
             }
             // No stored route means this chat follows the daemon's agent default:
             // the picker must not invent one and make it look already chosen.
@@ -425,7 +461,31 @@ class ChatViewModel(
         }
         viewModelScope.launch {
             val ok = runCatching { repo.setSessionModel(sessionId, provider, model) }.getOrDefault(false)
-            if (ok) notice.value = "ใช้ $provider / $model กับแชทนี้แล้ว" else notice.value = "บันทึก provider/model ไม่สำเร็จ"
+            if (ok) {
+                hasStoredRoute.value = true
+                notice.value = "ใช้ $provider / $model กับแชทนี้แล้ว"
+            } else {
+                notice.value = "บันทึก provider/model ไม่สำเร็จ"
+            }
+        }
+    }
+
+    /** Returns the open chat to the global agent defaults and forgets its pin. */
+    fun clearModel() {
+        if (!hasStoredRoute.value) {
+            notice.value = "แชทนี้ใช้ค่าของ agent อยู่แล้ว"
+            return
+        }
+        viewModelScope.launch {
+            val ok = runCatching { repo.clearSessionModel(sessionId) }.getOrDefault(false)
+            if (ok) {
+                selectedProvider.value = ""
+                selectedModel.value = ""
+                hasStoredRoute.value = false
+                notice.value = "ยกเลิกการล็อกโมเดลของแชทนี้แล้ว — ใช้ค่าของ agent"
+            } else {
+                notice.value = "ยกเลิกการล็อกโมเดลไม่สำเร็จ"
+            }
         }
     }
 
@@ -457,6 +517,9 @@ class ChatViewModel(
             runCatching { repo.createSession("") }
                 .onSuccess {
                     sessionId = it
+                    selectedProvider.value = ""
+                    selectedModel.value = ""
+                    hasStoredRoute.value = false
                     settings.saveSession(it)
                 }
                 .onFailure { notice.value = "สร้างแชทใหม่ไม่สำเร็จ: ${it.message}" }
@@ -470,11 +533,13 @@ class ChatViewModel(
             sessionId = id
             selectedProvider.value = ""
             selectedModel.value = ""
+            hasStoredRoute.value = false
             settings.saveSession(id)
             // The header shows this chat's model, not the daemon default.
             runCatching { repo.sessionRoute(id) }.getOrNull()?.let { (provider, model) ->
                 selectedProvider.value = provider
                 selectedModel.value = model
+                hasStoredRoute.value = true
             }
         }
     }
@@ -489,7 +554,15 @@ class ChatViewModel(
             if (id == sessionId) {
                 val next = repo.activeSession.value
                 sessionId = next
+                selectedProvider.value = ""
+                selectedModel.value = ""
+                hasStoredRoute.value = false
                 settings.saveSession(next)
+                runCatching { repo.sessionRoute(next) }.getOrNull()?.let { (provider, model) ->
+                    selectedProvider.value = provider
+                    selectedModel.value = model
+                    hasStoredRoute.value = true
+                }
             }
         }
     }

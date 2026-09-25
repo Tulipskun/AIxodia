@@ -2,6 +2,7 @@
 
 package com.tulipskun.aixodia.ui.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -121,6 +122,10 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val sessId by settings.sessionFlow.collectAsState(initial = "")
     var showSettings by remember { mutableStateOf(false) }
 
+    // Settings is a screen branch of the chat, not a separate Android route: the
+    // system back button has to return here, not leave the app.
+    BackHandler(enabled = showSettings) { showSettings = false }
+
     // Unconfigured installs stop here — before the ViewModel exists — so a
     // first launch cannot reach the network layer and crash. The settings
     // screen still has to open from here, or there would be no way to fix it.
@@ -145,12 +150,16 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val notice by vm.notice.collectAsState()
     val busy by vm.busy.collectAsState()
     val liveText by vm.liveText.collectAsState()
+    val liveThinkingMs by vm.liveThinkingMs.collectAsState()
+    val liveThinkingAgent by vm.liveThinkingAgent.collectAsState()
     val liveSteps by vm.liveSteps.collectAsState()
     val subAgents by vm.subAgents.collectAsState()
     val stats by vm.turnStats.collectAsState()
     val providers by vm.providers.collectAsState()
+    val providerStatuses by vm.providerStatuses.collectAsState()
     val pickedProvider by vm.selectedProvider.collectAsState()
     val pickedModel by vm.selectedModel.collectAsState()
+    val hasStoredRoute by vm.hasStoredRoute.collectAsState()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
@@ -252,11 +261,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     if (showModelPicker) {
         ChatModelSheet(
             providers = providers,
+            statuses = providerStatuses.associateBy { it.id },
             pickedProvider = pickedProvider,
             pickedModel = pickedModel,
+            hasStoredRoute = hasStoredRoute,
             onProvider = { vm.chooseProvider(it) },
             onModel = { vm.chooseModel(it) },
             onSave = { vm.saveModel(); showModelPicker = false },
+            onClear = { vm.clearModel() },
             onDismiss = { showModelPicker = false },
         )
     }
@@ -492,6 +504,9 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 }
                 // The answer being streamed right now. It is not in the
                 // database yet; the stored row replaces it when the turn ends.
+                if (liveThinkingMs > 0L && liveText.isBlank()) {
+                    item(key = "live-thinking") { ThinkingLine(liveThinkingMs, liveThinkingAgent) }
+                }
                 if (liveText.isNotBlank()) {
                     item(key = "live-answer") {
                         LiveAnswer(liveText, stats, routeLabel, nowMs)
@@ -509,11 +524,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
 @Composable
 private fun ChatModelSheet(
     providers: List<com.tulipskun.aixodia.data.model.ProviderView>,
+    statuses: Map<String, com.tulipskun.aixodia.data.model.ProviderStatus>,
     pickedProvider: String,
     pickedModel: String,
+    hasStoredRoute: Boolean,
     onProvider: (String) -> Unit,
     onModel: (String) -> Unit,
     onSave: () -> Unit,
+    onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -538,7 +556,12 @@ private fun ChatModelSheet(
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("โมเดลของแชทนี้", style = MaterialTheme.typography.titleMedium)
+            Text("โมเดลของแชทนี้ (เฉพาะแชทนี้ ไม่ใช่ค่าเริ่มต้นสากล)", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (hasStoredRoute) "แชทนี้ล็อก provider/model ไว้แล้ว" else "แชทนี้ยังไม่ล็อก — ใช้ค่าของ agent",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (providers.isEmpty()) {
                 Text(
                     "ยังไม่มี provider — เพิ่มหรือทดสอบ provider ในหน้าตั้งค่าก่อน",
@@ -564,6 +587,22 @@ private fun ChatModelSheet(
                             label = { Text(p.id) },
                         )
                     }
+                }
+                val currentStatus = statuses[pickedProvider]
+                if (pickedProvider.isNotBlank()) {
+                    Text(
+                        when {
+                            currentStatus == null -> "ยังไม่มีสถานะของ provider นี้ — ตรวจในหน้าตั้งค่า"
+                            !currentStatus.probed -> "ยังไม่ทดสอบ · key ${currentStatus.keyCount}"
+                            currentStatus.reachable -> buildString {
+                                append("ใช้ได้ · key ${currentStatus.keyCount}")
+                                if (currentStatus.workingModel.isNotBlank()) append(" · ตอบได้จริง ${currentStatus.workingModel}")
+                            }
+                            else -> "ใช้ไม่ได้" + (if (currentStatus.lastError.isNotBlank()) " · ${currentStatus.lastError}" else "")
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 OutlinedTextField(
                     value = query,
@@ -627,6 +666,11 @@ private fun ChatModelSheet(
                 enabled = pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("ใช้กับแชทนี้") }
+            TextButton(
+                onClick = onClear,
+                enabled = hasStoredRoute,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("ใช้ค่าของ agent (ล้างการล็อกแชทนี้)") }
         }
     }
 }
@@ -803,6 +847,7 @@ private fun TurnStatsLine(stats: TurnStats, model: String, nowMs: Long, live: Bo
             if (route.isNotBlank()) append(route).append(" · ")
             append(mark).append(tokens).append(" token")
             if (stats.inputTokens > 0) append(" (↑").append(stats.inputTokens).append(")")
+            append(cacheText(stats.cacheRead, stats.cacheWrite))
             append(" · ").append(elapsed)
             if (rate > 0.0) append(" · ").append(mark).append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
             if (live && stats.running) append(" · กำลังทำงาน")
@@ -820,6 +865,14 @@ private fun seconds(millis: Long): String = when {
     else -> "${millis / 1000}s"
 }
 
+/** Cache usage is a subset of input/output, so it reads as its own clause. */
+private fun cacheText(cacheRead: Int, cacheWrite: Int): String = when {
+    cacheRead > 0 && cacheWrite > 0 -> " · cache $cacheRead/$cacheWrite"
+    cacheRead > 0 -> " · cache $cacheRead"
+    cacheWrite > 0 -> " · cache เขียน $cacheWrite"
+    else -> ""
+}
+
 @Composable
 private fun ConnDot(c: ConnState) {
     val (label, color) = when (c) {
@@ -828,6 +881,23 @@ private fun ConnDot(c: ConnState) {
         ConnState.OFFLINE -> "● ออฟไลน์" to MaterialTheme.colorScheme.error
     }
     Text(label, style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(end = 4.dp))
+}
+
+@Composable
+private fun ThinkingLine(reasoningMs: Long, agent: String) {
+    // Raw reasoning is progress, not transcript: the thread shows that thinking
+    // is happening and how long the daemon has recorded, but never stores prose.
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AgentBadge(ChatMessage(id = "thinking", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = agent))
+        Text(
+            "กำลังคิด · " + seconds(reasoningMs),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -883,6 +953,7 @@ private fun ToolSteps(steps: List<com.tulipskun.aixodia.data.model.ToolStep>) {
                     append("● ")
                     append(step.name)
                     if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
+                    if (step.durationMs > 0L) append(" · ").append(seconds(step.durationMs))
                     append(when {
                         !step.done -> "…"
                         step.isError -> " — ล้มเหลว"
@@ -965,9 +1036,10 @@ private fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
 private fun MessageFooter(m: ChatMessage) {
     val line = buildString {
         if (m.model.isNotBlank()) append(m.model).append(" · ")
-        if (m.tokensOut > 0 || m.tokensIn > 0) {
+        if (m.tokensOut > 0 || m.tokensIn > 0 || m.cacheRead > 0 || m.cacheWrite > 0) {
             append(m.tokensOut).append(" token")
             if (m.tokensIn > 0) append(" (↑").append(m.tokensIn).append(")")
+            append(cacheText(m.cacheRead, m.cacheWrite))
         }
         if (m.durationMs > 0L) {
             if (isNotEmpty()) append(" · ")

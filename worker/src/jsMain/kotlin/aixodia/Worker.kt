@@ -165,7 +165,7 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
             val result = all(
                 db,
                 "SELECT seq, role, agent, job_id, text, created_at, " +
-                    "model, input_tokens, output_tokens, duration_ms FROM turns " +
+                    "model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, duration_ms FROM turns " +
                     "WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
                 sid,
                 before.toLong(),
@@ -192,7 +192,7 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
             run(
                 db,
                 "INSERT INTO turns(session_id, seq, role, agent, job_id, text, " +
-                    "model, input_tokens, output_tokens, duration_ms) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    "model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, duration_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 sid,
                 seq,
                 role,
@@ -202,6 +202,8 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
                 payload.model?.toString() ?: "",
                 number(payload.input_tokens).toLong(),
                 number(payload.output_tokens).toLong(),
+                number(payload.cache_read_tokens).toLong(),
+                number(payload.cache_write_tokens).toLong(),
                 number(payload.duration_ms).toLong(),
             )
             run(db, "UPDATE sessions SET updated_at = unixepoch() WHERE id = ?", sid)

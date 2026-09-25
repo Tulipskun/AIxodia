@@ -36,6 +36,8 @@ data class TurnRow(
     @Json(name = "model") val model: String = "",
     @Json(name = "input_tokens") val inputTokens: Int = 0,
     @Json(name = "output_tokens") val outputTokens: Int = 0,
+    @Json(name = "cache_read_tokens") val cacheRead: Int = 0,
+    @Json(name = "cache_write_tokens") val cacheWrite: Int = 0,
     @Json(name = "duration_ms") val durationMs: Long = 0,
 )
 
@@ -189,6 +191,25 @@ class HistoryApi(private val settings: SettingsStore) {
         val c = settings.current()
         val base = absoluteUrl(c.workerUrl) ?: return@withContext false
         val body = JSONObject().put("provider", provider).put("model", model).toString()
+        runCatching {
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .patch(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Removes the pin and returns the chat to the global agent defaults. This is
+     * a separate explicit request because an empty provider/model PATCH also
+     * means "only rename this chat", never "unpin it".
+     */
+    suspend fun clearSessionModel(sessionId: String): Boolean = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
+        val body = JSONObject().put("clear_model", true).toString()
         runCatching {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")

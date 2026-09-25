@@ -120,14 +120,21 @@
   `trace` (progress: request, provider_ready, thinking, retry_wait, tool_call,
   tool_running, tool_result), `message` (the authoritative answer, sent only
   when it did not already arrive as deltas) and `done`. The phone appends
-  deltas into one live bubble, draws tool steps as they run, and replaces the
-  bubble with the stored row when the turn closes.
+  deltas into one live answer, draws tool steps as they run with name, status,
+  args excerpt and recorded duration, shows reasoning only as a transient
+  thinking row with its recorded time (never as stored/transcribed prose), and
+  replaces the live answer with the stored row when the turn closes.
 - AX-081 — The phone can pick the provider and model for a chat: `GET /api/models`
   returns what the router can actually reach right now, `PATCH /api/sessions/:id`
   with `{provider, model}` validates the pair against the router, applies it to
   the live session and stores it on the chat, so the choice survives a restart
   and follows the session on any phone. A chat that was never configured keeps
-  the daemon's boot default.
+  following the global agent defaults, and an explicitly pinned chat can be
+  unpinned with `{"clear_model":true}`; the daemon then forgets the cached live
+  route, so the next turn uses the current defaults instead of the old pin.
+  The session sheet is session scope only and says so: it shows a stored pin or
+  "ใช้ค่าของ agent", plus the picked provider's global status, and never edits
+  global defaults or key pools.
 - AX-082 — The streaming bubble is never written to the local database: the
   daemon mirrors exactly one row per turn into D1 and the app pulls it when the
   turn closes, so a stream can never become a duplicate history row.
@@ -141,13 +148,18 @@
   invalid key, `403` free tier, `402` out of credit, `503` upstream) instead of
   a silent failure. The list is a plain `GET /api/providers` over the tunnel.
 - AX-084 — Each provider has a key pool the operator can edit from the phone:
-  add one key, remove one key, or replace the whole pool. The app only ever
-  sends key material; it displays the count and never a key value, because the
-  daemon's admin API is write-only for keys.
-- AX-085 — The main and the sub agent each get their own provider + model,
-  chosen in the settings screen and stored with `PUT /api/settings`; the daemon
-  validates the pair against its router, applies it to the next turn, and
-  re-reads it after a restart.
+  add one key, remove one key by pool position, or replace the whole pool. The
+  app only ever sends key material; it displays the count and never a key value,
+  because the daemon's admin API is write-only for keys. Since a value can never
+  be read back, there is no in-place key edit: fixing one key means adding the
+  replacement and removing the old position, or replacing the pool. Removing a
+  key or replacing a pool is destructive and needs its own confirmation naming the
+  provider and position; changing the pool returns the provider to untested.
+- AX-085 — The main and the sub agent each get their own global default provider +
+  model, chosen in the settings screen and stored with `PUT /api/settings`; the
+  daemon validates the pair against its router, applies it to the next turn, and
+  re-reads it after a restart. These defaults apply to every chat without its own
+  pin; they never edit a single chat's stored route.
 - AX-086 — A running turn can be stopped from the phone: while the turn is live
   the send button becomes a stop button, tapping it sends the `cancel` frame,
   the bubble shows the stop state (`cancelled`, or that the turn had already
@@ -179,10 +191,12 @@
   pre-set to that stored route, and a chat with no route says it follows the
   agent default instead of showing an invented choice. Losing the daemon is a
   banner above the input with a retry, not grey text. A message can be copied
-  with a long press and confirmed. In settings, a key can be pasted from the
+  with a long press and   confirmed. In settings, a key can be pasted from the
   clipboard, the operator chooses *which* key to drop (keys are never sent
-  back, so position is the only honest handle), and one provider can be tested
+  back, so position is the only honest handle), removal asks again by provider
+  and position before deleting, and one provider can be tested
   on its own instead of waiting for the whole list.
+
 
 ## Provider truth (AX-090)
 
@@ -226,8 +240,9 @@
 ## The thread is the document (AX-095, AX-096)
 
 - AX-095 — Every answer carries its own footer, not the turn. A model message is
-  drawn with the model that produced it, the tokens it used (`out` and, when the
-  provider reported it, `↑in`), how long it took and how fast it wrote. The
+  drawn with the model that produced it, the tokens it used (`out`, input as
+  `↑in`, and cached usage when the provider reported it), how long it took and
+  how fast it wrote. The
   numbers come from the closing frame of that message — the model and the
   duration the daemon measured from the request it sent to the event it
   received — and they are stored with the turn, so a chat reopened tomorrow
@@ -239,3 +254,22 @@
   emphasis, inline and fenced code, lists, quotes, rules) and half-written
   Markdown has to render as something, because the text arrives a few
   characters at a time. Long-press still copies a message.
+
+## Navigation, scope and display integrity (AX-097..AX-099)
+
+- AX-097 — Settings is a branch of the chat screen, not a way out of the app:
+  both the toolbar back arrow and the Android system back button return to the
+  chat that was open.
+- AX-098 — Configuration has exactly two scopes and the UI names them: a chat
+  sheet pins or unpins one chat, while settings owns global providers, their
+  write-only key pools and the global main/sub defaults. Provider identity is
+  immutable after creation; keys are only added, removed by position with a
+  second confirmation, or replaced wholesale, and changing a pool returns that
+  provider to untested. The session sheet always shows whether the chat is
+  pinned or following the agent defaults, with the picked provider's global
+  status beside the choice.
+- AX-099 — Numbers and work shown on the phone must match what the daemon
+  recorded: provider-reported input/output/cache tokens, exact output over the
+  daemon-measured duration for token/s, streaming estimates marked `≈`, tool
+  rows with name/status/args excerpt/duration, and reasoning as a transient
+  thinking timer only — never stored prose.
