@@ -235,9 +235,7 @@ private fun encode(value: String): String = js("encodeURIComponent")(value).toSt
 
 private fun decode(value: String): String = js("decodeURIComponent")(value).toString()
 
-private fun typeOf(value: Any?): String = js("typeof")(value).toString()
-
-private fun isString(value: Any?): Boolean = typeOf(value) == "string"
+private fun isString(value: Any?): Boolean = value is String
 
 private fun valueOf(body: dynamic): String {
     val value = body.value
