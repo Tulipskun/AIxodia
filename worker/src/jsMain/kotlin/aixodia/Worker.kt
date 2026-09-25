@@ -1,6 +1,7 @@
 package aixodia
 
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.await
 import kotlinx.coroutines.promise
 import kotlin.js.Promise
 import kotlin.js.undefined
@@ -13,18 +14,19 @@ import kotlin.js.undefined
  * file needs.
  */
 @JsExport
-fun handleFetch(request: dynamic, env: dynamic): Promise<dynamic> =
+fun handleFetch(request: Any?, env: Any?): Promise<Any?> =
     GlobalScope.promise { route(request, env) }
 
 private suspend fun route(request: dynamic, env: dynamic): dynamic {
-    val url = js("new URL")(request.url) as dynamic
+    val url = js("new URL")(request.url)
     val path: String = url.pathname.toString()
     val method: String = request.method.toString()
 
     if (path == "/ws" && present(env.AI_DAEMON_WS)) {
         val session: String = url.searchParams.get("session")?.toString() ?: "default"
-        val headers = obj("Authorization" to (request.headers.get("Authorization") ?: ""))
-        return js("fetch")(env.AI_DAEMON_WS + "?session=" + encode(session), obj("headers" to headers))
+        val headers = obj("Authorization" to ((request.headers.get("Authorization") ?: "").toString()))
+        val target = (env.AI_DAEMON_WS as String) + "?session=" + encode(session)
+        return js("fetch")(target, obj("headers" to headers))
     }
     if (!path.startsWith("/api/")) return text("AIxodia Worker", 200)
     val auth: String = request.headers.get("Authorization") ?: ""
@@ -38,8 +40,8 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
         val age = if (row == null) -1L else now - number(row.heartbeat)
         return json(
             obj(
-                "tunnel_url" to (row?.tunnel_url ?: null),
-                "version" to (row?.version ?: ""),
+                "tunnel_url" to (row?.tunnel_url?.toString()),
+                "version" to (row?.version?.toString() ?: ""),
                 "heartbeat_age_s" to age,
                 "online" to (age >= 0 && age < 90),
             ),
@@ -83,8 +85,8 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
             return json(
                 obj(
                     "key" to key,
-                    "value" to (row?.value ?: null),
-                    "updated_at" to (if (row == null) 0L else number(row.updated_at)),
+                    "value" to (row?.value?.toString()),
+                    "updated_at" to (if (row == null) 0L else number(row.updated_at).toLong()),
                 ),
             )
         }
@@ -260,22 +262,34 @@ private fun rawJson(value: dynamic, status: Int = 200): dynamic {
     return js("new Response")(payload, obj("status" to status, "headers" to headers))
 }
 
+@Suppress("UNCHECKED_CAST")
+private fun <T> Any?.unsafeCast(): T = this as T
+
 private fun text(body: String, status: Int): dynamic =
     js("new Response")(body, obj("status" to status))
 
 private suspend fun body(request: dynamic): dynamic = try {
-    (request.json() as Promise<dynamic>).await()
+    (request.json() as Any?).unsafeCast<Promise<Any?>>().await()
 } catch (_: Throwable) {
     obj()
 }
 
 private fun statement(db: dynamic, sql: String, args: Array<out Any?>): dynamic {
     val prepared = db.prepare(sql)
-    if (args.isNotEmpty()) prepared.bind(*args)
+    // Dynamic calls take no spread operator, and no statement here needs more
+    // than three parameters.
+    when (args.size) {
+        0 -> Unit
+        1 -> prepared.bind(args[0])
+        2 -> prepared.bind(args[0], args[1])
+        3 -> prepared.bind(args[0], args[1], args[2])
+        else -> prepared.bind(args)
+    }
     return prepared
 }
 
-private fun await(value: dynamic): dynamic = (value as Promise<dynamic>).await()
+private suspend fun await(value: dynamic): dynamic =
+    (value as Any?).unsafeCast<Promise<Any?>>().await()
 
 private suspend fun first(db: dynamic, sql: String, vararg args: Any?): dynamic? =
     await(statement(db, sql, args).first())
