@@ -24,9 +24,11 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -43,7 +45,7 @@ private sealed interface Block {
     data class Heading(val level: Int, val text: String) : Block
     data class Code(val text: String, val language: String) : Block
     data class Quote(val text: String) : Block
-    data class List(val items: List<String>, val ordered: Boolean) : Block
+    data class ItemList(val items: List<String>, val ordered: Boolean) : Block
     data class Rule(val text: String) : Block
     data class Paragraph(val text: String) : Block
 }
@@ -79,11 +81,11 @@ private fun blocks(text: String): List<Block> {
     }
     fun flushList() {
         if (bullets.isNotEmpty()) {
-            out.add(Block.List(ArrayList(bullets), ordered = false))
+            out.add(Block.ItemList(ArrayList(bullets), ordered = false))
             bullets.clear()
         }
         if (ordered.isNotEmpty()) {
-            out.add(Block.List(ArrayList(ordered), ordered = true))
+            out.add(Block.ItemList(ArrayList(ordered), ordered = true))
             ordered.clear()
         }
     }
@@ -307,7 +309,7 @@ fun MarkdownText(
                     )
                 }
 
-                is Block.List -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                is Block.ItemList -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     block.items.forEachIndexed { index, item ->
                         Row(Modifier.fillMaxWidth()) {
                             Text(
