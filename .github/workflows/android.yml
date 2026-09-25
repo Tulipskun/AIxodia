@@ -46,9 +46,21 @@ jobs:
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      # The signing key is a repository secret, not a file in the repository:
+      # a public repo must not publish the key that signs its own updates. A
+      # fresh install without the secret still builds, with a throwaway key.
       - name: Prepare stable signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.AIXODIA_KEYSTORE_B64 }}
         run: |
-          base64 --decode app/aixodia-debug.keystore.b64 > app/aixodia-debug.keystore
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > app/aixodia-debug.keystore
+          else
+            echo "no AIXODIA_KEYSTORE_B64 secret: building with a throwaway debug key"
+            keytool -genkeypair -v -keystore app/aixodia-debug.keystore -storepass android \
+              -alias aixodia -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=AIxodia" >/dev/null
+          fi
           chmod 600 app/aixodia-debug.keystore
 
       - name: Determine release version

@@ -6,6 +6,7 @@ local.properties
 build/
 app/build/
 app/*.keystore
+app/aixodia-debug.keystore.b64
 *.jks
 local.env.json
 
