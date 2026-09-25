@@ -517,9 +517,16 @@ private fun ChatModelSheet(
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val models = providers.firstOrNull { it.id == pickedProvider }?.models.orEmpty()
-    val filtered = remember(models, query) {
-        if (query.isBlank()) models else models.filter { it.id.contains(query, true) || it.name.contains(query, true) }
+    val provider = providers.firstOrNull { it.id == pickedProvider }
+    val models = provider?.models.orEmpty()
+    // The daemon's default model is the one a health check actually got an
+    // answer from, so it leads the list: a catalogue of twenty models says
+    // nothing about which one this key can use.
+    val working = provider?.defaultModel.orEmpty()
+    val filtered = remember(models, query, working) {
+        val searched = if (query.isBlank()) models else models.filter { it.id.contains(query, true) || it.name.contains(query, true) }
+        if (working.isBlank() || searched.none { it.id == working }) searched
+        else listOf(searched.first { it.id == working }) + searched.filter { it.id != working }
     }
     ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
         Column(
@@ -585,9 +592,17 @@ private fun ChatModelSheet(
                             Text(
                                 m.id,
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                fontWeight = if (selected || m.id == working) FontWeight.SemiBold else FontWeight.Normal,
                                 modifier = Modifier.weight(1f),
                             )
+                            if (m.id == working) {
+                                Text(
+                                    "ตอบได้จริง",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                            }
                             if (m.supportsStreaming) {
                                 Text(
                                     "stream",

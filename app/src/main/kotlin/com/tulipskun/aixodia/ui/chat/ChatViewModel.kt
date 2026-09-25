@@ -399,10 +399,15 @@ class ChatViewModel(
         liveSubText = ""
         subAgents.value = emptyList()
         // The footer opens with this turn: which model answers, from when, and
-        // nothing else yet.
+        // nothing else yet. A chat that follows the agent's default says so —
+        // printing whatever route happens to be current later would put another
+        // turn's model next to this turn's tokens.
+        val route = listOf(selectedProvider.value, selectedModel.value)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+            .ifBlank { "ตามค่าของ agent" }
         turnStats.value = TurnStats(
-            model = listOf(selectedProvider.value, selectedModel.value)
-                .filter { it.isNotBlank() }.joinToString(" · "),
+            model = route,
             startedAtMs = SystemClock.elapsedRealtime(),
             running = true,
         )
