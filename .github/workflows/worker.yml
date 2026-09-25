@@ -5,9 +5,11 @@ on:
     branches: ["main"]
     paths:
       - "worker/**"
+      - ".github/workflows/worker.yml"
   pull_request:
     paths:
       - "worker/**"
+      - ".github/workflows/worker.yml"
   workflow_dispatch:
 
 permissions:
