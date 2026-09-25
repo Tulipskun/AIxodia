@@ -30,15 +30,20 @@ kotlin {
  */
 val bundleWorker by tasks.registering {
     val entry = layout.buildDirectory.file("worker/index.mjs")
-    val dist = layout.buildDirectory.dir("dist/js")
+    val buildDir = layout.buildDirectory
     dependsOn("assemble")
     outputs.file(entry)
     outputs.upToDateWhen { false }
     doLast {
-        val compiled = dist.get().asFile.walkTopDown()
-            .filter { it.isFile && it.extension == "mjs" }
-            .maxByOrNull { it.length() }
-            ?: error("no compiled ES module under ${dist.get().asFile}")
+        // The module Gradle emits is named after the project, but the directory
+        // layout differs between plugin versions, so the one that actually
+        // exports the handler is the one that gets wrapped.
+        val root = buildDir.get().asFile
+        val modules = root.walkTopDown().filter { it.isFile && it.extension == "mjs" }.toList()
+        val compiled = modules.firstOrNull { it.readText().contains("handleFetch") }
+            ?: modules.maxByOrNull { it.length() }
+            ?: error("no compiled ES module under $root; found: ${modules.map { it.path }}")
+        logger.lifecycle("worker: wrapping ${compiled.path}")
         val relative = compiled.relativeTo(entry.get().asFile.parentFile).invariantSeparatorsPath
         val target = entry.get().asFile
         target.parentFile.mkdirs()
