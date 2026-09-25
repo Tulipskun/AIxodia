@@ -210,6 +210,11 @@
   rate in tokens per second. While the answer streams the token count and the
   rate are an estimate and are marked `≈`; when the provider reports its usage
   the footer switches to those real numbers without changing anything else.
+- AX-094 — The model sheet leads with the model a health check actually got an
+  answer from (the daemon's default) and tags it `ตอบได้จริง`, because a
+  catalogue says nothing about what this key can use. The footer's route is the
+  route that turn used: a chat with no route of its own says it follows the
+  agent, so the numbers are never labelled with a model from a later turn.
 - AX-093 — Sub agent work is visible and stoppable per worker. Each sub agent the
   daemon reports gets a row with what it is doing and how long it has been at
   it, and its own stop button that stops that worker and leaves the turn
