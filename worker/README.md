@@ -69,8 +69,9 @@ npx wrangler secret put AIXODIA_TOKEN
 npx wrangler deploy
 ```
 
-## Mock parity
+## Local use
 
-`mock/mockdb` implements the same endpoints in Go, so the app can be tested
-without any of the above. Keep the two in sync: schema + contract changes land
-in `worker/schema.sql`, `worker/src/jsMain/kotlin/aixodia/Worker.kt`, and `mock/mockdb/db.go`.
+`wrangler dev` serves the same Worker against a local D1 (`worker/schema.sql`),
+so the contract can be exercised without the deployed database. The Go mock
+stack that used to live here is gone (2026-09-25): this repository is the app
+and the Worker, in Kotlin, and the daemon repository is the server.

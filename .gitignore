@@ -10,10 +10,6 @@ app/aixodia-debug.keystore.b64
 *.jks
 local.env.json
 
-# local mock stack data (acts as the DB while testing)
-mock/mockai-data.json
-mock/*.json
-
 # runtime config + secrets (never commit)
 worker/.dev.vars
 worker/.wrangler/

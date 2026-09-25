@@ -22,8 +22,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * REST client for history + node discovery. The base URL is either the real
- * Cloudflare Worker (production) or the local mock DB (`mock/`, testing) —
- * both speak the same contract, so the app code does not care.
+ * Cloudflare Worker, reached either directly or through the daemon's tunnel —
+ * the app code does not care which address it was given.
  */
 @JsonClass(generateAdapter = true)
 data class TurnRow(

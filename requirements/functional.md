@@ -3,7 +3,7 @@
 ## Transport — direct WebSocket (user chose: WebSocket direct)
 
 - AX-001 — App opens an authenticated WebSocket to the `ai` daemon mobile
-  endpoint (`bridge/` reference server). Frames are JSON `Input` (client→server)
+  endpoint (`ai/transport/mobile/`). Frames are JSON `Input` (client→server)
   and `Output` (server→client) mirroring `sdk/io.go`, with `Turn`/`ContentPart`/
   `Response`/`TraceEvent` shapes from `sdk/types.go` + `sdk/trace.go`.
 - AX-002 — Client sends `{"type":"hello","token":...,"session_id":...,
@@ -74,9 +74,10 @@
 
 ## Mock-first testing + agent attribution (AX-06x)
 
-- AX-060 — `mock/` provides a complete local stack (mock DB REST + mock
-  agent WS + `aiclient` CLI) speaking the production contract, so the app is
-  testable before Cloudflare exists. CI runs its Go tests on every push.
+- AX-060 — Retired 2026-09-25: the Go mock stack is no longer part of this
+  repository. The app is tested against the real daemon and the real Worker
+  (`wrangler dev` for a local D1), so a second implementation of the contract
+  cannot drift from the one that ships.
 - AX-061 — Jobs are server-side: the agent persists each step to the DB before
   broadcasting it, and the job continues after the client disconnects. The app
   pulls the newest rows on open/reconnect and merges them with Room, so closing

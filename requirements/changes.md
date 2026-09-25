@@ -158,3 +158,11 @@
   โมเดลเขียนว่า "ตามค่าของ agent" แทนการไปแสดงค่า route ปัจจุบัน (ซึ่งอาจเปลี่ยนไปแล้ว
   หลัง turn จบ แล้วเอาไปติดกับตัวเลข token ของ turn ก่อนหน้า). เจอตอนทดสอบจริงบนเครื่อง:
   เลือก provider แล้วรายการโมเดลยังเรียงตามแคตตาล็อก ทำให้ต้องเลื่อนหาโมเดลที่ใช้ได้จริง.
+
+- AXCH-020 (2026-09-25) — "ไม่ต้อง mock แล้ว ลบออกไปเลย": ลบ `mock/` (mock DB REST +
+  mock agent WS + `aiclient` CLI, Go) และ `bridge/` (สำเนา `mobile_ws.go`/`tunnel.go`
+  ของ daemon ที่มีอยู่จริงใน `Tulipskun/ai/transport/mobile/` แล้ว) ออกจากโปรเจค พร้อม
+  ตัด Go toolchain + 2 test steps ออกจาก CI, แก้ README/worker README/AX-001/AX-060
+  ให้ชี้ที่ daemon ตัวจริง และเปลี่ยนวิธีทดสอบเป็น daemon ตัวจริง + `wrangler dev`
+  (เหตุผล: โปรเจคนี้คือ frontend + Worker ที่เขียน Kotlin ทั้งหมด การมี implementation
+  ที่สองของสัญญาเดียวกันแยกภาษาคือแหล่งที่ drift และไม่ได้ใช้งานจริงแล้ว).

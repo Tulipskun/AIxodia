@@ -1,8 +1,9 @@
 # AIxodia
 
-Private Android chat client (Kotlin + Compose) for `Tulipskun/ai`.
+Android chat client (Kotlin + Compose) for the `Tulipskun/ai` daemon, with the
+Cloudflare Worker that stores its history also written in Kotlin.
 
-- **Direct live display**: authenticated WebSocket to the `ai` daemon mobile endpoint — JSON `Input`/`Output` frames mirroring `ai/sdk/io.go` (+ `types.go`, `trace.go`). See `bridge/mobile_ws.go`.
+- **Direct live display**: authenticated WebSocket to the `ai` daemon mobile endpoint — JSON `Input`/`Output` frames mirroring `ai/sdk/io.go` (+ `types.go`, `trace.go`). The daemon serves it itself in `ai/transport/mobile/`.
 - **Old history from Cloudflare**: Cloudflare D1 via Worker REST (`worker/`), never direct D1 from the phone.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; open = cache → D1 backfill → WS live tail.
 - **Messenger UX**: Discord-like session drawer + Telegram-like bubbles, typing/tool status, connection dot, retry, pull-older.
@@ -12,20 +13,19 @@ Private Android chat client (Kotlin + Compose) for `Tulipskun/ai`.
 ```text
 app/            Android client (.kt, Compose Material3, Room, OkHttp WS, Worker REST)
 worker/         Cloudflare Worker + D1 schema (wrangler.toml, schema.sql, src/jsMain/kotlin/aixodia/Worker.kt)
-bridge/         Go drop-in mobile WS transport for the ai daemon
 requirements/   spec source of truth (read before code)
 ```
 
 ## Setup
 
 1. **D1 + Worker**: `wrangler d1 create aixodia` → put id in `worker/wrangler.toml` → `wrangler d1 execute aixodia --file=worker/schema.sql` → `wrangler secret put AIXODIA_TOKEN` → `wrangler deploy`.
-2. **Daemon**: wire `bridge/mobile_ws.go` into `ai` (see `bridge/README.md`), expose `:18789/ws`, mirror turns to Worker ingest.
-3. **App**: open in Android Studio, run `app`. Settings (gear icon): WS URL, Worker URL, token, session + Worker test. D1 first: `cd worker && ./setup.sh`. Needs reachable daemon (LAN/Tailscale) or Worker `/ws` proxy.
+2. **Daemon**: build and run `Tulipskun/ai` (`cmd/ai`) with mobile enabled — it serves the WebSocket, opens the quick tunnel and mirrors turns into D1 by itself.
+3. **App**: open in Android Studio, run `app`. Settings (gear icon): the tunnel URL, the D1 token, plus provider/agent configuration. D1 first: `cd worker && ./setup.sh`.
 
 ## Architecture (tunnel + stateless ai)
 
 `ai` serves the mobile WS on localhost only and opens a Cloudflare **quick
-tunnel** (`bridge/tunnel.go`); the random trycloudflare URL is heartbeat-announced
+tunnel** (`ai/transport/mobile/tunnel.go`); the random trycloudflare URL is heartbeat-announced
 to D1, and the app discovers it via `GET /api/node` (Settings → "ค้นหา ai" →
 "ใช้ URL นี้"). `ai` keeps no local state: config/sessions live as JSON blobs
 in D1 (`/api/state`), and the phone's scoped Worker token (sent in the WS hello,
@@ -55,26 +55,8 @@ added without approval; the daemon owns no credential of its own.
 - A fresh app install has empty settings and shows a setup screen instead of
   silently pointing somewhere.
 
-## Test it right now (no Cloudflare needed)
+## Test it right now
 
-```bash
-cd mock
-go run ./cmd/mockai -token devtoken -db 127.0.0.1:39117 -ws 127.0.0.1:39118 -tunnel
-```
-
-Then in the app (gear icon): DB URL `http://<host>:39117`, WS URL
-`ws://<host>:39118/ws` (emulator: `10.0.2.2`), token `devtoken`, or press
-"ค้นหา ai" and use the announced tunnel URL. Details: `mock/README.md`.
-For the real DB, put the deployed Worker URL + `AIXODIA_TOKEN` in the same
-screen — same code path, no rebuild.
-
-## Build / update (no uninstall needed)
-
-CI (`.github/workflows/android.yml`, same shape as Droid-SSH) signs every build
-with the same stable key (`app/aixodia-debug.keystore.b64`) and tags
-`v0.1.<RUN_NUMBER>` with `versionCode=<RUN_NUMBER>`. Installing the new
-`AIxodia.apk` goes OVER the old one — chat cache and settings are kept.
-Unlike Droid-SSH, old Releases are never deleted (rollback possible).
-In-app: drawer → "ตรวจอัปเดต".
-
-Spec: `requirements/` (AX-xxx). Changes: `requirements/changes.md` (AXCH-001/002).
+Start the daemon (`Tulipskun/ai`, mobile enabled), copy the tunnel URL it prints
+into the app's settings together with the D1 token, and send a message. The
+provider, key and per-agent model are set from the phone (AX-083..094).
