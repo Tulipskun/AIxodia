@@ -23,11 +23,12 @@ android {
     }
 
     signingConfigs {
-        // Stable key for sideload: every build signs with the SAME key,
-        // updates install over the old APK with data preserved.
-        // Keystore is decoded from aixodia-debug.keystore.b64 in CI
-        // (same pattern as Droid-SSH). Local dev builds without the
-        // keystore fall back to the default debug key.
+        // Stable key for sideload: every build signs with the SAME key, so
+        // updates install over the old APK with data preserved. CI reads the
+        // keystore from the AIXODIA_KEYSTORE_B64 repository secret; a local
+        // build without it falls back to the default debug key. The key that
+        // used to sit in this repository was replaced on 2026-09-25: a public
+        // repository must not publish the key that signs its own updates.
         create("stable") {
             val stableKeystore = file("aixodia-debug.keystore")
             if (stableKeystore.exists()) {
