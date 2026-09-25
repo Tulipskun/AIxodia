@@ -1,5 +1,6 @@
 package com.tulipskun.aixodia.data.repo
 
+import androidx.room.withTransaction
 import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.local.MessageEntity
 import com.tulipskun.aixodia.data.local.SessionEntity
@@ -135,7 +136,7 @@ class ChatRepository(
         val min = db.messages().minSeq(sid)
         if (db.messages().count(sid) == 0 || min > 1) {
             history.turns(sid, beforeSeq = 0, limit = 200).takeIf { it.isNotEmpty() }?.let { rows ->
-                db.messages().insertAll(rows.map { it.toEntity(sid) })
+                reconcile(sid, rows)
             }
         }
         refreshLatest(sid, skipAtOrBelow = localMax)
@@ -228,9 +229,9 @@ class ChatRepository(
     suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {
         val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
         if (rows.isEmpty()) return
-        db.messages().insertAll(
-            rows.filter { it.seq > skipAtOrBelow }.map { it.toEntity(sid) }
-        )
+        // The whole page goes to reconcile, not just the rows past the local
+        // max: a row the old filter hid is healed instead of lost.
+        reconcile(sid, rows)
         val last = rows.maxByOrNull { it.seq } ?: return
         val cur = db.sessions().get(sid)
         db.sessions().upsert(
@@ -282,7 +283,48 @@ class ChatRepository(
         if (min <= 1) return
         (try { history.turns(sid, beforeSeq = min, limit = 100) } catch (_: Exception) { emptyList() })
             .takeIf { it.isNotEmpty() }?.let { rows ->
-            db.messages().insertAll(rows.map { it.toEntity(sid) })
+            reconcile(sid, rows)
+        }
+    }
+
+    /**
+     * Merges one pulled page into the local table. The phone numbers its
+     * pending row from its own counter while D1 numbers every row MAX+1, so the
+     * two counters can disagree — after a slow user mirror, a dropped write, or
+     * an unlucky restart. Blindly appending past the local max then hides rows
+     * forever behind a seq collision the next pull can never repair, so every
+     * row is decided on its own:
+     *
+     * - no local row at this seq: insert (new row, or a historical gap);
+     * - same role and text: adopt it (clears a stale pending flag);
+     * - different content: the counters diverged. D1 wins, but only when the
+     *   displaced local row's text is also in this page (its true twin): that
+     *   way a message is never deleted without its replacement on screen.
+     *   Otherwise the local row stays — the mirror is still in flight, or the
+     *   twin is outside this page, and dropping either side would lose text.
+     */
+    private suspend fun reconcile(sid: String, rows: List<com.tulipskun.aixodia.data.remote.TurnRow>) {
+        if (rows.isEmpty()) return
+        val entities = rows.map { it.toEntity(sid) }
+        db.withTransaction {
+            for (e in entities.sortedBy { it.seq }) {
+                val existing = db.messages().get(sid, e.seq)
+                if (existing == null) {
+                    db.messages().upsert(e)
+                    continue
+                }
+                if (existing.role == e.role && existing.text == e.text) {
+                    if (existing.pending || existing.createdAt != e.createdAt) {
+                        db.messages().upsert(e.copy(pending = false, clientMsgId = existing.clientMsgId))
+                    }
+                    continue
+                }
+                val twinInPage = entities.any { it.seq != e.seq && it.text == existing.text }
+                if (twinInPage) {
+                    db.messages().deleteOne(sid, e.seq)
+                    db.messages().upsert(e)
+                }
+            }
         }
     }
 

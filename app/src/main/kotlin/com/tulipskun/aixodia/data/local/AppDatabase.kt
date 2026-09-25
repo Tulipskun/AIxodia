@@ -98,6 +98,12 @@ interface MessageDao {
     @Query("UPDATE messages SET pending = 0 WHERE clientMsgId = :clientMsgId")
     suspend fun markAcked(clientMsgId: String)
 
+    @Query("SELECT * FROM messages WHERE sessionId = :sid AND seq = :seq LIMIT 1")
+    suspend fun get(sid: String, seq: Long): MessageEntity?
+
+    @Query("DELETE FROM messages WHERE sessionId = :sid AND seq = :seq")
+    suspend fun deleteOne(sid: String, seq: Long)
+
     @Query("DELETE FROM messages WHERE sessionId = :sid")
     suspend fun deleteSession(sid: String)
 }
