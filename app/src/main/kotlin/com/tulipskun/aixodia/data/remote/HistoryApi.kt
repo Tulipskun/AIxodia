@@ -14,6 +14,7 @@ import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -56,7 +57,16 @@ data class SessionRow(
 
 class HistoryApi(private val settings: SettingsStore) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    private val client = OkHttpClient()
+    // The settings calls are not all instant: asking the daemon to re-check its
+    // providers means waiting for the gateways to answer, through a tunnel that
+    // can take seconds per round trip. The default 10s read timeout cut those
+    // calls off halfway and left the screen with nothing to show.
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(150, TimeUnit.SECONDS)
+        .build()
     private val sessionsAdapter = moshi.adapter(Array<SessionRow>::class.java)
     private val turnsAdapter = moshi.adapter(TurnsPage::class.java)
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)

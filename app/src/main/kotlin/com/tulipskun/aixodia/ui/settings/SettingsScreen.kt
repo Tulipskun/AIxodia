@@ -132,22 +132,33 @@ fun SettingsScreen(
     var pickingKeyFor by remember { mutableStateOf<ProviderStatus?>(null) }
     var testingId by remember { mutableStateOf<String?>(null) }
 
-    val load: suspend (probe: Boolean) -> Unit = { probe ->
+    // load reports whether the daemon answered. A failed read keeps the list it
+    // already had and names the failure: a screen that empties itself and then
+    // says "ทุก provider ใช้งานได้" is worse than no answer at all.
+    val load: suspend (probe: Boolean) -> Boolean = { probe ->
         loading = true
-        providers = runCatching {
+        val loaded = runCatching {
             if (probe) history.refreshProviders() else history.providers()
-        }.getOrDefault(emptyList())
-        // A daemon that answers the probe knows the verdict, and says so. One that
-        // does not report it is still believed about the providers it just tested.
-        if (probe) {
-            probedIds = providers.filter { it.probed || it.lastError.isNotBlank() }.map { it.id }.toSet()
         }
-        catalogue = runCatching { history.models() }.getOrDefault(emptyList())
+        val rows = loaded.getOrNull()
+        if (rows != null) {
+            providers = rows
+            // A daemon that answers the probe knows the verdict, and says so. One
+            // that does not report it is still believed about the providers it
+            // just tested.
+            if (probe) {
+                probedIds = rows.filter { it.probed || it.lastError.isNotBlank() }.map { it.id }.toSet()
+            }
+        } else {
+            msg = "โหลด provider ไม่สำเร็จ: ${loaded.exceptionOrNull()?.message ?: "ไม่รู้สาเหตุ"}"
+        }
+        runCatching { history.models() }.getOrNull()?.let { catalogue = it }
         runCatching { history.agentSettings() }.getOrNull()?.let {
             mainRoute = it.main
             subRoute = it.sub
         }
         loading = false
+        rows != null
     }
 
     // The provider list, the model catalogue and the saved agent routes are
@@ -279,9 +290,14 @@ fun SettingsScreen(
                         onClick = {
                             busy = true
                             scope.launch {
-                                load(true)
-                                val bad = providers.count { !it.reachable }
-                                msg = if (bad == 0) "ทุก provider ใช้งานได้" else "$bad provider ใช้ไม่ได้"
+                                val answered = load(true)
+                                val rows = providers
+                                msg = when {
+                                    !answered -> msg
+                                    rows.isEmpty() -> "daemon ไม่ได้รายงาน provider เลย"
+                                    rows.all { it.reachable } -> "ทุก provider ใช้งานได้"
+                                    else -> "${rows.count { !it.reachable }} provider ใช้ไม่ได้"
+                                }
                                 busy = false
                             }
                         },
@@ -317,16 +333,14 @@ fun SettingsScreen(
                         onTest = {
                             testingId = p.id
                             scope.launch {
-                                val status = history.refreshProvider(p.id)
+                                val status = runCatching { history.refreshProvider(p.id) }.getOrNull()
                                 probedIds = probedIds + p.id
-                                if (status == null) {
-                                    msg = "ทดสอบ ${p.id} ไม่สำเร็จ ( daemon ไม่ตอบ)"
-                                } else if (status.reachable) {
-                                    val model = status.workingModel
-                                    msg = if (model.isNotBlank()) "${p.id} ใช้ได้ (${model})"
-                                    else "${p.id} ใช้ได้ (${status.modelCount} model)"
-                                } else {
-                                    msg = "${p.id} ใช้ไม่ได้"
+                                msg = when {
+                                    status == null -> "ทดสอบ ${p.id} ไม่สำเร็จ ( daemon ไม่ตอบ)"
+                                    status.reachable && status.workingModel.isNotBlank() ->
+                                        "${p.id} ใช้ได้ (${status.workingModel})"
+                                    status.reachable -> "${p.id} ใช้ได้ (${status.modelCount} model)"
+                                    else -> "${p.id} ใช้ไม่ได้"
                                 }
                                 if (status != null) {
                                     providers = providers.map { if (it.id == p.id) status else it }

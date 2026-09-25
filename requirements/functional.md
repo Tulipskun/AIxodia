@@ -192,3 +192,10 @@
   the one request that came back, and a refusal that is temporary (a free tier
   that is out of quota) must read as a refusal rather than as a broken
   provider.
+
+- AX-091 — A settings screen that cannot read the daemon says so and keeps what
+  it had: a failed or timed-out read must never empty the provider list, and a
+  summary must never claim `ทุก provider ใช้งานได้` when the daemon returned no
+  providers at all. The REST client waits long enough for a real provider check
+  (a gateway can take tens of seconds to answer), and a provider test that fails
+  is reported, not thrown.
