@@ -1,5 +1,5 @@
 plugins {
-    kotlin("js") version "2.1.10"
+    kotlin("multiplatform") version "2.1.10"
 }
 
 repositories {
@@ -12,11 +12,15 @@ kotlin {
         // modules: no UMD wrapper, no CommonJS, no Node built-ins.
         useEsModules()
         nodejs()
+        binaries.executable()
     }
-}
-
-dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    sourceSets {
+        val jsMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+            }
+        }
+    }
 }
 
 /**
@@ -27,7 +31,7 @@ dependencies {
 val bundleWorker by tasks.registering {
     val entry = layout.buildDirectory.file("worker/index.mjs")
     val dist = layout.buildDirectory.dir("dist/js")
-    dependsOn("jsProductionCompile")
+    dependsOn("assemble")
     inputs.dir(dist)
     outputs.file(entry)
     doLast {
