@@ -182,3 +182,13 @@
   clipboard, the operator chooses *which* key to drop (keys are never sent
   back, so position is the only honest handle), and one provider can be tested
   on its own instead of waiting for the whole list.
+
+## Provider truth (AX-090)
+
+- AX-090 — A provider card shows the model that actually answered for it
+  (`ตอบได้จริง: <model>`, from the daemon's `working_model`), and the result of
+  a provider test names that model instead of only a model count. A catalogue
+  the gateway lists is not proof that anything answers, so the phone must show
+  the one request that came back, and a refusal that is temporary (a free tier
+  that is out of quota) must read as a refusal rather than as a broken
+  provider.

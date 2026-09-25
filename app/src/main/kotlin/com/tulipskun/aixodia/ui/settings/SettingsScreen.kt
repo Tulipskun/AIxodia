@@ -322,7 +322,9 @@ fun SettingsScreen(
                                 if (status == null) {
                                     msg = "ทดสอบ ${p.id} ไม่สำเร็จ ( daemon ไม่ตอบ)"
                                 } else if (status.reachable) {
-                                    msg = "${p.id} ใช้ได้ (${status.modelCount} model)"
+                                    val model = status.workingModel
+                                    msg = if (model.isNotBlank()) "${p.id} ใช้ได้ (${model})"
+                                    else "${p.id} ใช้ได้ (${status.modelCount} model)"
                                 } else {
                                     msg = "${p.id} ใช้ไม่ได้"
                                 }
@@ -629,6 +631,13 @@ private fun ProviderCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant,
             )
+            if (provider.workingModel.isNotBlank()) {
+                Text(
+                    "ตอบได้จริง: ${provider.workingModel}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
             Text(
                 provider.endpoint,
                 style = MaterialTheme.typography.bodySmall,
@@ -778,7 +787,8 @@ private fun ProviderSheet(
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                         )
                         Text(
-                            p.statusLine(p.id in probedIds) + " · key ${p.keyCount} · model ${p.modelCount}",
+                            p.statusLine(p.id in probedIds) + " · key ${p.keyCount} · model ${p.modelCount}" +
+                                if (p.workingModel.isNotBlank()) " · ตอบได้: ${p.workingModel}" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

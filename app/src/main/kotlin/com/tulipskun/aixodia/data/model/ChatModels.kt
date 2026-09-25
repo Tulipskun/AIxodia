@@ -59,6 +59,7 @@ data class ProviderStatus(
     @Json(name = "model_count") val modelCount: Int = 0,
     @Json(name = "reachable") val reachable: Boolean = false,
     @Json(name = "probed") val probed: Boolean = false,
+    @Json(name = "working_model") val workingModel: String = "",
     @Json(name = "last_error") val lastError: String = "",
 )
 
