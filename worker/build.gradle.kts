@@ -1,6 +1,7 @@
+import org.jetbrains.kotlin.gradle.dsl.KotlinJsModuleKind
+
 plugins {
     kotlin("js") version "2.1.10"
-    id("org.jetbrains.kotlin.plugin.compose") version "2.1.10" apply false
 }
 
 repositories {
@@ -8,24 +9,20 @@ repositories {
 }
 
 kotlin {
-    js(IR) {
+    js {
+        outputModuleName.set("aixodia-worker")
+        nodejs()
         // Cloudflare runs the module through workerd, so the output has to be a
         // real ES module with named exports — no Node built-ins, no CommonJS.
-        moduleKind = org.jetbrains.kotlin.gradle.dsl.KotlinJsModuleKind.ES
-        outputModuleName.set("aixodia-worker")
-        generateTypeScriptDefinitions()
-        nodejs()
-    }
-    sourceSets {
-        val jsMain by getting {
-            dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-            }
+        compilerOptions {
+            moduleKind.set(KotlinJsModuleKind.ES)
         }
     }
 }
 
-val bundleDir = layout.buildDirectory.dir("worker")
+dependencies {
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+}
 
 /**
  * Wrangler wants a module whose default export is the worker object. Kotlin
@@ -33,13 +30,13 @@ val bundleDir = layout.buildDirectory.dir("worker")
  * rather than checked in as another language in the tree.
  */
 val bundleWorker by tasks.registering {
-    dependsOn("jsProductionCompile")
-    val output = bundleDir.map { it.asFile.resolve("index.mjs") }
+    val entry = layout.buildDirectory.file("worker/index.mjs")
     val compiled = layout.buildDirectory.file("dist/js/productionExecutable/aixodia-worker.mjs")
+    dependsOn("jsProductionExecutable")
     inputs.file(compiled)
-    outputs.file(output)
+    outputs.file(entry)
     doLast {
-        val target = output.get().asFile
+        val target = entry.get().asFile
         target.parentFile.mkdirs()
         target.writeText(
             """
