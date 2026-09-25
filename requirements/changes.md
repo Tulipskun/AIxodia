@@ -139,3 +139,16 @@
   ทิ้งกลางคัน. ฝั่ง daemon ตรงกับ CHANGE-070/REQ-048(10) (ตรวจ provider พร้อมกันทีละ 4 ตัว
   ภายใต้งบ 25 วินาทีต่อตัว) ผลจริงบนเครื่องจริง: ก่อนแก้ กดแล้วรายการหายและข้อความโกหก;
   หลังแก้ รายการยังอยู่และข้อความตรงกับคำตอบของ daemon.
+
+- AXCH-018 (2026-09-25) — "การแสดงผลแชทควรแสดงเต็มหน้าจอ แสดง footer สำหรับ
+  token/model/เวลาที่ใช้/การแสดง Animation/การแสดงการทำงานของ sub agent/การหยุด sub agent
+  และเพิ่มแสดง token/s แบบ realtime": เพิ่ม AX-092/AX-093 — แชทเต็มจอ (Scaffold ไม่ inset
+  ซ้ำ, thread ใช้ทั้งหน้าต่าง), progress bar + ป้าย "กำลังตอบ" ที่เต้นเบา ๆ ระหว่างทำงาน,
+  footer ใต้ช่องพิมพ์แสดง `provider · model · token · เวลา · tok/s` (ตัวเลขที่กำลัง stream
+  เป็นค่าประมาณและขึ้น `≈` แต่พอ provider รายงาน usage จริงก็เปลี่ยนเป็นตัวเลขจริงทันที), และแผง
+  "sub agent" หนึ่งแถวต่อ worker พร้อมปุ่ม "หยุด" เฉพาะตัว (ส่ง `cancel` ที่มี `job_id`;
+  ปุ่มหยุดเดิมยังหยุดทั้ง turn). ฝั่ง daemon ตรงกับ CHANGE-072/REQ-048(11): `cancel` รับ
+  `job_id`, `sdk.Agent.StopSubAgent` ยกเลิกเฉพาะ job นั้นโดยไม่หยุด turn และ adapter อ่าน
+  `usage` จาก stream (ขอ `stream_options.include_usage` + รับ chunk ปิดท้ายของ
+  chat/completions และ `response.completed` ของ Responses API) เพื่อให้ตัวเลข token เป็น
+  ของจริง ไม่ใช่การเดา.

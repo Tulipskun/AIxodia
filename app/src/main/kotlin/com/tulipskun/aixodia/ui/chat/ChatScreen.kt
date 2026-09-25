@@ -2,6 +2,12 @@
 
 package com.tulipskun.aixodia.ui.chat
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -13,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -49,6 +56,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
@@ -74,6 +82,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -137,6 +147,8 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val busy by vm.busy.collectAsState()
     val liveText by vm.liveText.collectAsState()
     val liveSteps by vm.liveSteps.collectAsState()
+    val subAgents by vm.subAgents.collectAsState()
+    val stats by vm.turnStats.collectAsState()
     val providers by vm.providers.collectAsState()
     val pickedProvider by vm.selectedProvider.collectAsState()
     val pickedModel by vm.selectedModel.collectAsState()
@@ -161,6 +173,20 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
 
     val listState = rememberLazyListState()
     val clip = LocalClipboardManager.current
+    // One clock for the whole screen: the footer, the rate and every sub agent
+    // row read the same millisecond, so their numbers agree with each other.
+    var nowMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(busy, subAgents.isNotEmpty()) {
+        while (busy || subAgents.any { it.running }) {
+            nowMs = android.os.SystemClock.elapsedRealtime()
+            kotlinx.coroutines.delay(200)
+        }
+    }
+    val routeLabel = when {
+        pickedProvider.isBlank() -> ""
+        pickedModel.isBlank() -> pickedProvider
+        else -> "$pickedProvider · $pickedModel"
+    }
     LaunchedEffect(toast) {
         if (toast.isNotBlank()) {
             kotlinx.coroutines.delay(2200)
@@ -271,6 +297,11 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
         }
     ) {
         Scaffold(
+            // Edge to edge: the app bar and the input bar each handle their own
+            // system-bar insets, so the thread gets the whole window instead of
+            // being inset twice.
+            containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopAppBar(
                     title = {
@@ -334,6 +365,18 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                                 modifier = Modifier.padding(bottom = 2.dp),
                             )
                         }
+                        if (busy) {
+                            // Motion that means something: the agent is working
+                            // and this is how long it has been at it.
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 4.dp)
+                                    .semantics { contentDescription = "agent กำลังทำงาน" },
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            )
+                        }
                         if (status.isNotEmpty()) {
                             Text(
                                 status,
@@ -371,6 +414,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                                 }
                             }
                         }
+                        if (subAgents.isNotEmpty()) {
+                            SubAgentPanel(
+                                agents = subAgents,
+                                nowMs = nowMs,
+                                onStop = { vm.stopSubAgent(it) },
+                            )
+                        }
+                        TurnFooter(stats = stats, model = routeLabel, nowMs = nowMs)
                         Row(verticalAlignment = Alignment.Bottom) {
                             OutlinedTextField(
                                 value = draft,
@@ -408,7 +459,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
                 if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty()) {
                     item {
@@ -640,6 +691,106 @@ private fun SessionRow(
     }
 }
 
+/**
+ * What the sub agents of this turn are doing, one row each, with a stop button
+ * per row. The daemon sends the frames, so the panel never claims work that did
+ * not happen: a row appears when a sub agent frame arrives and its state changes
+ * only when the daemon says so.
+ */
+@Composable
+private fun SubAgentPanel(
+    agents: List<SubAgentActivity>,
+    nowMs: Long,
+    onStop: (String) -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "sub agent ${agents.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            agents.forEach { a ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val (dot, tint) = when {
+                        a.stopping -> "◐" to MaterialTheme.colorScheme.tertiary
+                        a.running -> "●" to MaterialTheme.colorScheme.primary
+                        else -> "✓" to MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "${a.detail.ifBlank { a.label }} · ${seconds(a.elapsedMs(nowMs))}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = when {
+                                a.stopping -> "กำลังหยุด…"
+                                a.running -> a.jobId
+                                else -> "หยุดแล้ว · ${a.jobId}"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    Text(dot, color = tint, style = MaterialTheme.typography.labelSmall)
+                    if (a.running && !a.stopping) {
+                        Spacer(Modifier.size(4.dp))
+                        TextButton(
+                            onClick = { onStop(a.jobId) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text("  หยุด")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The footer of the chat: which model is answering, what it cost in tokens, how
+ * long it has taken and how fast it is going. While the answer streams the
+ * numbers are an estimate and say so; when the provider reports its usage they
+ * become the real ones.
+ */
+@Composable
+private fun TurnFooter(stats: TurnStats, model: String, nowMs: Long) {
+    if (stats.startedAtMs == 0L) return
+    val elapsed = seconds(stats.elapsedMs(nowMs))
+    val tokens = stats.outputTokensNow()
+    val rate = stats.tokensPerSecond(nowMs)
+    val mark = if (stats.exact) "" else "≈"
+    Text(
+        text = buildString {
+            val route = stats.model.ifBlank { model }
+            if (route.isNotBlank()) append(route).append(" · ")
+            append(mark).append(tokens).append(" token")
+            if (stats.inputTokens > 0) append(" (↑").append(stats.inputTokens).append(")")
+            append(" · ").append(elapsed)
+            if (rate > 0.0) append(" · ").append(mark).append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
+            if (stats.running) append(" · กำลังทำงาน")
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+    )
+}
+
+/** Whole seconds, or one decimal under ten, so a short turn is not "0s". */
+private fun seconds(millis: Long): String = when {
+    millis < 10_000 -> String.format(Locale.US, "%.1fs", millis / 1000.0)
+    else -> "${millis / 1000}s"
+}
+
 @Composable
 private fun ConnDot(c: ConnState) {
     val (label, color) = when (c) {
@@ -652,6 +803,17 @@ private fun ConnDot(c: ConnState) {
 
 @Composable
 private fun LiveBubble(text: String) {
+    // A slow pulse on the "กำลังตอบ" line: motion that says the answer is
+    // still coming, and stops the moment it has.
+    val pulse by rememberInfiniteTransition(label = "live-answer").animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "live-answer-alpha",
+    )
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Card(
             modifier = Modifier.widthIn(max = 360.dp),
@@ -664,7 +826,7 @@ private fun LiveBubble(text: String) {
                     Text(
                         "กำลังตอบ",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulse),
                     )
                 }
                 Text(text, style = MaterialTheme.typography.bodyMedium)

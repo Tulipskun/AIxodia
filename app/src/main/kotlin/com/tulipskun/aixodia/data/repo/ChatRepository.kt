@@ -194,6 +194,9 @@ class ChatRepository(
     /** Stops the turn the daemon is running for this chat. */
     fun stopTurn(sid: String): Boolean = socket.cancel(sid)
 
+    /** Stops one sub agent of this chat and leaves the turn running. */
+    fun stopSubAgent(sid: String, jobId: String): Boolean = socket.cancelSubAgent(sid, jobId)
+
     /** The provider and model the daemon currently offers, for the picker. */
     suspend     fun models(): List<ProviderView> = history.models()
 

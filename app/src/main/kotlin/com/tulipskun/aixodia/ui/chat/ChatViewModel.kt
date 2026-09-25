@@ -2,7 +2,9 @@ package com.tulipskun.aixodia.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.os.SystemClock
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -10,6 +12,49 @@ import com.tulipskun.aixodia.data.repo.ChatRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+
+/** One sub agent the daemon is running (or just finished) for this chat. */
+data class SubAgentActivity(
+    val jobId: String,
+    val label: String,
+    val detail: String,
+    val startedAtMs: Long,
+    val running: Boolean,
+    val stopping: Boolean = false,
+) {
+    fun elapsedMs(nowMs: Long): Long = (nowMs - startedAtMs).coerceAtLeast(0L)
+}
+
+/**
+ * What the footer shows about the turn on screen: which model, how many tokens
+ * it used, how long it took and how fast. Counts are exact once the provider
+ * reports them and an estimate (marked with ≈) while the answer is still
+ * streaming, because a phone that shows nothing until the turn ends is not a
+ * live view of anything.
+ */
+data class TurnStats(
+    val model: String = "",
+    val inputTokens: Int = 0,
+    val outputTokens: Int = 0,
+    val exact: Boolean = false,
+    val startedAtMs: Long = 0L,
+    val endedAtMs: Long = 0L,
+    val estimatedTokens: Int = 0,
+    val running: Boolean = false,
+) {
+    fun elapsedMs(nowMs: Long): Long {
+        val end = if (endedAtMs > 0L) endedAtMs else nowMs
+        return (end - startedAtMs).coerceAtLeast(0L)
+    }
+
+    fun outputTokensNow(): Int = if (exact) outputTokens else estimatedTokens
+
+    fun tokensPerSecond(nowMs: Long): Double {
+        val millis = elapsedMs(nowMs)
+        if (millis <= 0L) return 0.0
+        return outputTokensNow().toDouble() * 1000.0 / millis.toDouble()
+    }
+}
 
 class ChatViewModel(
     private val repo: ChatRepository,
@@ -42,7 +87,14 @@ class ChatViewModel(
     val liveAgent = MutableStateFlow("main")
     val liveSteps = MutableStateFlow<List<ToolStep>>(emptyList())
     val providers = MutableStateFlow<List<ProviderView>>(emptyList())
+
+    /** The sub agents this turn started, newest last, each with its own stop. */
+    val subAgents = MutableStateFlow<List<SubAgentActivity>>(emptyList())
+
+    /** Model, tokens, elapsed time and rate for the footer. */
+    val turnStats = MutableStateFlow(TurnStats())
     private var liveSubText = ""
+    private var liveChars = 0
     val selectedProvider = MutableStateFlow("")
     val selectedModel = MutableStateFlow("")
 
@@ -72,18 +124,19 @@ class ChatViewModel(
                 when (f.kind) {
                     // One streamed chunk: append to the bubble the phone is
                     // already showing, or to the sub agent's status line.
-                    "delta" -> onDelta(f.agent, f.text)
+                    "delta" -> onDelta(f.agent, f.text, f)
                     // The authoritative answer. A streamed turn already filled
                     // the bubble, so this only confirms it.
-                    "message" -> onMessage(f.agent, f.text)
+                    "message" -> onMessage(f.agent, f.text, f)
                     "trace" -> onTrace(f)
-                    "done" -> onTurnDone(f.stage)
+                    "done" -> onTurnDone(f)
                     "error" -> {
                         status.value = ""
                         liveText.value = ""
                         liveSteps.value = emptyList()
                         busy.value = false
                         notice.value = f.text
+                        finishStats()
                     }
                     // The ack only means the message reached the daemon. The
                     // turn keeps running until `done`, and until then the stop
@@ -94,32 +147,78 @@ class ChatViewModel(
         }
     }
 
-    private fun onDelta(agent: String, chunk: String) {
+    private fun onDelta(agent: String, chunk: String, frame: AiOutput? = null) {
         if (chunk.isEmpty()) return
         if (agent.isNotEmpty() && agent != "main") {
             status.value = "${if (agent == "sub") "sub" else agent}: " + (liveSubText + chunk).take(80)
             liveSubText += chunk
+            noteSubAgent(frame, chunk.take(80))
             return
         }
         liveAgent.value = agent.ifEmpty { "main" }
         liveText.value += chunk
+        liveChars += chunk.length
+        estimateTokens()
         busy.value = true
     }
 
-    private fun onMessage(agent: String, text: String) {
+    /**
+     * While the answer streams, the exact token count is still unknown: the
+     * provider only reports it at the end. Four characters per token is the
+     * usual rule of thumb, and the footer marks it with ≈ so nobody reads it as
+     * a bill.
+     */
+    private fun estimateTokens() {
+        val stats = turnStats.value
+        if (stats.exact) return
+        turnStats.value = stats.copy(estimatedTokens = (liveChars + 3) / 4)
+    }
+
+    private fun onMessage(agent: String, text: String, frame: AiOutput? = null) {
         if (text.isBlank()) return
         if (agent.isNotEmpty() && agent != "main") {
             status.value = "${if (agent == "sub") "sub" else agent}: " + text.take(80)
             liveSubText = text
+            noteSubAgent(frame, text.take(80))
             return
         }
         // Replace whatever streamed in with the daemon's own copy: it is the one
         // that also lands in D1.
         liveText.value = text
+        recordUsage(frame)
         busy.value = true
     }
 
-    private fun onTrace(f: com.tulipskun.aixodia.data.model.AiOutput) {
+    /**
+     * The daemon reports the real token counts on the final message. From then
+     * on the footer shows those numbers instead of the estimate, and the rate is
+     * computed from them.
+     */
+    private fun recordUsage(frame: AiOutput?) {
+        if (frame == null) return
+        val input = frame.inputTokens
+        val output = frame.outputTokens
+        if (input <= 0 && output <= 0) return
+        turnStats.value = turnStats.value.copy(
+            inputTokens = input,
+            outputTokens = output,
+            exact = true,
+            estimatedTokens = output,
+        )
+    }
+
+    private fun onTrace(f: AiOutput) {
+        if (f.agent.isNotEmpty() && f.agent != "main") {
+            val detail = when (f.stage) {
+                "tool_call", "tool_running" -> "กำลังใช้ ${f.toolCall?.name ?: "เครื่องมือ"}"
+                "tool_result" -> if (f.toolResult?.isError == true) "เครื่องมือล้มเหลว" else "เครื่องมือเสร็จแล้ว"
+                "request" -> "กำลังส่งงาน"
+                "response_text" -> "กำลังคิด"
+                "retry_wait" -> "รอสลองใหม่"
+                else -> f.text.ifEmpty { f.stage }
+            }
+            noteSubAgent(f, detail)
+        }
         when (f.stage) {
             "tool_call", "tool_running" -> {
                 val name = f.toolCall?.name ?: return
@@ -148,7 +247,14 @@ class ChatViewModel(
         }
     }
 
-    private fun onTurnDone(stage: String) {
+    private fun onTurnDone(frame: AiOutput) {
+        val stage = frame.stage
+        // A cancel that named a job answers for that job only: the turn keeps
+        // running, so the busy state and the stream stay as they are.
+        if (stage.startsWith("subagent_")) {
+            onSubAgentStopped(frame)
+            return
+        }
         if (stage == "cancelled") {
             notice.value = "หยุดการทำงานแล้ว"
         } else if (stage == "already_done") {
@@ -160,9 +266,70 @@ class ChatViewModel(
         liveSubText = ""
         liveSteps.value = emptyList()
         busy.value = false
+        subAgents.value = subAgents.value.map { it.copy(running = false) }
+        finishStats()
         // The daemon mirrored the turn into D1; pull it so the bubble is
         // replaced by the stored row instead of a second copy.
         if (streamed.isNotBlank()) refresh()
+    }
+
+    /** Freezes the footer's numbers when the turn ends. */
+    private fun finishStats() {
+        val stats = turnStats.value
+        if (stats.startedAtMs == 0L) return
+        turnStats.value = stats.copy(running = false, endedAtMs = SystemClock.elapsedRealtime())
+    }
+
+    /**
+     * Keeps one row per sub agent: what it is doing, how long it has been at it,
+     * and whether it is still running. The phone is the only place the user can
+     * see that work at all, so the row is built from the frames, not guessed.
+     */
+    private fun noteSubAgent(frame: AiOutput?, detail: String) {
+        val jobId = frame?.jobId?.takeIf { it.isNotBlank() } ?: return
+        val now = SystemClock.elapsedRealtime()
+        val rows = subAgents.value
+        val existing = rows.firstOrNull { it.jobId == jobId }
+        val row = if (existing == null) {
+            SubAgentActivity(jobId = jobId, label = "sub", detail = detail, startedAtMs = now, running = true)
+        } else {
+            existing.copy(detail = detail, running = true, stopping = false)
+        }
+        subAgents.value = if (existing == null) rows + row else rows.map { if (it.jobId == jobId) row else it }
+    }
+
+    private fun onSubAgentStopped(frame: AiOutput) {
+        val jobId = frame.jobId.takeIf { it.isNotBlank() } ?: return
+        val rows = subAgents.value
+        when (frame.stage) {
+            "subagent_stopping" -> {
+                subAgents.value = rows.map { if (it.jobId == jobId) it.copy(stopping = true) else it }
+                status.value = "กำลังหยุด sub agent…"
+            }
+            "subagent_not_found" -> {
+                subAgents.value = rows.filterNot { it.jobId == jobId }
+                notice.value = "ไม่พบ sub agent ที่หยุด — อาจจบไปแล้ว"
+            }
+            "subagent_stop_failed" -> {
+                subAgents.value = rows.map { if (it.jobId == jobId) it.copy(stopping = false) else it }
+                notice.value = "หยุด sub agent ไม่สำเร็จ"
+            }
+        }
+    }
+
+    /**
+     * The per-row stop: one worker stops, the turn that delegated to it keeps
+     * going. The daemon answers for the job, and that answer is what moves the
+     * row, so the button never has to guess.
+     */
+    fun stopSubAgent(jobId: String) {
+        if (jobId.isBlank()) return
+        if (!repo.stopSubAgent(sessionId, jobId)) {
+            notice.value = "ส่งคำสั่งหยุด sub agent ไม่ได้ — socket ไม่ออนไลน์"
+            return
+        }
+        subAgents.value = subAgents.value.map { if (it.jobId == jobId) it.copy(stopping = true) else it }
+        status.value = "กำลังหยุด sub agent…"
     }
 
     /**
@@ -228,6 +395,17 @@ class ChatViewModel(
     fun send(text: String) {
         if (text.isBlank()) return
         busy.value = true
+        liveChars = 0
+        liveSubText = ""
+        subAgents.value = emptyList()
+        // The footer opens with this turn: which model answers, from when, and
+        // nothing else yet.
+        turnStats.value = TurnStats(
+            model = listOf(selectedProvider.value, selectedModel.value)
+                .filter { it.isNotBlank() }.joinToString(" · "),
+            startedAtMs = SystemClock.elapsedRealtime(),
+            running = true,
+        )
         viewModelScope.launch { repo.send(sessionId, text.trim()) }
     }
 

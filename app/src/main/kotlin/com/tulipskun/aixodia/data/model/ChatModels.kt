@@ -117,6 +117,9 @@ data class AiInput(
     @Json(name = "session_id") val sessionId: String = "",
     @Json(name = "role") val role: String = "user",
     @Json(name = "content") val content: List<ContentPart> = emptyList(),
+    // A cancel that names a job stops that one sub agent; without it the
+    // cancel stops the whole turn.
+    @Json(name = "job_id") val jobId: String = "",
     @Json(name = "client_msg_id") val clientMsgId: String = "",
 )
 

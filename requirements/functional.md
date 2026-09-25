@@ -199,3 +199,20 @@
   providers at all. The REST client waits long enough for a real provider check
   (a gateway can take tens of seconds to answer), and a provider test that fails
   is reported, not thrown.
+
+## Live turn view (AX-092, AX-093)
+
+- AX-092 — The chat is a live view of the turn, not a transcript that fills in
+  at the end. The thread uses the whole window (edge to edge, the app bar and
+  the input bar own their own insets), an indeterminate progress bar and a
+  breathing "กำลังตอบ" label say the agent is working, and a footer under the
+  input names the model, the tokens it used, how long the turn has taken and the
+  rate in tokens per second. While the answer streams the token count and the
+  rate are an estimate and are marked `≈`; when the provider reports its usage
+  the footer switches to those real numbers without changing anything else.
+- AX-093 — Sub agent work is visible and stoppable per worker. Each sub agent the
+  daemon reports gets a row with what it is doing and how long it has been at
+  it, and its own stop button that stops that worker and leaves the turn
+  running; the turn's own stop button keeps stopping everything. A row changes
+  state only when the daemon says so: `subagent_stopping`, then the worker's own
+  final report, or `subagent_not_found` when the job had already ended.

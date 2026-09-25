@@ -84,6 +84,17 @@ class AiDirectSocket(private val settings: SettingsStore) {
         return ws?.send(inAdapter.toJson(frame)) == true
     }
 
+    /**
+     * Stops one sub agent job and leaves the turn running. The daemon answers
+     * with a `done` frame that carries the job id and what it did, so the phone
+     * updates that row instead of ending the thread.
+     */
+    fun cancelSubAgent(sessionId: String, jobId: String): Boolean {
+        if (jobId.isBlank()) return false
+        val frame = AiInput(type = "cancel", sessionId = sessionId, jobId = jobId)
+        return ws?.send(inAdapter.toJson(frame)) == true
+    }
+
     fun close() {
         wantOpen = false
         ws?.close(1000, "ui")
