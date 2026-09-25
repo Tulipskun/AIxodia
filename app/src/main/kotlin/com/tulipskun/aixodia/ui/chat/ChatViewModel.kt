@@ -432,7 +432,6 @@ class ChatViewModel(
                 }
             }
 
-            }
             // No stored route means this chat follows the daemon's agent default:
             // the picker must not invent one and make it look already chosen.
         }
