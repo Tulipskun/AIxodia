@@ -21,7 +21,7 @@
 
 - AX-010 — Cloud source of truth is Cloudflare D1 (tables in `worker/schema.sql`,
   mirrored from `sdk/session_db.go`: `sessions` + `turns`). The app never talks
-  to D1 directly; it calls Worker REST in `worker/src/main/kotlin/aixodia/Worker.kt`.
+  to D1 directly; it calls Worker REST in `worker/src/jsMain/kotlin/aixodia/Worker.kt`.
 - AX-011 — `GET /api/sessions` → session list. `GET /api/sessions/:id/turns?
   before_seq=&limit=` → paged history (newest-first, default 50).
 - AX-012 — Merge order per session open: (1) render Room cache instantly,

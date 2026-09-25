@@ -11,7 +11,7 @@ Private Android chat client (Kotlin + Compose) for `Tulipskun/ai`.
 
 ```text
 app/            Android client (.kt, Compose Material3, Room, OkHttp WS, Worker REST)
-worker/         Cloudflare Worker + D1 schema (wrangler.toml, schema.sql, src/main/kotlin/aixodia/Worker.kt)
+worker/         Cloudflare Worker + D1 schema (wrangler.toml, schema.sql, src/jsMain/kotlin/aixodia/Worker.kt)
 bridge/         Go drop-in mobile WS transport for the ai daemon
 requirements/   spec source of truth (read before code)
 ```

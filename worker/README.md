@@ -1,6 +1,6 @@
 # worker/ — Cloudflare Worker + D1 (production history store)
 
-The Worker is Kotlin: `src/main/kotlin/aixodia/Worker.kt` compiles to an ES
+The Worker is Kotlin: `src/jsMain/kotlin/aixodia/Worker.kt` compiles to an ES
 module with Gradle (`./gradlew buildWorker`) and `build/worker/index.mjs` is the
 entry wrangler loads. There is no TypeScript in this project any more — the app
 is the product, so the whole repo is Kotlin.
@@ -73,4 +73,4 @@ npx wrangler deploy
 
 `mock/mockdb` implements the same endpoints in Go, so the app can be tested
 without any of the above. Keep the two in sync: schema + contract changes land
-in `worker/schema.sql`, `worker/src/main/kotlin/aixodia/Worker.kt`, and `mock/mockdb/db.go`.
+in `worker/schema.sql`, `worker/src/jsMain/kotlin/aixodia/Worker.kt`, and `mock/mockdb/db.go`.
