@@ -36,16 +36,12 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
 
     if (path == "/api/node" && method == "GET") {
         val row = first(db, "SELECT tunnel_url, version, heartbeat FROM nodes WHERE id = 'ai'")
-        val now = (js("Date.now")() as Double / 1000.0).toLong()
-        val age = if (row == null) -1L else now - number(row.heartbeat)
-        return json(
-            obj(
-                "tunnel_url" to (row?.tunnel_url?.toString()),
-                "version" to (row?.version?.toString() ?: ""),
-                "heartbeat_age_s" to age,
-                "online" to (age >= 0 && age < 90),
-            ),
-        )
+        val now: Long = (js("Date.now")() as Double / 1000.0).toLong()
+        val tunnelUrl: String? = row?.tunnel_url?.toString()
+        val version: String = row?.version?.toString() ?: ""
+        val age: Long = if (row == null) -1L else now - number(row.heartbeat).toLong()
+        val online: Boolean = age >= 0L && age < 90L
+        return json(obj("tunnel_url" to tunnelUrl, "version" to version, "heartbeat_age_s" to age, "online" to online))
     }
     if (path == "/api/node/heartbeat" && method == "POST") {
         val body = body(request)
@@ -73,7 +69,7 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
             return json(obj("error" to "bad prefix"), 400)
         }
         val result = all(db, "SELECT key FROM state WHERE key >= ? ORDER BY key LIMIT 200", prefix)
-        val keys = rows(result).map { it.key.toString() }
+        val keys: List<String> = rows(result).map { it.key.toString() }
         return json(obj("keys" to keys))
     }
     val stateKey = afterPrefix(path, "/api/state/")
@@ -82,13 +78,9 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
         if (!KEY_RE.containsMatchIn(key)) return json(obj("error" to "bad key"), 400)
         if (method == "GET") {
             val row = first(db, "SELECT value, updated_at FROM state WHERE key = ?", key)
-            return json(
-                obj(
-                    "key" to key,
-                    "value" to (row?.value?.toString()),
-                    "updated_at" to (if (row == null) 0L else number(row.updated_at).toLong()),
-                ),
-            )
+            val value: String? = row?.value?.toString()
+            val updatedAt: Long = if (row == null) 0L else number(row.updated_at).toLong()
+            return json(obj("key" to key, "value" to value, "updated_at" to updatedAt))
         }
         if (method == "PUT") {
             val value = valueOf(body(request))
@@ -178,7 +170,8 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
                 before.toLong(),
                 limit.toLong(),
             )
-            return rawJson(obj("turns" to rows(result).reversed()))
+            val list: List<dynamic> = rows(result).reversed()
+            return rawJson(obj("turns" to list))
         }
         if (method == "POST") {
             val payload = body(request)
@@ -193,7 +186,8 @@ private suspend fun route(request: dynamic, env: dynamic): dynamic {
                 }
             }
             val max = first(db, "SELECT COALESCE(MAX(seq),0) AS m FROM turns WHERE session_id = ?", sid)
-            val seq = number(max?.m).toLong() + 1
+            val next: Long = number(max?.m).toLong() + 1L
+            val seq: Long = next
             run(
                 db,
                 "INSERT INTO turns(session_id, seq, role, agent, job_id, text) VALUES(?,?,?,?,?,?)",
