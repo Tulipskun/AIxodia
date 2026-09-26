@@ -24,7 +24,7 @@
   to D1 directly; it calls Worker REST in `worker/src/jsMain/kotlin/aixodia/Worker.kt`.
 - AX-011 — `GET /api/sessions` → session list. `GET /api/sessions/:id/turns?
   before_seq=&limit=` → paged history (newest-first, default 50).
-- AX-012 — Merge order per session open: (1) render Room cache instantly,
+- AX-012 — Merge order per session open, with reconcile instead of blind append: (1) render Room cache instantly,
   (2) fetch D1 pages, upsert into Room, (3) attach WebSocket live tail.
   No duplicate seqs; `(session_id, seq)` is unique.
 - AX-013 — Offline-first: airplane mode still shows cached threads; send
@@ -249,6 +249,15 @@
   still shows them. A message with no numbers shows no footer rather than zeros
   dressed up as a measurement. While an answer is still streaming its footer
   marks the counts with ≈.
+- AX-096A — A pulled page that matches nothing local at all means the session id
+  was reborn server-side (deleted and recreated, so D1 holds a new conversation
+  under an old id). Merging would only stack two threads on the same seqs, so
+  D1 is adopted wholesale instead: stale non-pending rows go, pending rows stay
+  only while their text is nowhere in the page, and a pending row D1 already has
+  is dropped in favour of D1's copy. A page that does match goes through the
+  per-row reconcile (insert when absent, adopt when identical, D1-wins only with
+  the twin in the same page).
+
 - AX-096 — The thread has no bubbles. A message runs the full width of the
   screen with no card around it, an answer is drawn as Markdown (headings,
   emphasis, inline and fenced code, lists, quotes, rules) and half-written

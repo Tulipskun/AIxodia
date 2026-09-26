@@ -200,3 +200,13 @@ Status: accepted
   footer เก็บ `cache_read/cache_write` พร้อม in/out/duration, streaming ประมาณมี `≈`, tool มี
   ชื่อ/สถานะ/args/เวลา, reasoning เป็นตัวจับเวลาชั่วคราวโดยไม่บันทึกเนื้อหา. ฝั่ง daemon ตรงกับ
   CHANGE-077/D-012.
+
+- AXCH-022 (2026-09-26) — "turn ok แต่คำตอบไม่ขึ้น thread": เจอสาเหตุสองชั้น —
+  (1) user mirror วิ่งแข่งกับ answer mirror ทำให้ D1 ได้ seq สลับกันได้ (แก้ฝั่ง daemon
+  ด้วย gate ต่อ session ใน CHANGE-081) และ (2) กรณีนี้ session id `warm4` ถูกใช้ซ้ำ
+  (ลบแล้วสร้างใหม่) ทำให้ประวัติเก่าในเครื่องกับประวัติใหม่ใน D1 ชนกันทุก seq —
+  reconcile แบบเดิมปฏิเสธการ merge อย่างถูกต้อง (กันข้อมูลหาย) แต่ผลคือคำตอบใหม่ไม่ขึ้น
+  จอ วิธีแก้: ถ้าหน้าที่ pull มาไม่ตรงกับของในเครื่องเลยสักแถว ถือว่า session เกิดใหม่
+  แล้วรับของ D1 ทั้งชุด (เก็บเฉพาะ pending ที่ D1 ยังไม่มี) พร้อมกันนี้พิสูจน์บนเครื่องจริงว่า
+  footer cache ทำงานครบสาย (`· cache 63424` จาก `cached_tokens` ของ provider) และ
+  per-message footer/model/markdown เต็มจอถูกต้องทุกแถว
