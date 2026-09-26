@@ -590,13 +590,6 @@ class ChatViewModel(
 
     fun clearNotice() { notice.value = "" }
 
-    override fun onCleared() {
-        // The socket is app-wide; leaving it open keeps the agent's live tail
-        // flowing for the next screen. The daemon keeps working either way.
-        super.onCleared()
-    }
-}
-
     // ---- Per-session sub-agent settings (ACP session config pattern) ----
 
     val subAgentProvider = MutableStateFlow("")
@@ -653,3 +646,7 @@ class ChatViewModel(
 
     fun chooseSubProvider(id: String) { subAgentProvider.value = id }
     fun chooseSubModel(id: String) { subAgentModel.value = id }
+    override fun onCleared() {
+        super.onCleared()
+    }
+}
