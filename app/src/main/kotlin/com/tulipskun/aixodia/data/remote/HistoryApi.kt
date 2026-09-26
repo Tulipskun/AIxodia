@@ -8,6 +8,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AgentSettings
+import com.tulipskun.aixodia.data.model.SessionAgentConfig
 import com.tulipskun.aixodia.data.model.ModelsPage
 import com.tulipskun.aixodia.data.model.ProvidersPage
 import com.tulipskun.aixodia.data.model.ProviderStatus
@@ -82,6 +83,7 @@ class HistoryApi(private val settings: SettingsStore) {
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
     private val providerAdapter = moshi.adapter(ProviderStatus::class.java)
     private val settingsAdapter = moshi.adapter(AgentSettings::class.java)
+    private val sessionAgentAdapter = moshi.adapter(SessionAgentConfig::class.java)
 
     /**
      * Builds an absolute URL, or null when the app has no endpoint configured
@@ -355,3 +357,47 @@ class HistoryApi(private val settings: SettingsStore) {
     fun wsUrlFor(tunnelUrl: String): String =
         tunnelUrl.replaceFirst("https://", "wss://").trimEnd('/') + "/ws"
 }
+
+    /** Reads the effective per-session agent config (main + sub, pinned or default). */
+    suspend fun sessionAgentConfig(sessionId: String): SessionAgentConfig? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}").get().build()
+            client.newCall(req).execute().use { r ->
+                if (r.isSuccessful) sessionAgentAdapter.fromJson(r.body!!.source()) else null
+            }
+        }.getOrNull()
+    }
+
+    /** Saves the per-session agent config (main pin + sub-agent override). */
+    suspend fun saveSessionAgentConfig(
+        sessionId: String,
+        mainProvider: String,
+        mainModel: String,
+        clearMain: Boolean,
+        subProvider: String,
+        subModel: String,
+        subEnabled: Boolean?,
+        clearSub: Boolean,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
+        val body = JSONObject()
+            .put("provider", mainProvider)
+            .put("model", mainModel)
+            .put("clear_model", clearMain)
+            .put("sub_provider", subProvider)
+            .put("sub_model", subModel)
+            .put("clear_sub", clearSub)
+        if (subEnabled != null) body.put("sub_enabled", subEnabled)
+        runCatching {
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .patch(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r -> r.isSuccessful }
+        }.getOrDefault(false)
+    }

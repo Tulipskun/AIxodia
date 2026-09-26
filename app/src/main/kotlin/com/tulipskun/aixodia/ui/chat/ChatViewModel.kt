@@ -313,7 +313,6 @@ class ChatViewModel(
         }
         status.value = ""
         val streamed = liveText.value
-        liveText.value = ""
         liveSubText = ""
         liveSteps.value = emptyList()
         liveThinkingMs.value = 0L
@@ -321,8 +320,17 @@ class ChatViewModel(
         subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
         // The daemon mirrored the turn into D1; pull it so the bubble is
-        // replaced by the stored row instead of a second copy.
-        if (streamed.isNotBlank()) refresh()
+        // replaced by the stored row instead of a second copy. The streamed
+        // text stays on screen until the stored row is ready — clearing it
+        // first makes the answer flicker out and back (AXCH-026).
+        if (streamed.isNotBlank()) {
+            viewModelScope.launch {
+                runCatching { repo.refreshLatest(sessionId) }
+                liveText.value = ""
+            }
+        } else {
+            liveText.value = ""
+        }
     }
 
     /** Freezes the footer's numbers when the turn ends. */
@@ -588,3 +596,60 @@ class ChatViewModel(
         super.onCleared()
     }
 }
+
+    // ---- Per-session sub-agent settings (ACP session config pattern) ----
+
+    val subAgentProvider = MutableStateFlow("")
+    val subAgentModel = MutableStateFlow("")
+    val subAgentEnabled = MutableStateFlow(true)
+    val subAgentPinned = MutableStateFlow(false)
+
+    fun loadSubAgentConfig() {
+        viewModelScope.launch {
+            val cfg = repo.sessionAgentConfig(sessionId) ?: return@launch
+            subAgentProvider.value = cfg.subProvider
+            subAgentModel.value = cfg.subModel
+            subAgentEnabled.value = cfg.subEnabled
+            subAgentPinned.value = cfg.subPinned
+        }
+    }
+
+    fun setSubAgent(provider: String, model: String, enabled: Boolean) {
+        if (provider.isBlank() || model.isBlank()) {
+            notice.value = "เลือก provider และ model ของ sub agent ก่อน"
+            return
+        }
+        viewModelScope.launch {
+            val ok = runCatching {
+                repo.saveSessionAgentConfig(sessionId, "", "", false, provider, model, enabled, false)
+            }.getOrDefault(false)
+            if (ok) {
+                subAgentProvider.value = provider
+                subAgentModel.value = model
+                subAgentEnabled.value = enabled
+                subAgentPinned.value = true
+                notice.value = "Sub agent: $provider / $model"
+            } else {
+                notice.value = "บันทึก sub agent ไม่สำเร็จ"
+            }
+        }
+    }
+
+    fun clearSubAgent() {
+        viewModelScope.launch {
+            val ok = runCatching {
+                repo.saveSessionAgentConfig(sessionId, "", "", false, "", "", null, true)
+            }.getOrDefault(false)
+            if (ok) {
+                subAgentProvider.value = ""
+                subAgentModel.value = ""
+                subAgentPinned.value = false
+                notice.value = "Sub agent ใช้ค่าของ agent แล้ว"
+            } else {
+                notice.value = "ล้างค่า sub agent ไม่สำเร็จ"
+            }
+        }
+    }
+
+    fun chooseSubProvider(id: String) { subAgentProvider.value = id }
+    fun chooseSubModel(id: String) { subAgentModel.value = id }

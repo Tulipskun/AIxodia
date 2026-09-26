@@ -170,3 +170,14 @@ data class ChatSession(
     val lastSnippet: String = "",
     val lastAt: Long = 0,
 )
+
+@JsonClass(generateAdapter = true)
+data class SessionAgentConfig(
+    @Json(name = "provider") val provider: String = "",
+    @Json(name = "model") val model: String = "",
+    @Json(name = "pinned") val pinned: Boolean = false,
+    @Json(name = "sub_provider") val subProvider: String = "",
+    @Json(name = "sub_model") val subModel: String = "",
+    @Json(name = "sub_enabled") val subEnabled: Boolean = true,
+    @Json(name = "sub_pinned") val subPinned: Boolean = false,
+)

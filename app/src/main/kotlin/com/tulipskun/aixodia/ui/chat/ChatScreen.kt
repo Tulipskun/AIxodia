@@ -258,6 +258,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
         )
     }
     if (showModelPicker) {
+        vm.loadSubAgentConfig()
         ChatModelSheet(
             providers = providers,
             statuses = providerStatuses.associateBy { it.id },
@@ -670,6 +671,80 @@ private fun ChatModelSheet(
                 enabled = hasStoredRoute,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("ใช้ค่าของ agent (ล้างการล็อกแชทนี้)") }
+
+            // Per-session sub-agent settings (ACP session config pattern):
+            // each chat may pin its own sub provider/model instead of
+            // inheriting the global agent defaults.
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("Sub agent (เฉพาะแชทนี้)", style = MaterialTheme.typography.titleSmall)
+            val subPickedProvider = vm.subAgentProvider.collectAsState().value
+            val subPickedModel = vm.subAgentModel.collectAsState().value
+            val subEnabled = vm.subAgentEnabled.collectAsState().value
+            val subPinned = vm.subAgentPinned.collectAsState().value
+            Text(
+                if (subPinned) "แชทนี้ล็อก sub agent ไว้แล้ว" else "ใช้ค่าของ agent (sub agent ทั่วไป)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("เปิด sub agent", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = subEnabled,
+                    onCheckedChange = { vm.setSubAgent(subPickedProvider, subPickedModel, it) },
+                )
+            }
+            if (providers.isNotEmpty()) {
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    providers.forEach { p ->
+                        FilterChip(
+                            selected = p.id == subPickedProvider,
+                            onClick = { vm.chooseSubProvider(p.id) },
+                            label = { Text(p.id) },
+                        )
+                    }
+                }
+                if (subPickedProvider.isNotBlank()) {
+                    val subModels = providers.firstOrNull { it.id == subPickedProvider }?.models.orEmpty()
+                    val subWorking = providers.firstOrNull { it.id == subPickedProvider }?.defaultModel.orEmpty()
+                    val filtered = if (subModels.isEmpty()) emptyList()
+                    else if (subWorking.isBlank() || subModels.none { it.id == subWorking }) subModels
+                    else listOf(subModels.first { it.id == subWorking }) + subModels.filter { it.id != subWorking }
+                    LazyColumn(Modifier.heightIn(max = 160.dp).fillMaxWidth()) {
+                        items(filtered) { m ->
+                            val selected = m.id == subPickedModel
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.small)
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                    )
+                                    .clickable { vm.chooseSubModel(m.id) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(m.id, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                if (m.id == subWorking) {
+                                    Text("ตอบได้จริง", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Button(
+                onClick = { vm.setSubAgent(subPickedProvider, subPickedModel, subEnabled) },
+                enabled = subPickedProvider.isNotBlank() && subPickedModel.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("บันทึก sub agent ของแชทนี้") }
+            TextButton(
+                onClick = { vm.clearSubAgent() },
+                enabled = subPinned,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("ใช้ค่าของ agent (ล้าง sub agent ของแชทนี้)") }
         }
     }
 }

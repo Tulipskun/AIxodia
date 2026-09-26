@@ -7,6 +7,7 @@ import com.tulipskun.aixodia.data.local.SessionEntity
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ProviderView
+import com.tulipskun.aixodia.data.model.SessionAgentConfig
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -328,7 +329,12 @@ class ChatRepository(
             ) {
                 val pulledTexts = entities.map { it.text }.toSet()
                 for (row in localBySeq.values) {
-                    if (!row.pending || row.text in pulledTexts) {
+                    // Drop only local rows D1 already holds (by text) — they
+                    // are duplicates. Keep pending rows and rows whose text is
+                    // not in the pulled page: they may not have reached D1 yet,
+                    // and deleting them makes the thread flicker or lose
+                    // messages (AXCH-026).
+                    if (row.text in pulledTexts) {
                         db.messages().deleteOne(sid, row.seq)
                     }
                 }
@@ -392,3 +398,17 @@ class ChatRepository(
 
     fun close() = socket.close()
 }
+
+    suspend fun sessionAgentConfig(sid: String): SessionAgentConfig? =
+        try { history.sessionAgentConfig(sid) } catch (_: Exception) { null }
+
+    suspend fun saveSessionAgentConfig(
+        sid: String,
+        mainProvider: String,
+        mainModel: String,
+        clearMain: Boolean,
+        subProvider: String,
+        subModel: String,
+        subEnabled: Boolean?,
+        clearSub: Boolean,
+    ): Boolean = history.saveSessionAgentConfig(sid, mainProvider, mainModel, clearMain, subProvider, subModel, subEnabled, clearSub)
