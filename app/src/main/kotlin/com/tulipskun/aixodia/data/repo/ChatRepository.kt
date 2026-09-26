@@ -305,21 +305,26 @@ class ChatRepository(
      */
     private suspend fun reconcile(sid: String, rows: List<com.tulipskun.aixodia.data.remote.TurnRow>) {
         if (rows.isEmpty()) return
+        // TEMP-DEBUG-AXGH: reconcile diagnostics, reverted before release.
+        android.util.Log.d("AIXDBG", "reconcile sid=$sid pulled=${rows.map { "${it.seq}:${it.role}:${it.text.take(18)}" }}")
         val entities = rows.map { it.toEntity(sid) }
         db.withTransaction {
             for (e in entities.sortedBy { it.seq }) {
                 val existing = db.messages().get(sid, e.seq)
                 if (existing == null) {
+                    android.util.Log.d("AIXDBG", "insert seq=${e.seq} role=${e.role} text=${e.text.take(24)}")
                     db.messages().upsert(e)
                     continue
                 }
                 if (existing.role == e.role && existing.text == e.text) {
+                    android.util.Log.d("AIXDBG", "adopt seq=${e.seq}")
                     if (existing.pending || existing.createdAt != e.createdAt) {
                         db.messages().upsert(e.copy(pending = false, clientMsgId = existing.clientMsgId))
                     }
                     continue
                 }
                 val twinInPage = entities.any { it.seq != e.seq && it.text == existing.text }
+                android.util.Log.d("AIXDBG", "collision seq=${e.seq} local=(${existing.role},${existing.text.take(24)},pending=${existing.pending}) remote=(${e.role},${e.text.take(24)}) twin=$twinInPage")
                 if (twinInPage) {
                     db.messages().deleteOne(sid, e.seq)
                     db.messages().upsert(e)
