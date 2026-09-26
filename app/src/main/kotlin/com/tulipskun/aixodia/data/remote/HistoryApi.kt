@@ -396,4 +396,5 @@ class HistoryApi(private val settings: SettingsStore) {
                 .build()
             client.newCall(req).execute().use { r -> r.isSuccessful }
         }.getOrDefault(false)
+    }
 }
