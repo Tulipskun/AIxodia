@@ -66,8 +66,10 @@
   `versionCode` (`v0.1.<RUN_NUMBER>`). Same `applicationId` + same signature +
   higher `versionCode` = Android installs OVER the old APK; Room cache,
   DataStore settings and backups survive. Uninstall is never required.
-- AX-041 — In-app "ตรวจอัปเดต" (drawer): checks latest GitHub Release with the
-  stored token, downloads the APK to private storage, fires the installer via
+- AX-041 — In-app "ตรวจอัปเดต" (drawer): checks latest GitHub Release with no auth
+  (the repo is public; the stored Cloudflare token must never be sent to GitHub —
+  a non-GitHub Bearer answers 401 and the button wrongly reports "already
+  latest", AXCH-024), downloads the APK to private storage, fires the installer via
   FileProvider. Old Releases are kept on GitHub (no delete step) for rollback.
 
 ## Tunnel + stateless ai (AX-05x)

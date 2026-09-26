@@ -86,7 +86,6 @@ import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import com.tulipskun.aixodia.update.UpdateManager
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
@@ -1092,14 +1091,13 @@ private fun UpdateRow(settings: SettingsStore) {
                 busy = true; msg = "กำลังตรวจ…"
                 scope.launch {
                     try {
-                        val token = settings.tokenFlow.first()
-                        val up = UpdateManager.check(token)
+                        val up = UpdateManager.check()
                         if (up == null) {
                             msg = "ล่าสุดแล้ว (v" + BuildConfig.VERSION_NAME + ")"
                             return@launch
                         }
                         msg = "พบ ${up.tag} กำลังโหลด…"
-                        val apk = UpdateManager.download(ctx, up, token) { p -> msg = "โหลด $p% (${up.tag})" }
+                        val apk = UpdateManager.download(ctx, up) { p -> msg = "โหลด $p% (${up.tag})" }
                         msg = "พร้อมติดตั้ง ${up.tag}"
                         UpdateManager.install(ctx, apk)
                     } catch (e: Exception) {

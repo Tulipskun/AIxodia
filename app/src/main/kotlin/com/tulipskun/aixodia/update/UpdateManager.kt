@@ -18,9 +18,10 @@ import java.io.File
  * higher versionCode), so Room history and settings survive —
  * never uninstalls, never clears data.
  *
- * The repo is private, so API + asset download use the user's token
- * (same token stored in Settings). Without a token it returns null
- * and callers should open the Releases page in a browser instead.
+ * The repo is public, so no Authorization header is sent at all. The only
+ * token the app stores is the Cloudflare API token, which must never leave
+ * the Cloudflare/D1/daemon path — sending it to api.github.com answers 401
+ * and the button wrongly reports "already latest" (AXCH-024).
  */
 object UpdateManager {
     const val REPO = "Tulipskun/AIxodia"
@@ -29,11 +30,9 @@ object UpdateManager {
     data class Update(val tag: String, val apkUrl: String, val size: Long = 0)
 
     /** Returns an Update when the latest Release is newer than this build, else null. */
-    suspend fun check(token: String): Update? = withContext(Dispatchers.IO) {
-        if (token.isBlank()) return@withContext null
+    suspend fun check(): Update? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url("https://api.github.com/repos/$REPO/releases/latest")
-            .header("Authorization", "Bearer $token")
             .header("Accept", "application/vnd.github+json")
             .get().build()
         client.newCall(req).execute().use { r ->
@@ -55,13 +54,12 @@ object UpdateManager {
     }
 
     /** Downloads the APK to private storage and returns the file. */
-    suspend fun download(ctx: Context, update: Update, token: String, onProgress: (Int) -> Unit = {}): File =
+    suspend fun download(ctx: Context, update: Update, onProgress: (Int) -> Unit = {}): File =
         withContext(Dispatchers.IO) {
             val dir = File(ctx.filesDir, "updates").apply { mkdirs() }
             val out = File(dir, "AIxodia-${update.tag}.apk")
             val req = Request.Builder()
                 .url(update.apkUrl)
-                .header("Authorization", "Bearer $token")
                 .header("Accept", "application/octet-stream")
                 .get().build()
             client.newCall(req).execute().use { r ->

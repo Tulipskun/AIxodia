@@ -161,7 +161,7 @@
 
 - AXCH-020 (2026-09-25) — "ไม่ต้อง mock แล้ว ลบออกไปเลย": ลบ `mock/` (mock DB REST +
   mock agent WS + `aiclient` CLI, Go) และ `bridge/` (สำเนา `mobile_ws.go`/`tunnel.go`
-  ของ daemon ที่มีอยู่จริงใน `Tulipskun/ai/transport/mobile/` แล้ว) ออกจากโปรเจค พร้อม
+  ของ daemon ที่มีอยู่จริงใน `Tulipskun/ai-engine/transport/mobile/` แล้ว) ออกจากโปรเจค พร้อม
   ตัด Go toolchain + 2 test steps ออกจาก CI, แก้ README/worker README/AX-001/AX-060
   ให้ชี้ที่ daemon ตัวจริง และเปลี่ยนวิธีทดสอบเป็น daemon ตัวจริง + `wrangler dev`
   (เหตุผล: โปรเจคนี้คือ frontend + Worker ที่เขียน Kotlin ทั้งหมด การมี implementation
@@ -235,8 +235,23 @@ Status: accepted
   `db/schema.sql` + `db/migrations/0002_turn_footer.sql` + `db/README.md`
   (ย้าย/เพิ่มจาก `worker/`),
   requirements — AX-010/011/014/030/050/051/052/060/071/073, AXC-003, product.md, decisions.md (D-011);
-  ฝั่ง daemon `Tulipskun/ai`: CHANGE-082 (แก้เอกสารกับคอมเมนต์ที่ยังบอกว่าตรวจ token กับ Worker).
+  ฝั่ง daemon `Tulipskun/ai-engine`: CHANGE-082 (แก้เอกสารกับคอมเมนต์ที่ยังบอกว่าตรวจ token กับ Worker).
   Validation: `gradle assembleDebug` ใน CI; ยืนยันว่าไม่มี Worker เหลือในรีพ;
   เปิดแชทเก่า + โหลด page ของ turns ได้ด้วย token ตัวเดียวขณะ daemon ปิด;
   และ `wrangler d1 execute aixodia --file=db/schema.sql` ยังใช้ตั้ง schema ได้โดยไม่ต้องมี Worker
+  Status: accepted
+
+- AXCH-024 (2026-09-26) — "ทำให้ปุ่มอัพเดทใช้งานได้จริง": ปุ่ม "ตรวจอัปเดต" รายงาน
+  "ล่าสุดแล้ว" ตลอดทั้งที่มี release ใหม่ เพราะ `UpdateRow` ส่ง Cloudflare API token
+  (credential ตัวเดียวของแอปตั้งแต่ D-011) เป็น `Authorization: Bearer` ไปหา
+  `api.github.com` — GitHub ตอบ 401, `UpdateManager.check()` คืน null.
+  พิสูจน์ด้วย curl: ไม่ส่ง auth ได้ 200 (repo เป็น public แล้ว), ส่ง Bearer มั่วได้ 401.
+  New: `check()`/`download()` ไม่ส่ง auth เลย, เอา parameter token ออกทั้งสองจุดเรียก
+  (Settings + drawer), ลบ import `flow.first` ที่ไม่ใช้, แก้คอมเมนต์ "repo is private"
+  ที่ตกรุ่น และ AX-041.
+  Impact: `update/UpdateManager.kt`, `ui/settings/SettingsScreen.kt`,
+  `ui/chat/ChatScreen.kt`, requirements (functional AX-041 + changes).
+  Validation: `./gradlew assembleDebug`; เทสต์บนเครื่องจริง — ติดตั้ง release เก่า
+  (stable signature) แล้วกดปุ่ม ต้องเจอ release ล่าสุด โหลด APK และติดตั้งทับได้
+  ข้อมูลแชทไม่หาย.
   Status: accepted

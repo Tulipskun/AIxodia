@@ -1,6 +1,6 @@
 # AIxodia
 
-Android chat client (Kotlin + Compose) for the `Tulipskun/ai` daemon. History
+Android chat client (Kotlin + Compose) for the `Tulipskun/ai-engine` daemon. History
 lives in Cloudflare D1 and the phone reads and writes it **directly** over the
 D1 REST API (D-011) — there is no Cloudflare Worker in this project.
 
@@ -22,7 +22,7 @@ requirements/   spec source of truth (read before code)
 1. **D1**: `wrangler d1 create aixodia`, then
    `wrangler d1 execute aixodia --file=db/schema.sql` — both go straight to the
    Cloudflare API, nothing is deployed. See `db/README.md`.
-2. **Daemon**: build and run `Tulipskun/ai` (`cmd/ai`) with mobile enabled — it
+2. **Daemon**: build and run `Tulipskun/ai-engine` (`cmd/ai-engine`) with mobile enabled — it
    serves the WebSocket, opens the quick tunnel, writes its URL into the D1
    `nodes` row and mirrors every finished turn into D1 itself.
 3. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
@@ -74,7 +74,7 @@ without approval; the daemon owns no credential of its own.
 
 ## Test it right now
 
-Start the daemon (`Tulipskun/ai`, mobile enabled), paste the Cloudflare API
+Start the daemon (`Tulipskun/ai-engine`, mobile enabled), paste the Cloudflare API
 token in the app's settings, press "ค้นหา ai" to fill the tunnel URL, and send a
 message. The provider, key and per-agent model are set from the phone
 (AX-083..094).

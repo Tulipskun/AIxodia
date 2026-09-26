@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AIxodia is the Android (Kotlin) chat client for `Tulipskun/ai` (Go AI Harness).
+AIxodia is the Android (Kotlin) chat client for `Tulipskun/ai-engine` (Go AI Harness).
 It renders harness results on mobile with a Discord/Telegram-like messenger UX:
 
 - Session list (like Discord channels) + chat thread (like Telegram bubbles).
