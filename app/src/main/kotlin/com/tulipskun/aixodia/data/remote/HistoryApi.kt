@@ -353,12 +353,8 @@ class HistoryApi(private val settings: SettingsStore) {
      */
     suspend fun node(): NodeInfo? = withContext(Dispatchers.IO) { d1.node() }
 
-    /** https://x.trycloudflare.com -> wss://x.trycloudflare.com/ws */
-    fun wsUrlFor(tunnelUrl: String): String =
-        tunnelUrl.replaceFirst("https://", "wss://").trimEnd('/') + "/ws"
-}
 
-    /** Reads the effective per-session agent config (main + sub, pinned or default). */
+/** Reads the effective per-session agent config (main + sub, pinned or default). */
     suspend fun sessionAgentConfig(sessionId: String): SessionAgentConfig? = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
@@ -400,4 +396,4 @@ class HistoryApi(private val settings: SettingsStore) {
                 .build()
             client.newCall(req).execute().use { r -> r.isSuccessful }
         }.getOrDefault(false)
-    }
+}
