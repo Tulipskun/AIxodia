@@ -24,3 +24,17 @@
 - D-010 (2026-09-24) — Lockout is keyed by client address, never by token
   hash: a token-keyed counter could be bypassed by rotating credentials, which
   would defeat the five-failure rule entirely.
+- D-011 (2026-09-26) — **Drop the Cloudflare Worker.** The phone reads and
+  writes Cloudflare D1 through the **D1 REST API directly**
+  (`/client/v4/accounts/{account}/d1/database/{database}/query`), with the same
+  Cloudflare API token it already holds; the account and database ids are
+  resolved from that token instead of being typed in. Supersedes D-008 and
+  narrows D-009: the Worker is no longer "the sole D1 policy point", so history
+  stays readable and writable while the daemon is offline, and there is one
+  fewer moving part to deploy and rotate. Accepted cost: the history SQL (which
+  the Worker used to own) lives in the app, and the token the phone holds is
+  account-scoped (`D1: Edit`) rather than a scoped Worker secret — the same
+  single-operator tradeoff CON-012 / REQ-046 already accept for the daemon,
+  which has talked to the Cloudflare API directly since CHANGE-081.
+  The daemon still owns the live socket, provider/model validation and the
+  agent settings, because those need the running router, not the database.

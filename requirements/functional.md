@@ -17,21 +17,28 @@
 - AX-005 — Send path posts canonical `Input{source:"mobile", session_id, turn,
   metadata}` and optimistically inserts the user bubble before ack.
 
-## History — Cloudflare D1 via Worker + Room cache
+## History — Cloudflare D1 direct (REST) + Room cache
 
-- AX-010 — Cloud source of truth is Cloudflare D1 (tables in `worker/schema.sql`,
-  mirrored from `sdk/session_db.go`: `sessions` + `turns`). The app never talks
-  to D1 directly; it calls Worker REST in `worker/src/jsMain/kotlin/aixodia/Worker.kt`.
-- AX-011 — `GET /api/sessions` → session list. `GET /api/sessions/:id/turns?
-  before_seq=&limit=` → paged history (newest-first, default 50).
+- AX-010 — Cloud source of truth is Cloudflare D1 (tables in `db/schema.sql`,
+  mirrored from `sdk/session_db.go`: `sessions` + `turns`). The app talks to D1
+  **directly** through the Cloudflare D1 REST API
+  (`POST /client/v4/accounts/{account}/d1/database/{database}/query`) with the
+  operator's Cloudflare API token (D-011); there is no Worker. The account and
+  database ids are resolved from that token (`GET /user/tokens/verify` →
+  `GET /accounts` → `GET /accounts/{id}/d1/database`) and cached in settings, so
+  history is readable and writable while the daemon is offline.
+- AX-011 — The session list is `SELECT id, title, provider, model, created_at,
+  updated_at FROM sessions ORDER BY updated_at DESC LIMIT ?`, and a history page
+  is `SELECT … FROM turns WHERE session_id = ? AND seq < ? ORDER BY seq DESC
+  LIMIT ?` reversed to oldest-first (default 50, cap 200).
 - AX-012 — Merge order per session open, with reconcile instead of blind append: (1) render Room cache instantly,
   (2) fetch D1 pages, upsert into Room, (3) attach WebSocket live tail.
   No duplicate seqs; `(session_id, seq)` is unique.
 - AX-013 — Offline-first: airplane mode still shows cached threads; send
   while offline queues in Room (`pending`) and flushes on reconnect.
-- AX-014 — `POST /api/sessions/:id/turns` ingest path exists so the daemon
-  bridge can mirror every finished turn into D1 (fire-and-forget, never blocks
-  the live display).
+- AX-014 — The daemon mirrors every finished turn into D1 itself
+  (fire-and-forget, never blocks the live display); the app writes only its own
+  session-level rows (create, rename, delete).
 
 ## UI — message/discord/telegram-like
 
@@ -46,8 +53,12 @@
 
 ## Security / config
 
-- AX-030 — Settings screen (implemented as ui/settings/SettingsScreen): daemon WS URL, Worker base URL, auth token
-  (stored encrypted), session picker. No hardcoded secrets in git.
+- AX-030 — Settings screen (implemented as ui/settings/SettingsScreen): the
+  Cloudflare API token (stored encrypted), the account id and database id
+  resolved from that token (editable when the token can see several), the daemon
+  tunnel URL for the live socket (auto-filled from the D1 `nodes` row,
+  overridable by hand), and the session picker. No hardcoded secrets, account id
+  or Worker URL in git.
 
 ## Update — install over, keep data (AX-04x)
 
@@ -61,23 +72,25 @@
 
 ## Tunnel + stateless ai (AX-05x)
 
-- AX-050 — Discovery: ai announces its random trycloudflare URL with
-  `POST /api/node/heartbeat` every 30s; app resolves it with `GET /api/node`.
-  Stale heartbeat (>90s) renders "ai ออฟไลน์". Hardcoded daemon IP is fallback.
-- AX-051 — Secret flow: app sends its scoped Worker token in the WS hello
-  frame; ai keeps it in memory only and uses it for Worker REST (history
-  ingest + `/api/state` load/save). Raw Cloudflare API tokens never leave
-  Cloudflare/operator. Tunnel frames without a valid token are rejected.
-- AX-052 — Stateless state: `GET/PUT /api/state/:key` stores opaque JSON
-  (≤500KB, key charset `[A-Za-z0-9:_-]`), e.g. `config/provider`,
-  `sessions/<id>`. Local disk on the ai host is a pure cache, safe to wipe.
+- AX-050 — Discovery: the daemon writes its random trycloudflare URL into the D1
+  `nodes` row every 30s (the write is the daemon's own, REQ-046/CHANGE-082), and
+  the app resolves it by querying that row directly, showing "ai ออฟไลน์" when
+  the heartbeat is older than 90s. Discovery therefore does not depend on the
+  daemon answering HTTP.
+- AX-051 — Secret flow: the app holds exactly one credential, the Cloudflare API
+  token. It uses it for the D1 REST API and sends it in the WS hello frame; the
+  daemon keeps it in memory only and uses it straight against the Cloudflare
+  API. No Worker secret exists. Tunnel frames without a valid token are
+  rejected.
+- AX-052 — Stateless state: `state` rows hold opaque JSON values (`config/*`,
+  `sessions/<id>`) written by the daemon; the app never reads provider keys back
+  through any path. Local disk on the ai host is a pure cache, safe to wipe.
 
 ## Mock-first testing + agent attribution (AX-06x)
 
 - AX-060 — Retired 2026-09-25: the Go mock stack is no longer part of this
-  repository. The app is tested against the real daemon and the real Worker
-  (`wrangler dev` for a local D1), so a second implementation of the contract
-  cannot drift from the one that ships.
+  repository. The app is tested against the real daemon and the real D1, so a
+  second implementation of the contract cannot drift from the one that ships.
 - AX-061 — Jobs are server-side: the agent persists each step to the DB before
   broadcasting it, and the job continues after the client disconnects. The app
   pulls the newest rows on open/reconnect and merges them with Room, so closing
@@ -95,16 +108,17 @@
 
 - AX-070 — Step 1 is the quick-tunnel hostname: the daemon is only reachable
   through a random `*.trycloudflare.com` URL, so nothing is published.
-- AX-071 — Step 2 is the D1 access token, sent as
+- AX-071 — Step 2 is the Cloudflare API token, sent as
   `Authorization: Bearer <token>` on the WebSocket handshake and verified
-  against the Worker (`GET /api/ping`) BEFORE the socket is upgraded. A missing
-  or malformed header is rejected with 401 and is not counted as a login.
+  against Cloudflare (`GET /user/tokens/verify`) BEFORE the socket is upgraded.
+  A missing or malformed header is rejected with 401 and is not counted as a
+  login.
 - AX-072 — Progressive lockout keyed by client address (CF-Connecting-IP, then
   X-Forwarded-For, then peer address — behind a tunnel the peer is always the
   local cloudflared process). Five failures lock that address for 30s, then
   60s, 120s, 240s, 300s (cap). A successful handshake resets it. The key never
   includes the token, so rotating credentials cannot dodge the lockout.
-- AX-073 — Fail closed: if the Worker cannot be reached the handshake returns
+- AX-073 — Fail closed: if Cloudflare cannot be reached the handshake returns
   503 and is not counted as a failed login. Wrong tokens return 401 and are
   counted; the daemon owns no credential of its own.
 - AX-074 — Exactly one token exists in the system: the D1 access token. It is

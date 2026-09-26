@@ -210,3 +210,33 @@ Status: accepted
   แล้วรับของ D1 ทั้งชุด (เก็บเฉพาะ pending ที่ D1 ยังไม่มี) พร้อมกันนี้พิสูจน์บนเครื่องจริงว่า
   footer cache ทำงานครบสาย (`· cache 63424` จาก `cached_tokens` ของ provider) และ
   per-message footer/model/markdown เต็มจอถูกต้องทุกแถว
+
+- AXCH-023 (2026-09-26) — "ฉันไม่ได้ต้องการใช้ cloudflare worker แต่จะยิง api อ่าน/เขียน โดยตรง":
+  ลบ Cloudflare Worker ออกจากโปรเจค (โฟลเดอร์ `worker/` ทั้งหมด รวม Worker secret
+  `AIXODIA_TOKEN`, `wrangler.toml`, Worker ที่เขียนด้วย Kotlin) แล้วให้แอปอ่าน/เขียน
+  Cloudflare D1 ผ่าน **D1 REST API ตรง**
+  (`POST https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{database}/query`)
+  ด้วย Cloudflare API token ตัวเดียวกับที่แอปถืออยู่แล้ว — account id และ database id
+  resolve จาก token เอง (`GET /user/tokens/verify` → `GET /accounts` →
+  `GET /accounts/{id}/d1/database`) ไม่ต้องพิมพ์ ยกเว้นกรณีที่ token มองเห็นหลาย
+  account/database หน้า Settings จึงเปิดให้แก้ด้วยมือ.
+  Reason: daemon ยิง Cloudflare API ตรงอยู่แล้วตั้งแต่ CHANGE-081/REQ-046 จึงเหลือ Worker
+  เป็นชั้นกลางที่มีหน้าที่แค่ history + discovery ผลคือประวัติอ่าน/เขียนไม่ได้เมื่อ daemon ปิด
+  และมี secret เพิ่มอีกตัวที่ต้อง rotate; ผู้ใช้เลือกตัด Worker ออกและให้มือถือคุย D1 ตรง (D-011,
+  supersede D-008).
+  Impact: app — `data/remote/D1Api.kt` (ใหม่: Cloudflare D1 REST client + SQL ของ
+  sessions/turns/node), `data/remote/HistoryApi.kt` (sessions/create/rename/delete/turns/ping/node
+  เปลี่ยนไป D1 ตรง ส่วน models/providers/settings/key pool ยังผ่าน tunnel ไป daemon เพราะต้องใช้
+  router ที่รันอยู่), `SettingsStore.kt` (เพิ่ม `account_id`/`database_id`; `worker_url` →
+  `daemon_url`; resolve/describe ใหม่เป็น D1 + tunnel), `ui/settings/SettingsScreen.kt`
+  (ช่อง token + account/database ที่ค้นหาอัตโนมัติ + ปุ่มค้นหา ai จากแถว `nodes` ใน D1),
+  `data/repo/ChatRepository.kt` (คอมเมนต์แหล่งข้อมูล), `README.md`, `.gitignore`,
+  `config/aixodia.example.json`, `.github/workflows/worker.yml` (ลบ CI ของ Worker),
+  `db/schema.sql` + `db/migrations/0002_turn_footer.sql` + `db/README.md`
+  (ย้าย/เพิ่มจาก `worker/`),
+  requirements — AX-010/011/014/030/050/051/052/060/071/073, AXC-003, product.md, decisions.md (D-011);
+  ฝั่ง daemon `Tulipskun/ai`: CHANGE-082 (แก้เอกสารกับคอมเมนต์ที่ยังบอกว่าตรวจ token กับ Worker).
+  Validation: `gradle assembleDebug` ใน CI; ยืนยันว่าไม่มี Worker เหลือในรีพ;
+  เปิดแชทเก่า + โหลด page ของ turns ได้ด้วย token ตัวเดียวขณะ daemon ปิด;
+  และ `wrangler d1 execute aixodia --file=db/schema.sql` ยังใช้ตั้ง schema ได้โดยไม่ต้องมี Worker
+  Status: accepted
