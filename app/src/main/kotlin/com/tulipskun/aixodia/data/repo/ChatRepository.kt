@@ -397,7 +397,6 @@ class ChatRepository(
     )
 
     fun close() = socket.close()
-}
 
     suspend fun sessionAgentConfig(sid: String): SessionAgentConfig? =
         try { history.sessionAgentConfig(sid) } catch (_: Exception) { null }
@@ -412,3 +411,4 @@ class ChatRepository(
         subEnabled: Boolean?,
         clearSub: Boolean,
     ): Boolean = history.saveSessionAgentConfig(sid, mainProvider, mainModel, clearMain, subProvider, subModel, subEnabled, clearSub)
+}

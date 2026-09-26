@@ -260,6 +260,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     if (showModelPicker) {
         vm.loadSubAgentConfig()
         ChatModelSheet(
+            vm = vm,
             providers = providers,
             statuses = providerStatuses.associateBy { it.id },
             pickedProvider = pickedProvider,
@@ -523,6 +524,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatModelSheet(
+    vm: ChatViewModel,
     providers: List<com.tulipskun.aixodia.data.model.ProviderView>,
     statuses: Map<String, com.tulipskun.aixodia.data.model.ProviderStatus>,
     pickedProvider: String,

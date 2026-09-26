@@ -156,7 +156,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
-                .patch(body.toRequestBody("application/json".toMediaType()))
+                .patch(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { it.isSuccessful }
         }.getOrDefault(false)
@@ -175,7 +175,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
-                .patch(body.toRequestBody("application/json".toMediaType()))
+                .patch(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { it.isSuccessful }
         }.getOrDefault(false)
@@ -258,7 +258,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/providers")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json".toMediaType()))
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
                 failure("เพิ่ม $id แล้ว", r).let { if (r.isSuccessful) it else "เพิ่มไม่สำเร็จ: $it" }
@@ -283,7 +283,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/providers/$providerId/keys")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json".toMediaType()))
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
                 failure("อัปเดต key ของ $providerId แล้ว", r).let { if (r.isSuccessful) it else "อัปเดตไม่สำเร็จ: $it" }
@@ -316,7 +316,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/settings")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
-                .put(body.toRequestBody("application/json".toMediaType()))
+                .put(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
                 failure("บันทึกการตั้งค่า agent แล้ว", r).let { if (r.isSuccessful) it else "บันทึกไม่สำเร็จ: $it" }
@@ -392,7 +392,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
-                .patch(body.toRequestBody("application/json".toMediaType()))
+                .patch(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r -> r.isSuccessful }
         }.getOrDefault(false)
