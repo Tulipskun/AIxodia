@@ -34,12 +34,13 @@ class MainActivity : ComponentActivity() {
      * without hand-typing on a phone:
      *
      *   adb shell am start -n com.tulipskun.aixodia/.MainActivity \
+     *     --es aixodia.token <Cloudflare API token> \
      *     --es aixodia.address https://example.trycloudflare.com \
-     *     --es aixodia.token <D1 token> \
      *     --es aixodia.session work-1
      *
-     * `aixodia.ws` / `aixodia.worker` still work as explicit overrides for
-     * anyone who needs to point the two legs at different places.
+     * `aixodia.account` and `aixodia.database` override the ids that are
+     * otherwise discovered from the token, and the live socket follows from the
+     * daemon address (wss://<host>/ws).
      *
      * It is compiled out of release builds: BuildConfig.DEBUG is false there,
      * so a shipped APK has no way to receive connection values this way, and
@@ -48,29 +49,23 @@ class MainActivity : ComponentActivity() {
     private fun applyDebugSeed(intent: Intent?) {
         if (!BuildConfig.DEBUG || intent == null) return
         val address = intent.getStringExtra("aixodia.address").orEmpty()
-        val worker = intent.getStringExtra("aixodia.worker").orEmpty()
-        val ws = intent.getStringExtra("aixodia.ws").orEmpty()
         val token = intent.getStringExtra("aixodia.token").orEmpty()
+        val account = intent.getStringExtra("aixodia.account").orEmpty()
+        val database = intent.getStringExtra("aixodia.database").orEmpty()
         val session = intent.getStringExtra("aixodia.session").orEmpty()
-        if (address.isBlank() && worker.isBlank() && ws.isBlank() && token.isBlank()) return
+        if (address.isBlank() && token.isBlank()) return
         val settings = (application as AixodiaApp).container.settings
         lifecycleScope.launch {
-            // One address is the normal path: it derives both the live socket
-            // and the history URL, exactly like the settings screen does.
-            if (address.isNotBlank()) {
-                settings.saveEndpoint(address, token, session)
-            }
-            if (worker.isNotBlank() || ws.isNotBlank()) {
-                settings.saveConnection(ws, worker, token)
-            } else if (token.isNotBlank() && address.isBlank()) {
-                settings.saveConnection("", "", token)
-            }
-            if (session.isNotBlank() && address.isBlank()) settings.saveSession(session)
+            // One credential the app reads D1 with; the daemon address is only
+            // needed for the live socket and the provider/model API.
+            if (token.isNotBlank()) settings.saveD1(token, account, database)
+            if (address.isNotBlank()) settings.saveDaemon(address)
+            if (session.isNotBlank()) settings.saveSession(session)
             // Clear the extras so a configuration change does not re-apply them.
             intent.removeExtra("aixodia.address")
-            intent.removeExtra("aixodia.worker")
-            intent.removeExtra("aixodia.ws")
             intent.removeExtra("aixodia.token")
+            intent.removeExtra("aixodia.account")
+            intent.removeExtra("aixodia.database")
             intent.removeExtra("aixodia.session")
         }
     }

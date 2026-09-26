@@ -1,62 +1,80 @@
 # AIxodia
 
-Android chat client (Kotlin + Compose) for the `Tulipskun/ai` daemon, with the
-Cloudflare Worker that stores its history also written in Kotlin.
+Android chat client (Kotlin + Compose) for the `Tulipskun/ai` daemon. History
+lives in Cloudflare D1 and the phone reads and writes it **directly** over the
+D1 REST API (D-011) — there is no Cloudflare Worker in this project.
 
 - **Direct live display**: authenticated WebSocket to the `ai` daemon mobile endpoint — JSON `Input`/`Output` frames mirroring `ai/sdk/io.go` (+ `types.go`, `trace.go`). The daemon serves it itself in `ai/transport/mobile/`.
-- **Old history from Cloudflare**: Cloudflare D1 via Worker REST (`worker/`), never direct D1 from the phone.
+- **History from Cloudflare D1, direct**: `data/remote/D1Api.kt` calls `POST https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{database}/query` with the operator's Cloudflare API token, so the chat list and old turns stay readable and editable **while the daemon is stopped**.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; open = cache → D1 backfill → WS live tail.
 - **Messenger UX**: Discord-like session drawer + Telegram-like bubbles, typing/tool status, connection dot, retry, pull-older.
 
 ## Layout
 
 ```text
-app/            Android client (.kt, Compose Material3, Room, OkHttp WS, Worker REST)
-worker/         Cloudflare Worker + D1 schema (wrangler.toml, schema.sql, src/jsMain/kotlin/aixodia/Worker.kt)
+app/            Android client (.kt, Compose Material3, Room, OkHttp WS, D1 REST)
+db/             Cloudflare D1 schema + migrations (applied with wrangler, no Worker)
 requirements/   spec source of truth (read before code)
 ```
 
 ## Setup
 
-1. **D1 + Worker**: `wrangler d1 create aixodia` → put id in `worker/wrangler.toml` → `wrangler d1 execute aixodia --file=worker/schema.sql` → `wrangler secret put AIXODIA_TOKEN` → `wrangler deploy`.
-2. **Daemon**: build and run `Tulipskun/ai` (`cmd/ai`) with mobile enabled — it serves the WebSocket, opens the quick tunnel and mirrors turns into D1 by itself.
-3. **App**: open in Android Studio, run `app`. Settings (gear icon): the tunnel URL, the D1 token, plus provider/agent configuration. D1 first: `cd worker && ./setup.sh`.
+1. **D1**: `wrangler d1 create aixodia`, then
+   `wrangler d1 execute aixodia --file=db/schema.sql` — both go straight to the
+   Cloudflare API, nothing is deployed. See `db/README.md`.
+2. **Daemon**: build and run `Tulipskun/ai` (`cmd/ai`) with mobile enabled — it
+   serves the WebSocket, opens the quick tunnel, writes its URL into the D1
+   `nodes` row and mirrors every finished turn into D1 itself.
+3. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
+   **Cloudflare API token** — the account and database ids are resolved from it
+   and cached, so no id is ever typed — then press "ค้นหา ai" to pick up the
+   daemon's current tunnel URL for the live socket. Providers, their write-only
+   key pools and the per-agent model routes live on the same screen.
 
-## Architecture (tunnel + stateless ai)
+## Architecture
 
 `ai` serves the mobile WS on localhost only and opens a Cloudflare **quick
-tunnel** (`ai/transport/mobile/tunnel.go`); the random trycloudflare URL is heartbeat-announced
-to D1, and the app discovers it via `GET /api/node` (Settings → "ค้นหา ai" →
-"ใช้ URL นี้"). `ai` keeps no local state: config/sessions live as JSON blobs
-in D1 (`/api/state`), and the phone's scoped Worker token (sent in the WS hello,
-memory-only) is its DB credential. Raw Cloudflare API tokens never leave your account.
+tunnel** (`ai/transport/mobile/tunnel.go`); the random trycloudflare URL is
+written into D1 by the daemon itself. The app reads that row directly — no
+Worker and no `/api/node` round trip — and shows "ai ออฟไลน์" once the heartbeat
+is older than 90s. `ai` keeps no local state: config and sessions live in D1, and
+the Cloudflare API token (sent in the WS hello, memory-only) is the daemon's
+credential too.
+
+Two back ends, one credential:
+
+- **D1 REST** — chat list, paging, session create/rename/delete (`D1Api`).
+- **Daemon over the tunnel** — the live socket, the provider catalogue, provider
+  health, per-chat model pins and the agent settings, because validating those
+  needs the running router rather than the database.
 
 ## Authentication — one token, two steps
 
 1. The daemon is only reachable through a random `*.trycloudflare.com` quick
    tunnel (nothing published, no port forwarding).
-2. The app sends the **D1 access token** in the WebSocket handshake header
-   (`Authorization: Bearer …`); the daemon verifies it against the Worker
-   before upgrading and keeps it in memory only.
+2. The app sends the **Cloudflare API token** in the WebSocket handshake header
+   (`Authorization: Bearer …`); the daemon verifies it against Cloudflare
+   (`GET /user/tokens/verify`) before upgrading and keeps it in memory only.
 
-Missing header → `401` (not counted). Wrong token five times → `429` and a
-30s lockout for that address, then 60/120/240/300s. Worker unreachable →
-`503` (fail closed, not counted). There is **no second token** and none may be
-added without approval; the daemon owns no credential of its own.
+Missing header → `401` (not counted). Wrong token five times → `429` and a 30s
+lockout for that address, then 60/120/240/300s. Cloudflare unreachable → `503`
+(fail closed, not counted). There is **no second token** and none may be added
+without approval; the daemon owns no credential of its own.
 
 ## Production DB (runtime config, nothing hardcoded)
 
-- Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds sessions/turns/state.
-- The Worker is the only public door; the app authenticates with the Worker
-  secret `AIXODIA_TOKEN` typed in Settings at runtime.
-- The Cloudflare API token used for deploys lives only in the shell
-  (`CLOUDFLARE_API_TOKEN`); the repo contains config (`wrangler.toml`,
-  `config/aixodia.example.json`) and examples (`.dev.vars.example`), no secrets.
+- Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds sessions/turns/nodes/state.
+- One credential does the work: the Cloudflare API token typed in Settings reads
+  and writes D1, and the same token authenticates the daemon handshake.
+- The token used for `wrangler` stays in the shell (`CLOUDFLARE_API_TOKEN`); the
+  repo contains config (`config/aixodia.example.json`) and no secrets. It needs
+  Account → **D1: Edit**, which is what the app and the daemon both use it for.
 - A fresh app install has empty settings and shows a setup screen instead of
   silently pointing somewhere.
 
 ## Test it right now
 
-Start the daemon (`Tulipskun/ai`, mobile enabled), copy the tunnel URL it prints
-into the app's settings together with the D1 token, and send a message. The
-provider, key and per-agent model are set from the phone (AX-083..094).
+Start the daemon (`Tulipskun/ai`, mobile enabled), paste the Cloudflare API
+token in the app's settings, press "ค้นหา ai" to fill the tunnel URL, and send a
+message. The provider, key and per-agent model are set from the phone
+(AX-083..094).

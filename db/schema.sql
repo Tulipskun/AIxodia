@@ -1,7 +1,6 @@
--- Cloudflare D1 schema. Mirrors ai sdk/session_db.go (sessions + turns),
--- flattened so the Android client can page history with simple REST.
--- Kept in lockstep with mock/mockdb/db.go (the local stand-in used before
--- Cloudflare is set up) — change one, change both.
+-- Cloudflare D1 schema for AIxodia. Mirrors ai sdk/session_db.go (sessions +
+-- turns), flattened so the Android client can page history with plain SQL over
+-- the D1 REST API (D-011 — there is no Worker in front of it).
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL DEFAULT '',

@@ -116,7 +116,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
         r == null -> "เชื่อมต่อไม่ได้: ${t.message ?: t::class.simpleName}"
         r.code == 401 -> "401 token ไม่ผ่าน — daemon ไม่รับ D1 token นี้"
         r.code == 429 -> "429 ถูกล็อกชั่วคราวจากการเดา token ผิดเกิน 5 ครั้ง"
-        r.code == 503 -> "503 daemon ตรวจ token ไม่ได้ชั่วคราว (Worker/D1 อาจล่ม)"
+        r.code == 503 -> "503 daemon ตรวจ token กับ Cloudflare ไม่ได้ชั่วคราว"
         else -> "HTTP ${r.code} ${r.message}".trim()
     }
 

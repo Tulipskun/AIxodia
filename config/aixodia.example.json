@@ -1,7 +1,7 @@
 {
-  "_comment": "Runtime config for the AIxodia daemon/bridge. Copy to config/aixodia.json (gitignored) and edit. This file holds NO credential: the only token in the system is the D1 access token, typed by the operator in the app and handed to the daemon in the WebSocket Authorization header.",
+  "_comment": "Runtime config for the AIxodia daemon/bridge. Copy to config/aixodia.json (gitignored) and edit. This file holds NO credential: the only token in the system is the Cloudflare API token, typed by the operator in the app, used for the D1 REST API and handed to the daemon in the WebSocket Authorization header.",
 
-  "worker_base": "https://aixodia.<your-subdomain>.workers.dev",
+  "_d1": "There is no Worker any more (D-011). Nothing D1-related belongs in this file: the app resolves the account and the database from the token itself, and the schema is applied with wrangler straight to the Cloudflare API (see db/README.md).",
 
   "mobile_ws": {
     "listen": "127.0.0.1:18789",

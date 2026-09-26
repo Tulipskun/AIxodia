@@ -23,8 +23,9 @@ import kotlinx.coroutines.launch
 /**
  * Owns the merge of three sources (AXCH-005):
  *  1. Room cache — instant, offline-capable.
- *  2. REST (Cloudflare Worker/D1 in prod, mock DB in tests) — history + the
- *     newest rows, pulled on open, on reconnect and after a cold start.
+ *  2. Cloudflare D1 over its REST API (D-011) — history + the newest rows,
+ *     pulled on open, on reconnect and after a cold start. The phone reads D1
+ *     itself, so this still answers with the daemon stopped.
  *  3. WebSocket — the live tail from the agent, which keeps running server-side
  *     when the app is closed, so every frame is also written to Room and the
  *     next open sees it.

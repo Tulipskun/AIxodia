@@ -710,8 +710,8 @@ private fun SetupNeeded(endpoint: String, onOpen: () -> Unit) {
     ) {
         Text("ยังไม่ได้ตั้งค่าการเชื่อมต่อ", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "ใส่แค่ 2 อย่างที่หน้าตั้งค่า: URL ของ tunnel หรือ Worker และ D1 token\n" +
-                "(ไม่ต้องใส่ account id — ไม่มีค่าใดฝังในแอป)",
+            "ใส่ Cloudflare API token ที่หน้าตั้งค่า — account/database ถูกค้นหาให้เอง\n" +
+                "และใส่ URL ของ tunnel ด้วยถ้าต้องการแชทสด (ประวัติอ่านได้โดยไม่ต้องมี daemon)",
             style = MaterialTheme.typography.bodyMedium,
         )
         if (endpoint.isNotBlank()) {

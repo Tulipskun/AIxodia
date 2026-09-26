@@ -11,8 +11,4 @@ app/aixodia-debug.keystore.b64
 local.env.json
 
 # runtime config + secrets (never commit)
-worker/.dev.vars
-worker/.wrangler/
-worker/build/
-worker/.gradle/
 config/aixodia.json

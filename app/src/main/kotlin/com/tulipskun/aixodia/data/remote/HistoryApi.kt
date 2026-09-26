@@ -21,9 +21,13 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * REST client for history + node discovery. The base URL is either the real
- * Cloudflare Worker, reached either directly or through the daemon's tunnel —
- * the app code does not care which address it was given.
+ * The app's two back ends in one place (D-011).
+ *
+ *  - **Cloudflare D1** through `D1Api` for history — the chat list, paging and
+ *    session-level writes — so a stopped daemon does not hide the history;
+ *  - **the daemon over its tunnel** for the provider catalogue, provider
+ *    health, per-chat model pins and the agent settings, because validating
+ *    those needs the running router rather than the database.
  */
 @JsonClass(generateAdapter = true)
 data class TurnRow(
@@ -41,8 +45,6 @@ data class TurnRow(
     @Json(name = "duration_ms") val durationMs: Long = 0,
 )
 
-@JsonClass(generateAdapter = true)
-data class TurnsPage(@Json(name = "turns") val turns: List<TurnRow> = emptyList())
 
 @JsonClass(generateAdapter = true)
 data class NodeInfo(
@@ -63,6 +65,9 @@ data class SessionRow(
 
 class HistoryApi(private val settings: SettingsStore) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    // History is Cloudflare D1 read directly (D-011); everything in this class
+    // that still goes over HTTP talks to the daemon through its tunnel.
+    private val d1 = D1Api(settings)
     // The settings calls are not all instant: asking the daemon to re-check its
     // providers means waiting for the gateways to answer, through a tunnel that
     // can take seconds per round trip. The default 10s read timeout cut those
@@ -73,13 +78,10 @@ class HistoryApi(private val settings: SettingsStore) {
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(150, TimeUnit.SECONDS)
         .build()
-    private val sessionsAdapter = moshi.adapter(Array<SessionRow>::class.java)
-    private val turnsAdapter = moshi.adapter(TurnsPage::class.java)
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
     private val providerAdapter = moshi.adapter(ProviderStatus::class.java)
     private val settingsAdapter = moshi.adapter(AgentSettings::class.java)
-    private val nodeAdapter = moshi.adapter(NodeInfo::class.java)
 
     /**
      * Builds an absolute URL, or null when the app has no endpoint configured
@@ -94,79 +96,36 @@ class HistoryApi(private val settings: SettingsStore) {
         return base
     }
 
+    /**
+     * Every chat D1 knows, newest first (AX-010, AX-011). The phone reads D1
+     * itself now, so the list still arrives with the daemon stopped.
+     */
     suspend fun sessions(): List<SessionRow> = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
-        runCatching {
-            val req = Request.Builder().url("$base/api/sessions")
-                .header("Authorization", "Bearer ${c.token}").get().build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return@use emptyList()
-                sessionsAdapter.fromJson(r.body!!.source())?.toList() ?: emptyList()
-            }
-        }.getOrDefault(emptyList())
+        runCatching { d1.sessions() }.getOrDefault(emptyList())
     }
 
-    /** Creates the session on the DB side too, so the daemon and phone agree. */
+    /** Creates the chat in D1 too, so the daemon and phone agree. */
     suspend fun createSession(id: String, title: String): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
-        val body = """{"id":"$id","title":"$title"}"""
-        runCatching {
-            val req = Request.Builder().url("$base/api/sessions")
-                .header("Authorization", "Bearer ${c.token}")
-                .header("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(req).execute().use { it.isSuccessful }
-        }.getOrDefault(false)
+        runCatching { d1.createSession(id, title) }.getOrDefault(false)
     }
 
     /** Renames a chat, the way Gemini/ChatGPT let you retitle a conversation. */
     suspend fun renameSession(sessionId: String, title: String): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
-        val body = """{"title":"${title.replace("\\", "\\\\").replace("\"", "\\\"")}"}"""
-        runCatching {
-            val req = Request.Builder().url("$base/api/sessions/$sessionId")
-                .header("Authorization", "Bearer ${c.token}")
-                .header("Content-Type", "application/json")
-                .patch(body.toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(req).execute().use { it.isSuccessful }
-        }.getOrDefault(false)
+        runCatching { d1.renameSession(sessionId, title) }.getOrDefault(false)
     }
 
-    /** Deletes a chat with its history on both sides. */
+    /** Deletes a chat with its history, in D1 (AX-014). */
     suspend fun deleteSession(sessionId: String): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
-        runCatching {
-            val req = Request.Builder().url("$base/api/sessions/$sessionId")
-                .header("Authorization", "Bearer ${c.token}")
-                .delete()
-                .build()
-            client.newCall(req).execute().use { it.isSuccessful }
-        }.getOrDefault(false)
+        runCatching { d1.deleteSession(sessionId) }.getOrDefault(false)
     }
 
     /** Newest page for a session; the app calls this on open and on reconnect. */
     suspend fun latest(sessionId: String, limit: Int = 200): List<TurnRow> = turns(sessionId, 0, limit)
 
+    /** One page of history, oldest-first, read straight from D1 (AX-011). */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {
-            val c = settings.current()
-            val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
-            val before = if (beforeSeq <= 0) Long.MAX_VALUE else beforeSeq
-            val url = "$base/api/sessions/$sessionId/turns?before_seq=$before&limit=$limit"
-            runCatching {
-                val req = Request.Builder().url(url)
-                    .header("Authorization", "Bearer ${c.token}").get().build()
-                client.newCall(req).execute().use { r ->
-                    if (!r.isSuccessful) return@use emptyList()
-                    turnsAdapter.fromJson(r.body!!.source())?.turns ?: emptyList()
-                }
-            }.getOrDefault(emptyList())
+            runCatching { d1.turns(sessionId, beforeSeq, limit) }.getOrDefault(emptyList())
         }
 
     /**
@@ -175,7 +134,7 @@ class HistoryApi(private val settings: SettingsStore) {
      */
     suspend fun models(): List<ProviderView> = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/models")
                 .header("Authorization", "Bearer ${c.token}").get().build()
@@ -189,7 +148,7 @@ class HistoryApi(private val settings: SettingsStore) {
     /** Pins the provider and model for one chat; the daemon keeps it for good. */
     suspend fun setSessionModel(sessionId: String, provider: String, model: String): Boolean = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         val body = JSONObject().put("provider", provider).put("model", model).toString()
         runCatching {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
@@ -208,7 +167,7 @@ class HistoryApi(private val settings: SettingsStore) {
      */
     suspend fun clearSessionModel(sessionId: String): Boolean = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext false
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         val body = JSONObject().put("clear_model", true).toString()
         runCatching {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
@@ -222,7 +181,7 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** Every configured provider with its reachability and last error. */
     suspend fun providers(): List<ProviderStatus> = withContext(Dispatchers.IO) {
-        val base = absoluteUrl(settings.current().workerUrl) ?: return@withContext emptyList()
+        val base = absoluteUrl(settings.current().daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/providers")
                 .header("Authorization", "Bearer ${settings.current().token}").get().build()
@@ -236,7 +195,7 @@ class HistoryApi(private val settings: SettingsStore) {
     /** Asks the daemon to re-run model discovery and report what is reachable. */
     suspend fun refreshProviders(): List<ProviderStatus> = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext emptyList()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/providers/refresh")
                 .header("Authorization", "Bearer ${c.token}")
@@ -253,7 +212,7 @@ class HistoryApi(private val settings: SettingsStore) {
     /** Tests one provider only, so a dead key does not wait behind five others. */
     suspend fun refreshProvider(providerId: String): ProviderStatus? = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext null
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId/refresh")
                 .header("Authorization", "Bearer ${c.token}")
@@ -285,7 +244,7 @@ class HistoryApi(private val settings: SettingsStore) {
         id: String, adapter: String, endpoint: String, keys: List<String>, freeOnly: Boolean,
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
         val body = JSONObject()
             .put("id", id)
             .put("adapter", adapter)
@@ -310,7 +269,7 @@ class HistoryApi(private val settings: SettingsStore) {
         providerId: String, add: List<String> = emptyList(), remove: List<Int> = emptyList(), replace: List<String> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
         // Written by a JSON writer, never by string interpolation: a key with a
         // quote, a backslash or a newline must not corrupt the request.
         val body = JSONObject().apply {
@@ -332,7 +291,7 @@ class HistoryApi(private val settings: SettingsStore) {
 
     suspend fun removeProvider(providerId: String): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId")
                 .header("Authorization", "Bearer ${c.token}").delete().build()
@@ -345,7 +304,7 @@ class HistoryApi(private val settings: SettingsStore) {
     /** Saves which provider and model the main and sub agent run on. */
     suspend fun saveAgentSettings(settingsBody: AgentSettings): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
         val body = JSONObject()
             .put("main", JSONObject().put("provider", settingsBody.main.provider).put("model", settingsBody.main.model))
             .put("sub", JSONObject().put("provider", settingsBody.sub.provider).put("model", settingsBody.sub.model))
@@ -365,7 +324,7 @@ class HistoryApi(private val settings: SettingsStore) {
 
     suspend fun agentSettings(): AgentSettings? = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.workerUrl) ?: return@withContext null
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/api/settings")
                 .header("Authorization", "Bearer ${c.token}").get().build()
@@ -375,47 +334,22 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrNull()
     }
 
-    /** Connectivity check for the Settings screen: session count or throw. */
-    suspend fun ping(workerOverride: String = "", tokenOverride: String = ""): Int =
-        withContext(Dispatchers.IO) {
-            val c = settings.current()
-            val base = absoluteUrl(workerOverride.ifBlank { c.workerUrl })
-                ?: throw IllegalStateException("ยังไม่ได้ใส่ Worker URL")
-            val tok = tokenOverride.ifEmpty { c.token }
-            val req = Request.Builder().url("$base/api/sessions")
-                .header("Authorization", "Bearer $tok").get().build()
-            client.newCall(req).execute().use { r ->
-                when {
-                    r.code == 401 -> throw IllegalStateException("401 token ผิด")
-                    r.code == 404 -> throw IllegalStateException("404 ยังไม่มี DB/Worker ตรงนี้")
-                    !r.isSuccessful -> throw IllegalStateException("HTTP ${r.code}")
-                    else -> sessionsAdapter.fromJson(r.body!!.source())?.size ?: 0
-                }
-            }
-        }
+    /** Connectivity check for the Settings screen: session count, or throw. */
+    suspend fun ping(): Int = withContext(Dispatchers.IO) { d1.ping() }
 
-    /** Quick-tunnel discovery: where is the ai daemon right now? */
-    suspend fun node(workerOverride: String = "", tokenOverride: String = ""): NodeInfo? =
-        withContext(Dispatchers.IO) {
-            val c = settings.current()
-            val base = absoluteUrl(workerOverride.ifBlank { c.workerUrl })
-                ?: throw IllegalStateException("ยังไม่ได้ใส่ Worker URL")
-            val tok = tokenOverride.ifEmpty { c.token }
-            val req = Request.Builder().url("$base/api/node")
-                .header("Authorization", "Bearer $tok").get().build()
-            try {
-                client.newCall(req).execute().use { r ->
-                    if (r.code == 401) throw IllegalStateException("401 token ผิด")
-                    if (r.code == 404) throw IllegalStateException("404 ยังไม่มี DB/Worker ตรงนี้")
-                    if (!r.isSuccessful) return@withContext null
-                    nodeAdapter.fromJson(r.body!!.source())
-                }
-            } catch (e: IllegalStateException) {
-                throw e
-            } catch (_: Exception) {
-                null
-            }
-        }
+    /**
+     * Resolves the Cloudflare account and database from the token and reports
+     * what was found, so the settings screen can show it and remember it
+     * (AX-030). Throws with Cloudflare's own message when it cannot.
+     */
+    suspend fun discover(): D1Api.Target = withContext(Dispatchers.IO) { d1.discover() }
+
+    /**
+     * Tunnel discovery: where the ai daemon is, read from the D1 `nodes` row
+     * (AX-050). A failure is reported rather than hidden, so the settings screen
+     * can tell "D1 unreachable" from "the daemon has not beaten yet".
+     */
+    suspend fun node(): NodeInfo? = withContext(Dispatchers.IO) { d1.node() }
 
     /** https://x.trycloudflare.com -> wss://x.trycloudflare.com/ws */
     fun wsUrlFor(tunnelUrl: String): String =

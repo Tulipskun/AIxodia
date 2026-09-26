@@ -75,7 +75,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.BuildConfig
-import com.tulipskun.aixodia.EndpointKind
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AgentRoute
 import com.tulipskun.aixodia.data.model.AgentSettings
@@ -93,9 +92,10 @@ import kotlinx.coroutines.launch
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
 /**
- * Connection settings (AX-030): which daemon / Worker / token / session
- * the app talks to, with one-tap tests so a misconfigured URL or a
- * not-yet-deployed D1 shows up here instead of a silent empty chat.
+ * Connection settings (AX-030): the Cloudflare API token the app uses to read
+ * and write D1 directly, the daemon tunnel address that carries the live socket
+ * and the provider/model API, and one-tap tests so a wrong token or a missing
+ * nodes row shows up here instead of as a silent empty chat.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,8 +109,9 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val curEndpoint by settings.endpointFlow.collectAsState(initial = "")
     val curWs by settings.wsUrlFlow.collectAsState(initial = "")
-    val curWorker by settings.workerUrlFlow.collectAsState(initial = "")
     val curToken by settings.tokenFlow.collectAsState(initial = "")
+    val curAccount by settings.accountIdFlow.collectAsState(initial = "")
+    val curDatabase by settings.databaseIdFlow.collectAsState(initial = "")
     val curSession by settings.sessionFlow.collectAsState(initial = "default")
     val conn by socket.state.collectAsState(initial = ConnState.OFFLINE)
 
@@ -194,30 +195,16 @@ fun SettingsScreen(
         ) {
             if (msg.isNotBlank()) StatusBanner(msg)
 
-            SectionCard("การเชื่อมต่อ", "ใส่แค่ URL ของ tunnel กับ D1 token — ไม่ต้องใส่ account id หรือค่าอื่น") {
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = { Text("ที่อยู่ (tunnel หรือ Worker)") },
-                    placeholder = { Text("https://xxxx.trycloudflare.com") },
-                    supportingText = {
-                        when (SettingsStore.resolve(address).kind) {
-                            EndpointKind.TUNNEL -> Text("ใช้ทั้งประวัติและสดผ่าน tunnel นี้")
-                            EndpointKind.WORKER -> Text("Worker: ประวัติตรง สดจะค้นหาจาก /api/node")
-                            EndpointKind.NONE -> Text("ยังไม่ได้ใส่")
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
+            SectionCard(
+                "การเชื่อมต่อ",
+                "ใส่ Cloudflare API token ตัวเดียว — account/database ถูกค้นหาให้อัตโนมัติ (ไม่มี Worker แล้ว)",
+            ) {
+                val clip = LocalClipboardManager.current
                 OutlinedTextField(
                     value = token, onValueChange = { token = it },
-                    label = { Text("D1 token") },
-                    supportingText = { Text("ส่งเป็น header ไม่ฝังในแอป") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("Cloudflare API token") },
                     visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
-                        val clip = LocalClipboardManager.current
                         IconButton(
                             onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
                             enabled = !showToken,
@@ -229,55 +216,90 @@ fun SettingsScreen(
                             )
                         }
                     },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
                             busy = true; msg = ""
                             scope.launch {
-                                val r = SettingsStore.resolve(address)
-                                if (r.kind == EndpointKind.NONE) {
-                                    msg = "ใส่ URL ที่ขึ้นต้นด้วย https:// ก่อน"
-                                    busy = false
-                                    return@launch
+                                settings.saveD1(token)
+                                val found = runCatching { history.discover() }
+                                val target = found.getOrNull()
+                                if (target == null) {
+                                    msg = "ค้นหา D1 ไม่สำเร็จ: " +
+                                        (found.exceptionOrNull()?.message ?: "ไม่รู้สาเหตุ")
+                                } else {
+                                    val chats = runCatching { history.ping() }.getOrDefault(0)
+                                    msg = "ผ่าน — ${target.accountName}/${target.databaseName} · เจอ $chats เซสชัน"
+                                    load(false)
                                 }
-                                if (runCatching { history.ping(r.worker, token) }.isFailure) {
-                                    msg = "URL/token ไม่ผ่าน (401 = token ผิด) — ยังไม่บันทึก"
-                                    busy = false
-                                    return@launch
-                                }
-                                settings.saveEndpoint(address, token)
-                                msg = "บันทึกแล้ว"
-                                load(false)
                                 busy = false
                             }
                         },
-                        enabled = !busy,
-                    ) { Text("บันทึกและทดสอบ") }
+                        enabled = !busy && token.isNotBlank(),
+                    ) { Text("บันทึกและค้นหา D1") }
                     OutlinedButton(
                         onClick = {
-                            busy = true
+                            busy = true; msg = ""
                             scope.launch {
-                                val r = SettingsStore.resolve(address)
-                                msg = runCatching { "ผ่าน — เจอ ${history.ping(r.worker, token)} เซสชัน" }
+                                msg = runCatching { "ผ่าน — เจอ ${history.ping()} เซสชัน" }
                                     .getOrElse { "ไม่ผ่าน: ${it.message}" }
                                 busy = false
                             }
                         },
-                        enabled = !busy && address.isNotBlank(),
+                        enabled = !busy && token.isNotBlank(),
                     ) { Text("ทดสอบ") }
                 }
-                val resolved = SettingsStore.resolve(address)
-                if (resolved.kind == EndpointKind.WORKER) {
-                    HorizontalDivider()
-                    NodeCard(history = history, workerText = resolved.worker, tokenText = token,
-                        onUse = { wsUrl ->
+                Text(
+                    if (curAccount.isBlank() || curDatabase.isBlank()) {
+                        "D1: ยังไม่รู้ account/database — กดปุ่มบันทึกและค้นหา D1"
+                    } else {
+                        "D1: account ${curAccount.take(8)}… · database ${curDatabase.take(8)}…"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("ที่อยู่ daemon (tunnel) — แชทสด และ provider/model") },
+                    placeholder = { Text("https://xxxx.trycloudflare.com") },
+                    supportingText = {
+                        Text(
+                            if (address.isBlank()) "เว้นว่างได้: ประวัติยังอ่าน/เขียนได้จาก D1 ตรง"
+                            else "สดจะต่อ wss://<host>/ws และ provider/model จะถาม daemon ที่นี่",
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            busy = true; msg = ""
                             scope.launch {
-                                settings.saveConnection(wsUrl, resolved.worker, token)
-                                msg = "ใช้ URL ของ daemon แล้ว"
+                                settings.saveDaemon(address)
+                                msg = "บันทึกที่อยู่ daemon แล้ว"
+                                busy = false
                             }
-                        })
+                        },
+                        enabled = !busy,
+                    ) { Text("บันทึกที่อยู่") }
                 }
+                HorizontalDivider()
+                NodeCard(
+                    history = history,
+                    onUse = { tunnel ->
+                        scope.launch {
+                            settings.saveDaemon(tunnel)
+                            address = tunnel
+                            msg = "ใช้ URL ของ daemon แล้ว"
+                        }
+                    },
+                )
             }
 
             SectionCard(
@@ -1014,8 +1036,6 @@ private fun ReplaceKeysDialog(
 @Composable
 private fun NodeCard(
     history: HistoryApi,
-    workerText: String,
-    tokenText: String,
     onUse: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1024,24 +1044,25 @@ private fun NodeCard(
     var err by remember { mutableStateOf("") }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("ค้นหา ai daemon ผ่าน /api/node", style = MaterialTheme.typography.titleSmall)
+        Text("ค้นหา ai daemon จากแถว nodes ใน D1", style = MaterialTheme.typography.titleSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
                     checking = true; err = ""
                     scope.launch {
-                        try {
-                            node = history.node(workerText, tokenText)
-                            if (node == null) err = "ติดต่อ Worker ไม่ได้ — ตรวจ URL/token"
-                        } catch (e: Exception) {
-                            err = e.message ?: "error"
-                        } finally { checking = false }
+                        runCatching { history.node() }
+                            .onSuccess { found ->
+                                node = found
+                                if (found == null) err = "ยังไม่มีแถว nodes — daemon ยังไม่ heartbeat"
+                            }
+                            .onFailure { err = it.message ?: "error" }
+                        checking = false
                     }
                 },
                 enabled = !checking,
             ) { Text("ค้นหา") }
             if (node?.online == true) {
-                Button(onClick = { onUse(history.wsUrlFor(node!!.tunnelUrl)) }) { Text("ใช้ URL นี้") }
+                Button(onClick = { onUse(node!!.tunnelUrl) }) { Text("ใช้ URL นี้") }
             }
         }
         val n = node

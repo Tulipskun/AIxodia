@@ -13,54 +13,73 @@ private val Context.ds by preferencesDataStore("aixodia")
 /**
  * Every connection value is runtime configuration entered by the user in the
  * settings screen — nothing is baked into the app, and no secret ships in the
- * repo. Defaults are intentionally empty so an unconfigured app asks instead
- * of silently talking to a wrong endpoint.
+ * repo. Defaults are intentionally empty so an unconfigured app asks instead of
+ * silently talking to a wrong endpoint.
+ *
+ * Since D-011 there is exactly one credential: the Cloudflare API token, which
+ * the app uses against the D1 REST API and hands to the daemon in the WebSocket
+ * hello. The account and database ids are the token's own answer — discovered
+ * and cached, never required from the operator — and the daemon address only
+ * carries the live socket and the provider/model API.
  */
 class SettingsStore(private val ctx: Context) {
     private val endpoint = stringPreferencesKey("endpoint")
     private val wsUrl = stringPreferencesKey("ws_url")
-    private val workerUrl = stringPreferencesKey("worker_url")
+    private val daemonUrl = stringPreferencesKey("daemon_url")
     private val token = stringPreferencesKey("token")
+    private val accountId = stringPreferencesKey("account_id")
+    private val databaseId = stringPreferencesKey("database_id")
     private val sessionId = stringPreferencesKey("session_id")
 
     val endpointFlow: Flow<String> = ctx.ds.data.map { it[endpoint] ?: "" }
     val wsUrlFlow: Flow<String> = ctx.ds.data.map { it[wsUrl] ?: "" }
-    val workerUrlFlow: Flow<String> = ctx.ds.data.map { it[workerUrl] ?: "" }
+    val daemonUrlFlow: Flow<String> = ctx.ds.data.map { it[daemonUrl] ?: "" }
     val tokenFlow: Flow<String> = ctx.ds.data.map { it[token] ?: "" }
+    val accountIdFlow: Flow<String> = ctx.ds.data.map { it[accountId] ?: "" }
+    val databaseIdFlow: Flow<String> = ctx.ds.data.map { it[databaseId] ?: "" }
     val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "" }
 
     suspend fun current(): ConnConfig = ConnConfig(
         endpoint = endpointFlow.first(),
-        wsUrl = wsUrlFlow.first(), workerUrl = workerUrlFlow.first(),
-        token = tokenFlow.first(), sessionId = sessionFlow.first(),
+        wsUrl = wsUrlFlow.first(),
+        daemonUrl = daemonUrlFlow.first(),
+        token = tokenFlow.first(),
+        accountId = accountIdFlow.first(),
+        databaseId = databaseIdFlow.first(),
+        sessionId = sessionFlow.first(),
     )
 
-    suspend fun save(ws: String, worker: String, tok: String, sess: String) {
+    /**
+     * The one credential, plus the ids when they are already known. Blank ids
+     * stay blank on purpose: D1Api resolves them from the token and writes them
+     * back here, so nobody has to type a Cloudflare id (AX-010, AX-030).
+     */
+    suspend fun saveD1(tokenValue: String, accountValue: String = "", databaseValue: String = "") {
         ctx.ds.edit {
-            it[wsUrl] = ws.trim()
-            it[workerUrl] = worker.trim().trimEnd('/')
-            it[token] = tok.trim()
-            it[sessionId] = sess.trim()
+            it[token] = tokenValue.trim()
+            if (accountValue.isNotBlank()) it[accountId] = accountValue.trim()
+            if (databaseValue.isNotBlank()) it[databaseId] = databaseValue.trim()
+        }
+    }
+
+    /** Remembers the ids D1Api resolved, without touching the token. */
+    suspend fun saveResolvedTarget(accountValue: String, databaseValue: String) {
+        ctx.ds.edit {
+            it[accountId] = accountValue
+            it[databaseId] = databaseValue
         }
     }
 
     /**
-     * The only two things the operator has to supply: one address and the D1
-     * token. No account id, no second URL, no flags.
-     *
-     *  - a trycloudflare URL is the daemon's own tunnel: history is proxied
-     *    through it (/api/...) and the live socket is wss://<host>/ws
-     *  - a workers.dev (or any other https) URL is the Worker: history goes
-     *    direct, and the live socket is discovered from GET /api/node
+     * The daemon address: one https tunnel URL. Both legs follow from it — the
+     * live socket and the provider/model API the running router owns.
      */
-    suspend fun saveEndpoint(address: String, tok: String, session: String = "") {
-        val parts = resolve(address)
+    suspend fun saveDaemon(address: String) {
+        val clean = address.trim().trimEnd('/')
         ctx.ds.edit {
-            it[endpoint] = address.trim()
-            it[wsUrl] = parts.ws
-            it[workerUrl] = parts.worker
-            it[token] = tok.trim()
-            if (session.isNotBlank()) it[sessionId] = session.trim()
+            it[endpoint] = clean
+            it[daemonUrl] = clean
+            it[wsUrl] = wsUrlFor(clean)
         }
     }
 
@@ -69,54 +88,31 @@ class SettingsStore(private val ctx: Context) {
         ctx.ds.edit { it[sessionId] = sess.trim() }
     }
 
-    /** Save connection fields; blank inputs keep the previous value. */
-    suspend fun saveConnection(ws: String, worker: String, tok: String) {
-        ctx.ds.edit {
-            if (ws.isNotBlank()) it[wsUrl] = ws.trim()
-            if (worker.isNotBlank()) it[workerUrl] = worker.trim().trimEnd('/')
-            it[token] = tok.trim() // token may be intentionally cleared
-        }
-    }
-
-    /** True when an address + token are set (i.e. the app may connect). */
-    suspend fun isConfigured(): Boolean {
-        val c = current()
-        return c.workerUrl.isNotBlank() && c.token.isNotBlank() && c.wsUrl.isNotBlank()
-    }
+    /**
+     * True once a Cloudflare API token is set. History needs nothing else, so a
+     * phone with no daemon address still opens and edits its chats (AX-010);
+     * only the live socket stays offline until an address is known.
+     */
+    suspend fun isConfigured(): Boolean = current().token.isNotBlank()
 
     companion object {
-        /**
-         * Turns one pasted address into the two URLs the app actually uses.
-         * Exposed as a pure function so the settings screen can preview what a
-         * given address will do before saving it.
-         */
-        fun resolve(address: String): ResolvedEndpoint {
+        /** https://x.trycloudflare.com -> wss://x.trycloudflare.com/ws */
+        fun wsUrlFor(address: String): String {
             val clean = address.trim().trimEnd('/')
-            if (clean.isEmpty()) return ResolvedEndpoint("", "", EndpointKind.NONE)
+            if (clean.isEmpty()) return ""
             val host = clean.substringAfter("://", clean).substringBefore('/')
-            val isTunnel = host.endsWith(".trycloudflare.com")
-            val ws = when {
-                isTunnel -> "wss://$host/ws"
-                clean.startsWith("http://") -> "ws://$host/ws"
-                else -> "wss://$host/ws"
-            }
-            return ResolvedEndpoint(
-                ws = ws,
-                worker = clean,
-                kind = if (isTunnel) EndpointKind.TUNNEL else EndpointKind.WORKER,
-            )
+            val scheme = if (clean.startsWith("http://")) "ws" else "wss"
+            return "$scheme://$host/ws"
         }
     }
 }
 
-enum class EndpointKind { NONE, TUNNEL, WORKER }
-
-data class ResolvedEndpoint(val ws: String, val worker: String, val kind: EndpointKind)
-
 data class ConnConfig(
     val endpoint: String,
     val wsUrl: String,
-    val workerUrl: String,
+    val daemonUrl: String,
     val token: String,
+    val accountId: String,
+    val databaseId: String,
     val sessionId: String,
 )
