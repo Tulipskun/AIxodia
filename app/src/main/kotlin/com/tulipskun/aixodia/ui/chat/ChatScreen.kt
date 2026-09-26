@@ -48,6 +48,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -692,7 +693,7 @@ private fun ChatModelSheet(
                 Text("เปิด sub agent", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 Switch(
                     checked = subEnabled,
-                    onCheckedChange = { vm.setSubAgent(subPickedProvider, subPickedModel, it) },
+                    onCheckedChange = { enabled -> vm.setSubAgent(subPickedProvider, subPickedModel, enabled) },
                 )
             }
             if (providers.isNotEmpty()) {
