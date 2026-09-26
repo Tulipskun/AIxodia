@@ -101,6 +101,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE sessionId = :sid AND seq = :seq LIMIT 1")
     suspend fun get(sid: String, seq: Long): MessageEntity?
 
+    @Query("SELECT * FROM messages WHERE sessionId = :sid ORDER BY seq ASC")
+    suspend fun allNow(sid: String): List<MessageEntity>
+
     @Query("DELETE FROM messages WHERE sessionId = :sid AND seq = :seq")
     suspend fun deleteOne(sid: String, seq: Long)
 

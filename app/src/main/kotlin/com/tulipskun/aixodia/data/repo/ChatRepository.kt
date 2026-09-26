@@ -302,29 +302,53 @@ class ChatRepository(
      *   way a message is never deleted without its replacement on screen.
      *   Otherwise the local row stays — the mirror is still in flight, or the
      *   twin is outside this page, and dropping either side would lose text.
+     *
+     * A page that matches nothing local at all is a different case: the session
+     * id was reborn server-side (deleted and recreated, so D1 holds a new
+     * conversation under an old id). Merging would only stack two threads on
+     * the same seqs, so D1 is adopted wholesale instead, keeping only pending
+     * rows whose text D1 does not have yet.
      */
     private suspend fun reconcile(sid: String, rows: List<com.tulipskun.aixodia.data.remote.TurnRow>) {
         if (rows.isEmpty()) return
-        // TEMP-DEBUG-AXGH: reconcile diagnostics, reverted before release.
-        android.util.Log.d("AIXDBG", "reconcile sid=$sid pulled=${rows.map { "${it.seq}:${it.role}:${it.text.take(18)}" }}")
         val entities = rows.map { it.toEntity(sid) }
         db.withTransaction {
+            val localBySeq = db.messages().allNow(sid).associateBy { it.seq }
+            // A page that matches nothing local at all means this session id was
+            // reborn server-side (deleted and recreated, so D1 holds a new
+            // conversation under an old id). Merging would only stack two threads
+            // on the same seqs, so D1 is adopted wholesale instead: stale rows go,
+            // pending rows stay only while their text is nowhere in the page
+            // (still unsent), and a pending row D1 already has is dropped in
+            // favour of D1's copy.
+            if (localBySeq.isNotEmpty() && entities.none { e ->
+                    localBySeq[e.seq]?.let { it.role == e.role && it.text == e.text } == true
+                }
+            ) {
+                val pulledTexts = entities.map { it.text }.toSet()
+                for (row in localBySeq.values) {
+                    if (!row.pending || row.text in pulledTexts) {
+                        db.messages().deleteOne(sid, row.seq)
+                    }
+                }
+                for (e in entities.sortedBy { it.seq }) {
+                    db.messages().upsert(e)
+                }
+                return@withTransaction
+            }
             for (e in entities.sortedBy { it.seq }) {
-                val existing = db.messages().get(sid, e.seq)
+                val existing = localBySeq[e.seq]
                 if (existing == null) {
-                    android.util.Log.d("AIXDBG", "insert seq=${e.seq} role=${e.role} text=${e.text.take(24)}")
                     db.messages().upsert(e)
                     continue
                 }
                 if (existing.role == e.role && existing.text == e.text) {
-                    android.util.Log.d("AIXDBG", "adopt seq=${e.seq}")
                     if (existing.pending || existing.createdAt != e.createdAt) {
                         db.messages().upsert(e.copy(pending = false, clientMsgId = existing.clientMsgId))
                     }
                     continue
                 }
                 val twinInPage = entities.any { it.seq != e.seq && it.text == existing.text }
-                android.util.Log.d("AIXDBG", "collision seq=${e.seq} local=(${existing.role},${existing.text.take(24)},pending=${existing.pending}) remote=(${e.role},${e.text.take(24)}) twin=$twinInPage")
                 if (twinInPage) {
                     db.messages().deleteOne(sid, e.seq)
                     db.messages().upsert(e)
