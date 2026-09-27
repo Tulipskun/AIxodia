@@ -282,3 +282,5 @@ Status: accepted
 - AXCH-027 (2026-09-28) — CI trigger touch after local screen-agent implementation.
 
 - AXCH-028 (2026-09-28) — Pin the Laya native runtime to its full upstream commit for reproducible Android builds.
+
+- AXCH-029 (2026-09-28) — Disable shallow clone for the pinned Laya runtime commit so Android CMake can resolve the immutable source revision.
