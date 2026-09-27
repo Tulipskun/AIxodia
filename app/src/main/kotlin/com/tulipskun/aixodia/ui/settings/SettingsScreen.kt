@@ -302,6 +302,36 @@ fun SettingsScreen(
             }
 
             SectionCard(
+                "JEV decision guard",
+                "ตัวตรวจการเรียก bash ก่อนรันจริง โดยแยกหน้าที่จากโมเดลหลัก",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Column(
+                        Modifier.padding(start = 10.dp).weight(1f),
+                    ) {
+                        Text("เปิดใช้งานใน ai-engine", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "JEV ใช้คำถามแบบ yes/no เพื่อตรวจ scope ของคำสั่ง bash " +
+                                "ก่อน execute; ถ้า JEV ติดต่อไม่ได้ engine จะทำงานต่อด้วย policy เดิม",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(
+                    "โมเดลเริ่มต้น: jev-1.13-free · OpenCode Zen",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            SectionCard(
                 "Provider และ key (ทั้งระบบ)",
                 if (loading) "กำลังโหลด…"
                 else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · " +
