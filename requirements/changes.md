@@ -294,3 +294,5 @@ Status: accepted
 - AXCH-033 (2026-09-28) — Keep the native local screen-agent runtime arm64-only; the target device is ARM64 and the upstream Laya runtime does not need the legacy 32-bit ABI.
 
 - AXCH-034 (2026-09-28) — Correct frontend boundary: AIxodia is frontend only and does not execute screen-control actions. Remove the AccessibilityService, localhost screen bridge, Accessibility UI/status state, and related manifest/resource entries. Screen control and local JEV execution remain outside the APK; Main Agent/Sub-agent may invoke the external JEV runtime through ai-engine.
+
+- AXCH-035 (2026-09-28) — Enforce the frontend boundary for screen control: AIxodia contains no AccessibilityService, localhost screen-control bridge, screen-action executor, or JEV runtime. The APK is limited to chat/frontend concerns; external screen control remains outside the APK and may be requested by Main Agent/Sub-agent through ai-engine.
