@@ -20,6 +20,7 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     signingConfigs {
