@@ -286,3 +286,5 @@ Status: accepted
 - AXCH-029 (2026-09-28) — Disable shallow clone for the pinned Laya runtime commit so Android CMake can resolve the immutable source revision.
 
 - AXCH-030 (2026-09-28) — Fetch the upstream Laya implementation through its pull-request ref because the commit is not reachable from llama.cpp main.
+
+- AXCH-031 (2026-09-28) — Pin the Laya runtime against the source repository that owns the upstream implementation commit.
