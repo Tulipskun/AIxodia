@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -78,6 +79,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -258,8 +260,12 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
         )
     }
+    // The sub-agent block reads from the daemon, so load it once per sheet
+    // opening instead of on every recomposition.
+    LaunchedEffect(showModelPicker) {
+        if (showModelPicker) vm.loadSubAgentConfig()
+    }
     if (showModelPicker) {
-        vm.loadSubAgentConfig()
         ChatModelSheet(
             vm = vm,
             providers = providers,
@@ -554,6 +560,7 @@ private fun ChatModelSheet(
             Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.85f)
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 12.dp),
@@ -625,7 +632,7 @@ private fun ChatModelSheet(
                 // The list takes what is left of the sheet, so every model is
                 // reachable above the navigation bar instead of the first one
                 // hiding under it.
-                LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth()) {
+                LazyColumn(Modifier.heightIn(max = 200.dp).fillMaxWidth()) {
                     items(filtered) { m ->
                         val selected = m.id == pickedModel
                         Row(
@@ -680,10 +687,10 @@ private fun ChatModelSheet(
             // inheriting the global agent defaults.
             Divider(modifier = Modifier.padding(vertical = 8.dp))
             Text("Sub agent (เฉพาะแชทนี้)", style = MaterialTheme.typography.titleSmall)
-            val subPickedProvider = vm.subAgentProvider.collectAsState().value
-            val subPickedModel = vm.subAgentModel.collectAsState().value
-            val subEnabled = vm.subAgentEnabled.collectAsState().value
-            val subPinned = vm.subAgentPinned.collectAsState().value
+            val subPickedProvider by vm.subAgentProvider.collectAsStateWithLifecycle()
+            val subPickedModel by vm.subAgentModel.collectAsStateWithLifecycle()
+            val subEnabled by vm.subAgentEnabled.collectAsStateWithLifecycle()
+            val subPinned by vm.subAgentPinned.collectAsStateWithLifecycle()
             Text(
                 if (subPinned) "แชทนี้ล็อก sub agent ไว้แล้ว" else "ใช้ค่าของ agent (sub agent ทั่วไป)",
                 style = MaterialTheme.typography.bodySmall,
@@ -743,6 +750,11 @@ private fun ChatModelSheet(
                 enabled = subPickedProvider.isNotBlank() && subPickedModel.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("บันทึก sub agent ของแชทนี้") }
+            Text(
+                "เปิด/ปิดใช้ได้เลยโดยไม่ต้องเลือก provider — แชทนี้จะใช้ sub agent ของ agent",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             TextButton(
                 onClick = { vm.clearSubAgent() },
                 enabled = subPinned,

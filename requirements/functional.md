@@ -298,3 +298,16 @@
   daemon-measured duration for token/s, streaming estimates marked `≈`, tool
   rows with name/status/args excerpt/duration, and reasoning as a transient
   thinking timer only — never stored prose.
+
+- AX-100 — The sub agent is configurable per chat, like the main model: the
+  session sheet carries a "Sub agent (เฉพาะแชทนี้)" block with an on/off
+  switch, an optional provider + model pin, a save action and a "use the
+  agent's value" action that clears the pin. Turning the switch on or off must
+  work without picking a route — a chat with no sub route uses the agent's
+  global sub agent and only overrides the switch. The block states which of
+  those two states the chat is in, and clearing re-reads the effective value
+  from the daemon rather than leaving the last flag on screen.
+- AX-101 — Every control in the session sheet must be reachable: the sheet
+  scrolls to its end, so the sub-agent block's save and clear actions are never
+  left below the fold. State the sheet shows is read once per opening (not on
+  every recomposition) and is collected lifecycle-aware.

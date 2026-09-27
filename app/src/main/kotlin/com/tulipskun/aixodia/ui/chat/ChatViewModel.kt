@@ -607,11 +607,11 @@ class ChatViewModel(
         }
     }
 
+    // Toggling the sub agent on or off must work without picking a route: a
+    // blank provider/model tells the daemon "keep the agent's global
+    // sub-agent, only override the switch", which is what the daemon writes
+    // as sub_enabled with no route change.
     fun setSubAgent(provider: String, model: String, enabled: Boolean) {
-        if (provider.isBlank() || model.isBlank()) {
-            notice.value = "เลือก provider และ model ของ sub agent ก่อน"
-            return
-        }
         viewModelScope.launch {
             val ok = runCatching {
                 repo.saveSessionAgentConfig(sessionId, "", "", false, provider, model, enabled, false)
@@ -620,8 +620,14 @@ class ChatViewModel(
                 subAgentProvider.value = provider
                 subAgentModel.value = model
                 subAgentEnabled.value = enabled
-                subAgentPinned.value = true
-                notice.value = "Sub agent: $provider / $model"
+                subAgentPinned.value = provider.isNotBlank() && model.isNotBlank()
+                notice.value = if (subAgentPinned.value) {
+                    "Sub agent: $provider / $model"
+                } else if (enabled) {
+                    "เปิด sub agent ด้วยค่าของ agent"
+                } else {
+                    "ปิด sub agent ของแชทนี้"
+                }
             } else {
                 notice.value = "บันทึก sub agent ไม่สำเร็จ"
             }
@@ -637,6 +643,9 @@ class ChatViewModel(
                 subAgentProvider.value = ""
                 subAgentModel.value = ""
                 subAgentPinned.value = false
+                // Re-read the effective values so the toggle shows what the
+                // agent's global sub-agent is, not the flag the chat had.
+                loadSubAgentConfig()
                 notice.value = "Sub agent ใช้ค่าของ agent แล้ว"
             } else {
                 notice.value = "ล้างค่า sub agent ไม่สำเร็จ"

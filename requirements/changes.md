@@ -255,3 +255,21 @@ Status: accepted
   (stable signature) แล้วกดปุ่ม ต้องเจอ release ล่าสุด โหลด APK และติดตั้งทับได้
   ข้อมูลแชทไม่หาย.
   Status: accepted
+
+## CHANGE-076: session sheet เลื่อนถึงส่วน sub agent ได้ และเปิด sub agent ได้โดยไม่ต้องเลือก route
+New: AX-100 (ตั้งค่า sub agent รายแชทใน session sheet: สวิตช์เปิด/ปิดที่ใช้ได้แม้ไม่เลือก
+provider — แชทที่ไม่ล็อก route ใช้ sub agent ของ agent และ override แค่สวิตช์, ปุ่มบันทึก,
+ปุ่มล้างกลับไปใช้ค่าของ agent พร้อมอ่านค่าที่ได้จริงกลับมาใหม่), AX-101 (session sheet
+ต้องเลื่อนถึงสุดได้ ทุกปุ่มต้องกดได้ อ่านค่าครั้งเดียวต่อการเปิด และเก็บ state แบบ
+lifecycle-aware) — `ChatModelSheet` มี `verticalScroll` + รายการโมเดลใช้ความสูง
+จำกัดแทน `weight`, `loadSubAgentConfig()` ย้ายเข้า `LaunchedEffect`,
+`collectAsStateWithLifecycle`, และ `setSubAgent` เลิกบังคับให้ต้องเลือก provider/model
+ก่อนเปิดสวิตช์
+Reason: ทดสอบจริงบนเครื่อง — ปุ่มบันทึก/ล้างของส่วน sub agent อยู่ใต้ขอบจอและเลื่อนไม่ถึง
+และสวิตช์ตอบว่า "เลือก provider และ model ของ sub agent ก่อน" ทำให้เปิด sub agent ไม่ได้
+ผลคือ worker (ซึ่งเป็นทางเดียวที่ได้ใช้ `bash` หลัง CHANGE-087) ใช้งานไม่ได้จากแอป
+Impact: app `ui/chat/ChatScreen.kt`, `ui/chat/ChatViewModel.kt`, requirements
+(functional AX-100/AX-101 + changes)
+Validation: CI build ผ่าน; ทดสอบบนเครื่องจริง — เปิด sub agent ของแชทได้จาก session sheet
+แล้ว delegate ได้
+Status: accepted
