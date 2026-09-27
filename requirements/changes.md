@@ -273,3 +273,6 @@ Impact: app `ui/chat/ChatScreen.kt`, `ui/chat/ChatViewModel.kt`, requirements
 Validation: CI build ผ่าน; ทดสอบบนเครื่องจริง — เปิด sub agent ของแชทได้จาก session sheet
 แล้ว delegate ได้
 Status: accepted
+
+
+- AXCH-025 (2026-09-27) — Integrate the AI engine's JEV decision guard into the app-facing product. AIxodia keeps the generative model for chat/reasoning while ai-engine uses JEV as an auxiliary typed decision check before bash execution. Settings now explains the JEV layer and its fail-open behavior; no JEV credential is stored in the APK.
