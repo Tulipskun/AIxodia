@@ -276,3 +276,19 @@ Status: accepted
 
 
 - AXCH-025 (2026-09-27) — Integrate the AI engine's JEV decision guard into the app-facing product. AIxodia keeps the generative model for chat/reasoning while ai-engine uses JEV as an auxiliary typed decision check before bash execution. Settings now explains the JEV layer and its fail-open behavior; no JEV credential is stored in the APK.
+
+- AXCH-026 (2026-09-28) — Correct JEV architecture: remove hosted/OpenCode JEV integration and all bash gate behavior. Add a phone-local JEV-compatible Laya multilingual decision runtime. AIxodia AccessibilityService exposes a localhost screen-control bridge; ai-engine's screen_control tool sends a user goal to that bridge. The local decision model chooses among screen actions from the current accessibility tree and the service executes the selected action. No JEV API key or hosted decision request is used.
+
+- AXCH-027 (2026-09-28) — CI trigger touch after local screen-agent implementation.
+
+- AXCH-028 (2026-09-28) — Pin the Laya native runtime to its full upstream commit for reproducible Android builds.
+
+- AXCH-029 (2026-09-28) — Disable shallow clone for the pinned Laya runtime commit so Android CMake can resolve the immutable source revision.
+
+- AXCH-030 (2026-09-28) — Fetch the upstream Laya implementation through its pull-request ref because the commit is not reachable from llama.cpp main.
+
+- AXCH-031 (2026-09-28) — Pin the Laya runtime against the source repository that owns the upstream implementation commit.
+
+- AXCH-032 (2026-09-28) — Track the Laya source branch directly because its upstream PR implementation is maintained on that branch.
+
+- AXCH-033 (2026-09-28) — Keep the native local screen-agent runtime arm64-only; the target device is ARM64 and the upstream Laya runtime does not need the legacy 32-bit ABI.
