@@ -18,7 +18,7 @@ include(FetchContent)
 FetchContent_Declare(
     llama
     GIT_REPOSITORY https://github.com/Clauszy/llama.cpp.git
-    GIT_TAG 5d8c71ce6e3b9cf481e980c8ad96b00bfdad27c9
+    GIT_TAG master
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(llama)
