@@ -479,7 +479,6 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
-                item(key = "screen-control") { ScreenControlCard() }
                 if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty()) {
                     item {
                         Column(
