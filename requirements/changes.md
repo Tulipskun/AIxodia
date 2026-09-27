@@ -278,3 +278,5 @@ Status: accepted
 - AXCH-025 (2026-09-27) — Integrate the AI engine's JEV decision guard into the app-facing product. AIxodia keeps the generative model for chat/reasoning while ai-engine uses JEV as an auxiliary typed decision check before bash execution. Settings now explains the JEV layer and its fail-open behavior; no JEV credential is stored in the APK.
 
 - AXCH-026 (2026-09-28) — Correct JEV architecture: remove hosted/OpenCode JEV integration and all bash gate behavior. Add a phone-local JEV-compatible Laya multilingual decision runtime. AIxodia AccessibilityService exposes a localhost screen-control bridge; ai-engine's screen_control tool sends a user goal to that bridge. The local decision model chooses among screen actions from the current accessibility tree and the service executes the selected action. No JEV API key or hosted decision request is used.
+
+- AXCH-027 (2026-09-28) — CI trigger touch after local screen-agent implementation.
