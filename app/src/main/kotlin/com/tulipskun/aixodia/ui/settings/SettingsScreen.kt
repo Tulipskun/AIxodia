@@ -5,9 +5,6 @@
 
 package com.tulipskun.aixodia.ui.settings
 
-import android.content.Intent
-import android.provider.Settings
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -378,36 +375,6 @@ fun SettingsScreen(
                         onDelete = { deleting = p },
                     )
                 }
-            }
-
-            SectionCard(
-                "Screen Agent",
-                "JEV-compatible Laya รันในเครื่องและเลือก action จาก Accessibility tree; ไม่ส่งหน้าจอไป OpenCode หรือ API ภายนอก",
-            ) {
-                val context = LocalContext.current
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("ควบคุมหน้าจอด้วย AI", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "ต้องเปิด Accessibility Service ของ AIxodia ก่อนใช้งาน",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    FilledTonalButton(
-                        onClick = {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        },
-                    ) { Text("เปิด") }
-                }
-                Text(
-                    "โมเดล local: Laya multilingual · ไม่ใช้ API key",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
 
             SectionCard("โมเดลค่าเริ่มต้นของ agent (สากล)", "ค่าที่นี่ใช้กับทุกแชทที่ไม่ได้ล็อก provider/model ไว้เอง main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย") {
