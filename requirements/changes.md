@@ -280,3 +280,5 @@ Status: accepted
 - AXCH-026 (2026-09-28) — Correct JEV architecture: remove hosted/OpenCode JEV integration and all bash gate behavior. Add a phone-local JEV-compatible Laya multilingual decision runtime. AIxodia AccessibilityService exposes a localhost screen-control bridge; ai-engine's screen_control tool sends a user goal to that bridge. The local decision model chooses among screen actions from the current accessibility tree and the service executes the selected action. No JEV API key or hosted decision request is used.
 
 - AXCH-027 (2026-09-28) — CI trigger touch after local screen-agent implementation.
+
+- AXCH-028 (2026-09-28) — Pin the Laya native runtime to its full upstream commit for reproducible Android builds.
