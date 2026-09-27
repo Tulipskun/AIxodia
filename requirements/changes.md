@@ -290,3 +290,5 @@ Status: accepted
 - AXCH-031 (2026-09-28) — Pin the Laya runtime against the source repository that owns the upstream implementation commit.
 
 - AXCH-032 (2026-09-28) — Track the Laya source branch directly because its upstream PR implementation is maintained on that branch.
+
+- AXCH-033 (2026-09-28) — Keep the native local screen-agent runtime arm64-only; the target device is ARM64 and the upstream Laya runtime does not need the legacy 32-bit ABI.
