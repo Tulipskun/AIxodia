@@ -1,0 +1,14 @@
+.gradle/
+local.properties
+.idea/
+*.iml
+.DS_Store
+build/
+app/build/
+app/*.keystore
+app/aixodia-debug.keystore.b64
+*.jks
+local.env.json
+
+# runtime config + secrets (never commit)
+config/aixodia.json

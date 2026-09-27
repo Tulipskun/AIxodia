@@ -1,0 +1,1 @@
+-keep class com.tulipskun.aixodia.data.model.** { *; }
