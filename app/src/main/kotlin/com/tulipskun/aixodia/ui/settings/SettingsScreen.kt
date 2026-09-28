@@ -1121,3 +1121,4 @@ private fun UpdateRow(settings: SettingsStore) {
         Text("ติดตั้งทับตัวเดิม ข้อมูลแชทไม่หาย", style = MaterialTheme.typography.labelSmall)
     }
 }
+
