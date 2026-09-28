@@ -84,6 +84,13 @@ jobs:
       - name: Unit tests (Markdown + live answer)
         run: gradle testDebugUnitTest --console=plain
 
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
+
       - name: Build
         run: gradle assembleDebug
 
