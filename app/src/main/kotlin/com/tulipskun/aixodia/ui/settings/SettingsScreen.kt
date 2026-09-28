@@ -189,10 +189,17 @@ fun SettingsScreen(
             )
         },
     ) { pad ->
-        Column(
-            Modifier.fillMaxWidth().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
+        Box(Modifier.fillMaxSize()) {
+            Column(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .widthIn(max = 760.dp)
+                    .padding(pad)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
             if (msg.isNotBlank()) StatusBanner(msg)
 
             SectionCard(
@@ -586,6 +593,7 @@ private fun StatusBanner(text: String) {
                 modifier = Modifier.size(18.dp),
             )
             Text("  $text", style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }
