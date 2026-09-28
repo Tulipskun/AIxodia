@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.sp
 // rather than flicker or throw.
 
 /** One block of a Markdown answer. */
-private sealed interface Block {
+internal sealed interface Block {
     data class Heading(val level: Int, val text: String) : Block
     data class Code(val text: String, val language: String) : Block
     data class Quote(val text: String) : Block
@@ -57,8 +57,12 @@ private val RE_ORDERED = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
 private val RE_QUOTE = Regex("^\\s*>\\s?(.*)$")
 private val RE_FENCE = Regex("^\\s*(?:```|~~~)\\s*(\\S*)")
 
-/** Splits an answer into blocks. A fence that is still open at the end of the text is a block, not an error. */
-private fun blocks(text: String): List<Block> {
+/**
+ * Splits an answer into blocks. A fence that is still open at the end of the text
+ * is a block, not an error. This is the whole Markdown contract and it is pure,
+ * so the tests drive it directly instead of rendering a screen.
+ */
+internal fun blocks(text: String): List<Block> {
     val lines = text.split('\n')
     val out = ArrayList<Block>()
     var i = 0
@@ -257,10 +261,13 @@ fun MarkdownText(
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     val parsed = remember(text) { blocks(text) }
+    // Inline code reads as a quiet pill, not a black box: a name the user is
+    // meant to notice, not one that competes with the sentence around it.
     val codeStyle = SpanStyle(
         fontFamily = FontFamily.Monospace,
         fontSize = 13.sp,
-        background = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        background = MaterialTheme.colorScheme.surfaceContainerHigh,
     )
     val linkStyle = SpanStyle(
         color = MaterialTheme.colorScheme.primary,

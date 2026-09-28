@@ -311,3 +311,20 @@
   scrolls to its end, so the sub-agent block's save and clear actions are never
   left below the fold. State the sheet shows is read once per opening (not on
   every recomposition) and is collected lifecycle-aware.
+- AX-102 — One turn is shown once, and the thread reads as a conversation: the
+  reader's own turn is a soft bubble on the right (max 88% width, no name, the
+  time dimmed under it), an agent answer is plain full-width text with no box
+  and no "MAIN AGENT" label — a sub agent or a tool step keeps its badge
+  because it is a separate voice — and a hairline separates a question from its
+  answer. Inline code is a quiet pill, not a black box. A delta that repeats
+  text already on screen is dropped, and the daemon's full copy replaces the
+  live buffer instead of being appended to it; when the full copy is the same
+  answer without Markdown, the streamed copy is the one that stays.
+- AX-102 — One turn is shown once, and the thread reads as a conversation: the
+  reader's own turn is a soft bubble on the right, an agent answer carries no
+  name of its own (a sub agent or a tool step keeps its badge, because it is a
+  separate voice), a hairline separates a question from its answer, and inline
+  code is a quiet pill rather than a black box. A delta that repeats text
+  already on screen is dropped, and the daemon's full copy replaces the live
+  buffer instead of being appended to it; when that copy is the same answer
+  without Markdown, the streamed copy is the one that stays.

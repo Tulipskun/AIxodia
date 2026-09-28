@@ -296,3 +296,10 @@ Status: accepted
 - AXCH-034 (2026-09-28) — Correct frontend boundary: AIxodia is frontend only and does not execute screen-control actions. Remove the AccessibilityService, localhost screen bridge, Accessibility UI/status state, and related manifest/resource entries. Screen control and local JEV execution remain outside the APK; Main Agent/Sub-agent may invoke the external JEV runtime through ai-engine.
 
 - AXCH-035 (2026-09-28) — Enforce the frontend boundary for screen control: AIxodia contains no AccessibilityService, localhost screen-control bridge, screen-action executor, or JEV runtime. The APK is limited to chat/frontend concerns; external screen control remains outside the APK and may be requested by Main Agent/Sub-agent through ai-engine.
+
+## CHANGE-077: คำตอบต้องขึ้นครั้งเดียว และหน้าจออ่านเป็นบทสนทนา
+New: AX-102 — คำตอบหนึ่ง turn ต้องปรากฏครั้งเดียว: delta ที่ซ้ำกับข้อความที่มีอยู่แล้วถูกทิ้ง และข้อความฉบับเต็มจาก daemon แทนที่ buffer ไม่ใช่ต่อท้าย (ถ้าฉบับเต็มเป็นคำตอบเดียวกันแต่ไม่มี Markdown ให้คงฉบับที่ stream มา) พร้อมกันนี้ main agent ไม่ติดชื่อซ้ำบนทุกข้อความ, เส้นคั่นบาง ๆ ระหว่างคำถามกับคำตอบ, และ inline code เป็น pill สีอ่อน
+Reason: ดึงฐานข้อมูลบนเครื่องมาดูแล้วพบว่าข้อความที่เก็บถูกต้องสมบูรณ์ ("1. **read** …" และ "2. **bash** …") แต่บนจอขึ้นข้อความซ้ำและข้อ 2 หายไป — แปลว่าซ้ำที่ buffer ฝั่งแอป ไม่ใช่ที่ parser หรือ daemon
+Impact: app `ui/chat/LiveAnswer.kt` (ใหม่), `ui/chat/ChatViewModel.kt` (onDelta/onMessage), `ui/display/MessageComponents.kt` (badge/เส้นคั่น), `ui/chat/ChatScreen.kt` (itemsIndexed), `ui/chat/MarkdownText.kt` (inline code pill + เปิด parser ให้เทสต์), `ui/chat/{MarkdownBlocksTest,LiveAnswerMergeTest}.kt` (ใหม่), build.gradle.kts (junit), workflow (รัน unit tests)
+Validation: `gradle testDebugUnitTest` ผ่าน — parser คืน 2 item ครบและไม่ซ้ำจากข้อความจริงในฐานข้อมูล, merge ไม่ทำให้ข้อความซ้ำทั้งแบบ delta ซ้ำและแบบข้อความเต็มกลับมา; ตรวจบนเครื่องจริงด้วย screenshot หลังติดตั้ง release
+Status: accepted

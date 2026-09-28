@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -72,14 +73,21 @@ fun formatClock(ts: Long): String =
  * assistant answers on the left with soft surface, tools as monospace cards.
  */
 @Composable
-fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
+fun MessageBlock(
+    m: ChatMessage,
+    startsAfterUser: Boolean = false,
+    onCopy: () -> Unit = {},
+) {
     val mine = m.role == "user"
     val isTool = m.role == "tool_call" || m.role == "tool_result"
     val body = m.text.ifBlank { m.toolArgs }
+    // The main agent is the conversation itself, so it carries no name; a sub
+    // agent or a tool step keeps its badge because it is a separate voice.
+    val named = (m.agent.isNotBlank() && m.agent != "main") || isTool
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(top = if (startsAfterUser) 10.dp else 4.dp, bottom = 4.dp),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
     ) {
         Row(
@@ -87,7 +95,16 @@ fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
             horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (m.agent.isNotBlank() || isTool) {
+            if (startsAfterUser) {
+                // A hairline so an answer does not run into the next question.
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .fillMaxWidth(if (mine) 0.88f else 0.94f)
+                        .padding(bottom = 8.dp),
+                )
+            }
+            if (named) {
                 AgentBadge(m)
                 if (m.toolName.isNotBlank()) {
                     Text(
@@ -106,7 +123,7 @@ fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = if (m.agent.isNotBlank() || isTool) 4.dp else 0.dp),
+                modifier = Modifier.padding(start = if (named) 4.dp else 0.dp),
             )
         }
         if (isTool) {

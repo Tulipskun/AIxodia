@@ -81,6 +81,9 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Unit tests (Markdown + live answer)
+        run: gradle testDebugUnitTest --console=plain
+
       - name: Build
         run: gradle assembleDebug
 

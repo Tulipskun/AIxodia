@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -422,8 +423,8 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty()) {
                     item { EmptyChatState() }
                 }
-                items(messages, key = { it.id }) { m ->
-                    MessageBlock(m, onCopy = {
+                itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
+                    MessageBlock(m, startsAfterUser = index > 0 && messages[index - 1].role == "user", onCopy = {
                         clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
                         toast = "คัดลอกข้อความแล้ว"
                     })
