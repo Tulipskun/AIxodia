@@ -441,7 +441,13 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                                 onStop = { vm.stopSubAgent(it) },
                             )
                         }
-                        Row(verticalAlignment = Alignment.Bottom) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .widthIn(max = 900.dp)
+                                .align(Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
                             OutlinedTextField(
                                 value = draft,
                                 onValueChange = { draft = it },
