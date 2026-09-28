@@ -103,18 +103,27 @@ import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
+
+import com.tulipskun.aixodia.ui.display.ChatComposer
+import com.tulipskun.aixodia.ui.display.ConnDot
+import com.tulipskun.aixodia.ui.display.EmptyChatState
+import com.tulipskun.aixodia.ui.display.LiveAnswer
+import com.tulipskun.aixodia.ui.display.MessageBlock
+import com.tulipskun.aixodia.ui.display.OfflineBanner
+import com.tulipskun.aixodia.ui.display.SetupNeeded
+import com.tulipskun.aixodia.ui.display.SubAgentPanel
+import com.tulipskun.aixodia.ui.display.ThinkingLine
+import com.tulipskun.aixodia.ui.display.ToolSteps
+import com.tulipskun.aixodia.ui.sessions.ChatActionsSheet
+import com.tulipskun.aixodia.ui.sessions.DeleteChatDialog
+import com.tulipskun.aixodia.ui.sessions.RenameChatDialog
+import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
+import com.tulipskun.aixodia.ui.sessions.sessionTitle
 import com.tulipskun.aixodia.update.UpdateManager
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-private val userShape = RoundedCornerShape(
-    topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp,
-)
-private val answerShape = RoundedCornerShape(
-    topStart = 18.dp, topEnd = 18.dp, bottomStart = 6.dp, bottomEnd = 18.dp,
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -228,37 +237,23 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
         )
     }
     if (renameTarget != null) {
-        var field by remember(renameText) { mutableStateOf(renameText) }
-        AlertDialog(
-            onDismissRequest = { renameTarget = null },
-            title = { Text("เปลี่ยนชื่อแชท") },
-            text = {
-                OutlinedTextField(
-                    value = field, onValueChange = { field = it },
-                    label = { Text("ชื่อแชท") }, singleLine = true,
-                )
+        RenameChatDialog(
+            initial = renameText,
+            onConfirm = { name ->
+                renameTarget?.let { vm.renameChat(it.id, name) }
+                renameTarget = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    renameTarget?.let { vm.renameChat(it.id, field) }
-                    renameTarget = null
-                }) { Text("บันทึก") }
-            },
-            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("ยกเลิก") } },
+            onDismiss = { renameTarget = null },
         )
     }
     if (deleting != null) {
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("ลบแชทนี้?") },
-            text = { Text("แชท “${deleting!!.title}” และประวัติทั้งหมดจะถูกลบทั้งในเครื่องและบน D1") },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.deleteChat(deleting!!.id)
-                    deleting = null
-                }) { Text("ลบ") }
+        DeleteChatDialog(
+            title = deleting!!.title,
+            onConfirm = {
+                vm.deleteChat(deleting!!.id)
+                deleting = null
             },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
+            onDismiss = { deleting = null },
         )
     }
     // The sub-agent block reads from the daemon, so load it once per sheet
@@ -288,32 +283,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
             LaunchedEffect(drawer.currentValue) {
                 if (drawer.currentValue != DrawerValue.Closed) vm.refresh()
             }
-            ModalDrawerSheet {
-                Text(
-                    "AIxodia • ${sessions.size} แชท",
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                OutlinedButton(
-                    onClick = { vm.newChat(); scope.launch { drawer.close() } },
-                    modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Text("  เซสชันใหม่")
-                }
-                Divider(Modifier.padding(vertical = 8.dp))
-                if (sessions.isEmpty()) {
-                    Text("ยังไม่มีแชท — กด “แชทใหม่” เพื่อเริ่ม", Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodySmall)
-                }
-                sessions.forEach { s ->
-                    SessionRow(s, active = s.id == sessId, onOpen = {
-                        vm.openChat(s.id); scope.launch { drawer.close() }
-                    }, onLongPress = { pending = s })
-                }
-                Divider(Modifier.padding(vertical = 8.dp))
-                UpdateRow(settings)
-            }
+            SessionDrawerContent(
+                sessions = sessions,
+                activeId = sessId,
+                onNewChat = { vm.newChat(); scope.launch { drawer.close() } },
+                onOpen = { id -> vm.openChat(id); scope.launch { drawer.close() } },
+                onLongPress = { pending = it },
+                footer = { UpdateRow(settings) },
+            )
         }
     ) {
         Scaffold(
@@ -412,27 +389,10 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                             )
                         }
                         if (conn != ConnState.ONLINE) {
-                            // Being unable to talk to the daemon is the one problem
-                            // the user can act on, so it gets a banner and a retry
-                            // instead of a line of grey text.
-                            Surface(
-                                color = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                shape = MaterialTheme.shapes.medium,
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                            ) {
-                                Row(
-                                    Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        socketErr.ifBlank { "ต่อ daemon ไม่ได้" },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    TextButton(onClick = { vm.refresh() }) { Text("ลองใหม่") }
-                                }
-                            }
+                            OfflineBanner(
+                                message = socketErr.ifBlank { "ต่อ daemon ไม่ได้" },
+                                onRetry = { vm.refresh() },
+                            )
                         }
                         if (subAgents.isNotEmpty()) {
                             SubAgentPanel(
@@ -441,40 +401,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                                 onStop = { vm.stopSubAgent(it) },
                             )
                         }
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .widthIn(max = 900.dp)
-                                .align(Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.Bottom,
-                        ) {
-                            OutlinedTextField(
-                                value = draft,
-                                onValueChange = { draft = it },
-                                modifier = Modifier.weight(1f),
-                                placeholder = { Text("ส่งงานให้ agent…") },
-                                shape = MaterialTheme.shapes.large,
-                                maxLines = 4,
-                            )
-                            Spacer(Modifier.size(8.dp))
-                            if (busy) {
-                                // Stop is only meaningful while a turn is running;
-                                // the daemon answers whether it actually stopped one.
-                                FilledTonalIconButton(
-                                    onClick = { vm.stop() },
-                                    modifier = Modifier.size(48.dp),
-                                ) {
-                                    Icon(Icons.Default.Stop, contentDescription = "หยุดการทำงาน")
-                                }
-                            } else {
-                                FilledIconButton(
-                                    onClick = { vm.send(draft); draft = "" },
-                                    enabled = draft.isNotBlank(),
-                                    modifier = Modifier.size(48.dp),
-                                ) {
-                                    Icon(Icons.Default.Send, contentDescription = "ส่ง")
-                                }
-                            }
+                        ChatComposer(
+                            draft = draft,
+                            onDraftChange = { draft = it },
+                            busy = busy,
+                            onSend = { vm.send(draft); draft = "" },
+                            onStop = { vm.stop() },
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        )
                         }
                     }
                 }
@@ -487,29 +421,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
                 if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty()) {
-                    item {
-                        Column(
-                            Modifier.fillMaxWidth().padding(top = 48.dp, start = 24.dp, end = 24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Menu,
-                                contentDescription = null,
-                                modifier = Modifier.size(32.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                "เริ่มงานกับ agent",
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                "พิมพ์งานล่างจอ แล้ว agent จะทำต่อแม้ปิดแอป — ประวัติจะกลับมาตอนเปิดใหม่",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    item { EmptyChatState() }
                 }
                 items(messages, key = { it.id }) { m ->
                     MessageBlock(m, onCopy = {
@@ -770,457 +682,6 @@ private fun ChatModelSheet(
         }
     }
 }
-
-@Composable
-private fun ChatActionsSheet(
-    session: ChatSession,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(session.title, maxLines = 2) },
-        text = {
-            Column {
-                Text("แชทนี้มี ${if (session.lastSnippet.isBlank()) "ยังไม่มี" else session.lastSnippet.take(60)}")
-            }
-        },
-        confirmButton = { TextButton(onClick = onRename) { Text("เปลี่ยนชื่อ") } },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onDelete) {
-                    Text("ลบ", color = MaterialTheme.colorScheme.error)
-                }
-                TextButton(onClick = onDismiss) { Text("ปิด") }
-            }
-        },
-    )
-}
-
-@Composable
-private fun SetupNeeded(endpoint: String, onOpen: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("ยังไม่ได้ตั้งค่าการเชื่อมต่อ", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "ใส่ Cloudflare API token ที่หน้าตั้งค่า — account/database ถูกค้นหาให้เอง\n" +
-                "และใส่ URL ของ tunnel ด้วยถ้าต้องการแชทสด (ประวัติอ่านได้โดยไม่ต้องมี daemon)",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        if (endpoint.isNotBlank()) {
-            Text("ที่อยู่: $endpoint", style = MaterialTheme.typography.bodySmall)
-        }
-        Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("เปิดหน้าตั้งค่า") }
-    }
-}
-
-private fun sessionTitle(sessions: List<ChatSession>, id: String): String =
-    sessions.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } ?: id
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun SessionRow(
-    s: ChatSession,
-    active: Boolean,
-    onOpen: () -> Unit,
-    onLongPress: () -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(8.dp).clip(RoundedCornerShape(4.dp))
-                .background(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
-        )
-        Column(Modifier.padding(start = 10.dp).weight(1f)) {
-            Text(s.title, maxLines = 1, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
-            Text(
-                s.lastSnippet.ifBlank { "ยังไม่มีข้อความ" },
-                maxLines = 1,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (s.unread > 0) {
-            AssistChip(onClick = onOpen, label = { Text("${s.unread} ใหม่") })
-        }
-    }
-}
-
-/**
- * What the sub agents of this turn are doing, one row each, with a stop button
- * per row. The daemon sends the frames, so the panel never claims work that did
- * not happen: a row appears when a sub agent frame arrives and its state changes
- * only when the daemon says so.
- */
-@Composable
-private fun SubAgentPanel(
-    agents: List<SubAgentActivity>,
-    nowMs: Long,
-    onStop: (String) -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-    ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                "sub agent ${agents.size}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            agents.forEach { a ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val (dot, tint) = when {
-                        a.stopping -> "◐" to MaterialTheme.colorScheme.tertiary
-                        a.running -> "●" to MaterialTheme.colorScheme.primary
-                        else -> "✓" to MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = "${a.detail.ifBlank { a.label }} · ${seconds(a.elapsedMs(nowMs))}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = when {
-                                a.stopping -> "กำลังหยุด…"
-                                a.running -> a.jobId
-                                else -> "หยุดแล้ว · ${a.jobId}"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                    Text(dot, color = tint, style = MaterialTheme.typography.labelSmall)
-                    if (a.running && !a.stopping) {
-                        Spacer(Modifier.size(4.dp))
-                        TextButton(
-                            onClick = { onStop(a.jobId) },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                        ) {
-                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Text("  หยุด")
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * The footer of the chat: which model is answering, what it cost in tokens, how
- * long it has taken and how fast it is going. While the answer streams the
- * numbers are an estimate and say so; when the provider reports its usage they
- * become the real ones.
- */
-/**
- * The numbers under the answer being streamed. While the answer is still
- * coming the counts are an estimate and say so with ≈; the provider's own counts
- * replace them on the closing frame, and the stored message that follows keeps
- * them (AX-095).
- */
-@Composable
-private fun TurnStatsLine(stats: TurnStats, model: String, nowMs: Long, live: Boolean) {
-    if (stats.startedAtMs == 0L && model.isBlank()) return
-    val elapsed = seconds(stats.elapsedMs(nowMs))
-    val tokens = stats.outputTokensNow()
-    val rate = stats.tokensPerSecond(nowMs)
-    val mark = if (stats.exact) "" else "≈"
-    Text(
-        text = buildString {
-            val route = stats.model.ifBlank { model }
-            if (route.isNotBlank()) append(route).append(" · ")
-            append(mark).append(tokens).append(" token")
-            if (stats.inputTokens > 0) append(" (↑").append(stats.inputTokens).append(")")
-            append(cacheText(stats.cacheRead, stats.cacheWrite))
-            append(" · ").append(elapsed)
-            if (rate > 0.0) append(" · ").append(mark).append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
-            if (live && stats.running) append(" · กำลังทำงาน")
-        },
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    )
-}
-
-/** Whole seconds, or one decimal under ten, so a short turn is not "0s". */
-private fun seconds(millis: Long): String = when {
-    millis < 10_000 -> String.format(Locale.US, "%.1fs", millis / 1000.0)
-    else -> "${millis / 1000}s"
-}
-
-/** Cache usage is a subset of input/output, so it reads as its own clause. */
-private fun cacheText(cacheRead: Int, cacheWrite: Int): String = when {
-    cacheRead > 0 && cacheWrite > 0 -> " · cache $cacheRead/$cacheWrite"
-    cacheRead > 0 -> " · cache $cacheRead"
-    cacheWrite > 0 -> " · cache เขียน $cacheWrite"
-    else -> ""
-}
-
-@Composable
-private fun ConnDot(c: ConnState) {
-    val (label, color) = when (c) {
-        ConnState.ONLINE -> "● ออนไลน์" to MaterialTheme.colorScheme.primary
-        ConnState.CONNECTING -> "● กำลังต่อ" to MaterialTheme.colorScheme.tertiary
-        ConnState.OFFLINE -> "● ออฟไลน์" to MaterialTheme.colorScheme.error
-    }
-    Text(label, style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(end = 4.dp))
-}
-
-@Composable
-private fun ThinkingLine(reasoningMs: Long, agent: String) {
-    // Raw reasoning is progress, not transcript: the thread shows that thinking
-    // is happening and how long the daemon has recorded, but never stores prose.
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AgentBadge(ChatMessage(id = "thinking", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = agent))
-        Text(
-            "กำลังคิด · " + seconds(reasoningMs),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun LiveAnswer(text: String, stats: TurnStats, routeLabel: String, nowMs: Long) {
-    // A slow pulse on the "กำลังตอบ" line: motion that says the answer is
-    // still coming, and stops the moment it has.
-    val pulse by rememberInfiniteTransition(label = "live-answer").animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "live-answer-alpha",
-    )
-    Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AgentBadge(ChatMessage(id = "live", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = "main"))
-            Text(
-                "กำลังตอบ",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulse),
-            )
-        }
-        MarkdownText(
-            text = text,
-            modifier = Modifier.padding(top = 2.dp),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f),
-        )
-        TurnStatsLine(stats = stats, model = routeLabel, nowMs = nowMs, live = true)
-    }
-}
-
-/** The tool calls of the running turn, one line each, in the order they ran. */
-@Composable
-private fun ToolSteps(steps: List<com.tulipskun.aixodia.data.model.ToolStep>) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            "เครื่องมือ ${steps.size}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        steps.forEach { step ->
-            val tint = if (!step.done) {
-                MaterialTheme.colorScheme.tertiary
-            } else if (step.isError) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            }
-            Text(
-                text = buildString {
-                    append("● ")
-                    append(step.name)
-                    if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
-                    if (step.durationMs > 0L) append(" · ").append(seconds(step.durationMs))
-                    append(when {
-                        !step.done -> "…"
-                        step.isError -> " — ล้มเหลว"
-                        else -> " — เสร็จแล้ว"
-                    })
-                },
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = tint,
-            )
-        }
-    }
-}
-
-/**
- * One message in the thread. The thread is the document: messages run the full
- * width of the screen with no bubble around them, the model's answer is drawn
- * as Markdown, and only the agent that spoke and the clock stay small enough to
- * stay out of the way.
- */
-@Composable
-private fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
-    val mine = m.role == "user"
-    val isTool = m.role == "tool_call" || m.role == "tool_result"
-    val body = m.text.ifBlank { m.toolArgs }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (m.agent.isNotBlank() || isTool) {
-                AgentBadge(m)
-                if (m.toolName.isNotBlank()) {
-                    Text(
-                        m.toolName,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                }
-            }
-            Text(
-                text = buildString {
-                    if (m.pending) append("กำลังส่ง… · ")
-                    append(clock(m.createdAt))
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = if (m.agent.isNotBlank() || isTool) 4.dp else 0.dp),
-            )
-        }
-        if (isTool) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shape = MaterialTheme.shapes.medium,
-                tonalElevation = 1.dp,
-                modifier = Modifier
-                    .padding(top = 4.dp)
-                    .widthIn(max = 760.dp)
-                    .fillMaxWidth(if (mine) 1f else 0.94f)
-                    .combinedClickable(onClick = {}, onLongClick = onCopy),
-            ) {
-                Text(
-                    body,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(12.dp),
-                )
-            }
-        } else {
-            Surface(
-                color = if (mine) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerLow
-                },
-                contentColor = if (mine) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                shape = if (mine) userShape else answerShape,
-                tonalElevation = if (mine) 1.dp else 0.dp,
-                modifier = Modifier
-                    .padding(top = 4.dp)
-                    .widthIn(max = 760.dp)
-                    .fillMaxWidth(if (mine) 0.88f else 0.94f)
-                    .combinedClickable(onClick = {}, onLongClick = onCopy)
-                    .padding(horizontal = 14.dp, vertical = 11.dp),
-            ) {
-                MarkdownText(
-                    text = body,
-                    color = if (mine) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                )
-            }
-        }
-        if (!mine && !isTool) {
-            MessageFooter(m)
-        }
-    }
-}
-
-/**
- * The footer of one answer: which model replied, what it cost, how long it took
- * and how fast it wrote (AX-095). Nothing is shown for a message that never
- * carried counts, rather than zeros pretending to be a measurement.
- */
-@Composable
-private fun MessageFooter(m: ChatMessage) {
-    val line = buildString {
-        if (m.model.isNotBlank()) append(m.model).append(" · ")
-        if (m.tokensOut > 0 || m.tokensIn > 0 || m.cacheRead > 0 || m.cacheWrite > 0) {
-            append(m.tokensOut).append(" token")
-            if (m.tokensIn > 0) append(" (↑").append(m.tokensIn).append(")")
-            append(cacheText(m.cacheRead, m.cacheWrite))
-        }
-        if (m.durationMs > 0L) {
-            if (isNotEmpty()) append(" · ")
-            append(seconds(m.durationMs))
-            val rate = if (m.durationMs > 0) m.tokensOut * 1000.0 / m.durationMs else 0.0
-            if (m.tokensOut > 0 && rate > 0.0) {
-                append(" · ").append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
-            }
-        }
-    }
-    if (line.isBlank()) return
-    Text(
-        line,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    )
-}
-
-@Composable
-private fun AgentBadge(m: ChatMessage) {
-    val scheme = MaterialTheme.colorScheme
-    val (label, bg, fg) = when {
-        m.role == "user" -> Triple("คุณ", scheme.primaryContainer, scheme.onPrimaryContainer)
-        m.agent == "main" -> Triple("MAIN AGENT", scheme.primaryContainer, scheme.onPrimaryContainer)
-        m.agent == "sub" -> Triple("SUB AGENT", scheme.tertiaryContainer, scheme.onTertiaryContainer)
-        m.agent == "worker" -> Triple("WORKER", scheme.secondaryContainer, scheme.onSecondaryContainer)
-        else -> return
-    }
-    Text(
-        label,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.Bold,
-        color = fg,
-        modifier = Modifier
-            .padding(end = 8.dp)
-            .clip(MaterialTheme.shapes.extraSmall)
-            .background(bg)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
-}
-
-private fun clock(ts: Long): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
 @Composable
 private fun UpdateRow(settings: SettingsStore) {
