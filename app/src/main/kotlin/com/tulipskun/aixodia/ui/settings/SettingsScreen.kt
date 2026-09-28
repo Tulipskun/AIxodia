@@ -438,6 +438,7 @@ fun SettingsScreen(
                 UpdateRow(settings)
             }
         }
+        }
     }
 
     if (picker != null) {
