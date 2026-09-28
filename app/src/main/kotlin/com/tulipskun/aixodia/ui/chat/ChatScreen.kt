@@ -444,11 +444,14 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                         Row(verticalAlignment = Alignment.Bottom) {
                             OutlinedTextField(
                                 value = draft,
-                                onValueChange = { draft = it },
+                                onValueChange = { if (it.length <= 2000) draft = it },
                                 modifier = Modifier.weight(1f),
                                 placeholder = { Text("ส่งงานให้ agent…") },
                                 shape = MaterialTheme.shapes.large,
-                                maxLines = 4,
+                                maxLines = 6,
+                                supportingText = if (draft.length > 1800) {
+                                    { Text("${draft.length}/2000") }
+                                } else null,
                             )
                             Spacer(Modifier.size(8.dp))
                             if (busy) {
