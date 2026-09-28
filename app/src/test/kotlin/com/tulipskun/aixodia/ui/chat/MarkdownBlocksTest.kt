@@ -94,7 +94,7 @@ class MarkdownBlocksTest {
     fun `a matched line is never also treated as a continuation`() {
         val list = blocks(orderedAnswer).filterIsInstance<Block.ItemList>().single()
         assertEquals(2, list.items.size)
-        assertFalse("1." in list.items[0], "item 1 repeats itself: ${list.items[0]}")
+        assertFalse("item 1 repeats itself: ${list.items[0]}", "1." in list.items[0])
         assertTrue("2." in list.items[1])
         // Nothing is dropped either: both sentences survive exactly once.
         val all = blocks(orderedAnswer).joinToString(" ") { b ->
