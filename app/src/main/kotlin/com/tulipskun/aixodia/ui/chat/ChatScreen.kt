@@ -49,7 +49,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -604,7 +604,7 @@ private fun ChatModelSheet(
             // Per-session sub-agent settings (ACP session config pattern):
             // each chat may pin its own sub provider/model instead of
             // inheriting the global agent defaults.
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             Text("Sub agent (เฉพาะแชทนี้)", style = MaterialTheme.typography.titleSmall)
             val subPickedProvider by vm.subAgentProvider.collectAsStateWithLifecycle()
             val subPickedModel by vm.subAgentModel.collectAsStateWithLifecycle()
