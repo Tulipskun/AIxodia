@@ -409,7 +409,6 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                             onStop = { vm.stop() },
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                         )
-                        }
                     }
                 }
             }
