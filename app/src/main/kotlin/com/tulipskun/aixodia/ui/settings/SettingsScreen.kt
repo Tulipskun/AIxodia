@@ -576,6 +576,8 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
         )
     }
+        }
+    }
 }
 
 @Composable
