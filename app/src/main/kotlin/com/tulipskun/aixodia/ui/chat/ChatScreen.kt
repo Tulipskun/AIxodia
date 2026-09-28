@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -325,28 +326,28 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 TopAppBar(
                     title = {
                         Column {
-                            Text(sessionTitle(sessions, sessId), maxLines = 1)
-                            // Which model this chat runs on, and a way to change
-                            // it — the session id is plumbing, not information.
-                            Surface(
+                            Text(
+                                sessionTitle(sessions, sessId),
+                                maxLines = 1,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            AssistChip(
                                 onClick = {
                                     vm.loadProviders()
                                     showModelPicker = true
                                 },
-                                color = Color.Transparent,
-                                shape = MaterialTheme.shapes.extraSmall,
-                            ) {
-                                Text(
-                                    text = when {
-                                        pickedProvider.isBlank() -> "ใช้ค่าของ agent (แตะเพื่อล็อกโมเดล)"
-                                        pickedModel.isBlank() -> "$pickedProvider · เลือก model"
-                                        else -> "$pickedProvider · $pickedModel"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1,
-                                )
-                            }
+                                label = {
+                                    Text(
+                                        when {
+                                            pickedProvider.isBlank() -> "Agent default"
+                                            pickedModel.isBlank() -> "$pickedProvider · เลือก model"
+                                            else -> "$pickedProvider · $pickedModel"
+                                        },
+                                        maxLines = 1,
+                                    )
+                                },
+                                modifier = Modifier.height(32.dp),
+                            )
                         }
                     },
                     navigationIcon = {
