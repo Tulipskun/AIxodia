@@ -133,39 +133,49 @@ internal fun blocks(text: String): List<Block> {
             i++
             continue
         }
-        RE_HEADING.find(line)?.let { m ->
+        // One line is one construct. Each branch below has to leave the loop
+        // on its own: `return@let` only returns from the lambda, so a matched
+        // line used to fall through to the continuation below and be appended
+        // to the item it had just started — "1. read" became one item reading
+        // "read 1. read", and the next line was consumed by the second `i++`
+        // and lost. That is how an answer lost item 2 and repeated item 1.
+        val heading = RE_HEADING.find(line)
+        if (heading != null) {
             flushAll()
-            out.add(Block.Heading(m.groupValues[1].length, m.groupValues[2]))
+            out.add(Block.Heading(heading.groupValues[1].length, heading.groupValues[2]))
             i++
-            return@let
+            continue
         }
         if (line.startsWith("```") || line.startsWith("~~~")) {
             i++
             continue
         }
-        RE_QUOTE.find(line)?.let { m ->
+        val quoted = RE_QUOTE.find(line)
+        if (quoted != null) {
             flushParagraph()
             flushList()
             if (quote.isNotEmpty()) quote.append('\n')
-            quote.append(m.groupValues[1])
+            quote.append(quoted.groupValues[1])
             i++
-            return@let
+            continue
         }
-        RE_BULLET.find(line)?.let { m ->
+        val bullet = RE_BULLET.find(line)
+        if (bullet != null) {
             flushParagraph()
             flushQuote()
-            ordered.clear()
-            bullets.add(m.groupValues[1])
+            if (ordered.isNotEmpty()) flushList()
+            bullets.add(bullet.groupValues[1])
             i++
-            return@let
+            continue
         }
-        RE_ORDERED.find(line)?.let { m ->
+        val numbered = RE_ORDERED.find(line)
+        if (numbered != null) {
             flushParagraph()
             flushQuote()
-            bullets.clear()
-            ordered.add(m.groupValues[2])
+            if (bullets.isNotEmpty()) flushList()
+            ordered.add(numbered.groupValues[2])
             i++
-            return@let
+            continue
         }
         // A plain line continues the paragraph, the quote or the list item it
         // is under, which is how models write hard-wrapped prose.

@@ -297,9 +297,9 @@ Status: accepted
 
 - AXCH-035 (2026-09-28) — Enforce the frontend boundary for screen control: AIxodia contains no AccessibilityService, localhost screen-control bridge, screen-action executor, or JEV runtime. The APK is limited to chat/frontend concerns; external screen control remains outside the APK and may be requested by Main Agent/Sub-agent through ai-engine.
 
-## CHANGE-077: คำตอบต้องขึ้นครั้งเดียว และหน้าจออ่านเป็นบทสนทนา
-New: AX-102 — คำตอบหนึ่ง turn ต้องปรากฏครั้งเดียว: delta ที่ซ้ำกับข้อความที่มีอยู่แล้วถูกทิ้ง และข้อความฉบับเต็มจาก daemon แทนที่ buffer ไม่ใช่ต่อท้าย (ถ้าฉบับเต็มเป็นคำตอบเดียวกันแต่ไม่มี Markdown ให้คงฉบับที่ stream มา) พร้อมกันนี้ main agent ไม่ติดชื่อซ้ำบนทุกข้อความ, เส้นคั่นบาง ๆ ระหว่างคำถามกับคำตอบ, และ inline code เป็น pill สีอ่อน
-Reason: ดึงฐานข้อมูลบนเครื่องมาดูแล้วพบว่าข้อความที่เก็บถูกต้องสมบูรณ์ ("1. **read** …" และ "2. **bash** …") แต่บนจอขึ้นข้อความซ้ำและข้อ 2 หายไป — แปลว่าซ้ำที่ buffer ฝั่งแอป ไม่ใช่ที่ parser หรือ daemon
-Impact: app `ui/chat/LiveAnswer.kt` (ใหม่), `ui/chat/ChatViewModel.kt` (onDelta/onMessage), `ui/display/MessageComponents.kt` (badge/เส้นคั่น), `ui/chat/ChatScreen.kt` (itemsIndexed), `ui/chat/MarkdownText.kt` (inline code pill + เปิด parser ให้เทสต์), `ui/chat/{MarkdownBlocksTest,LiveAnswerMergeTest}.kt` (ใหม่), build.gradle.kts (junit), workflow (รัน unit tests)
-Validation: `gradle testDebugUnitTest` ผ่าน — parser คืน 2 item ครบและไม่ซ้ำจากข้อความจริงในฐานข้อมูล, merge ไม่ทำให้ข้อความซ้ำทั้งแบบ delta ซ้ำและแบบข้อความเต็มกลับมา; ตรวจบนเครื่องจริงด้วย screenshot หลังติดตั้ง release
+## CHANGE-077: รายการที่ขึ้นบนจอซ้ำและหายไปหนึ่งข้อ
+New: ใน `blocks()` ทุกบรรทัดที่จับคู่ regex แล้วต้องออกจาก loop ด้วยตัวเอง (`continue`) — ก่อนหน้านี้ใช้ `return@let` ซึ่งออกจาก lambda เท่านั้น บรรทัดจึงตกไปเข้าเงื่อนไขต่อบรรทัดถัดไปและถูกต่อท้ายกับ item ที่เพิ่งสร้าง ผลคือข้อ "1. **read** …" กลายเป็น item เดียวที่อ่านว่า "read … 1. read …" และ `i++` ครั้งที่สองกินบรรทัด "2. **bash** …" ทิ้งไปเลย นอกจากนี้ main agent ไม่ติดชื่อซ้ำบนทุกข้อความ เส้นคั่นบาง ๆ ระหว่างคำถามกับคำตอบ และ inline code เป็น pill สีอ่อน
+Reason: ดึงฐานข้อมูลบนเครื่องมาดูแล้วยืนยันว่าข้อความที่เก็บถูกต้องสมบูรณ์ ("1. **read** …" และ "2. **bash** …") จึงตัดปัญหาออกทาง parser แล้วจำลอง parser เป็น Java (regex ชุดเดียวกับ Kotlin) เพื่อหาสาเหตุ และยืนยันด้วยเทสต์ JVM ที่ใช้ข้อความจริงจากฐานข้อมูล
+Impact: app `ui/chat/MarkdownText.kt` (โครงสร้าง loop ของ blocks), `ui/chat/MarkdownBlocksTest.kt` (ใหม่, 9 เคส), `ui/display/MessageComponents.kt` (badge/เส้นคั่น), `ui/chat/ChatScreen.kt` (itemsIndexed), build.gradle.kts (junit), workflow (รัน unit tests + เก็บรายงาน)
+Validation: `gradle testDebugUnitTest` — parser คืน 2 item ครบ ไม่ซ้ำ ไม่หาย; ตรวจบนเครื่องจริงด้วย screenshot หลังติดตั้ง release
 Status: accepted

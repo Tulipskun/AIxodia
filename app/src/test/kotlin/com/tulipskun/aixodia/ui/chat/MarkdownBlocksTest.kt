@@ -1,6 +1,7 @@
 package com.tulipskun.aixodia.ui.chat
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -82,6 +83,32 @@ class MarkdownBlocksTest {
         for (partial in listOf("**bo", "1. rea", "```go\ngo bui", "# ", "> ")) {
             blocks(partial) // must not throw
         }
+    }
+
+    /**
+     * The exact shape that reached the screen: one item reading the same thing
+     * twice, with the second item of the list gone. A matched line used to be
+     * handled and then handled again by the continuation branch below it.
+     */
+    @Test
+    fun `a matched line is never also treated as a continuation`() {
+        val list = blocks(orderedAnswer).filterIsInstance<Block.ItemList>().single()
+        assertEquals(2, list.items.size)
+        assertFalse("1." in list.items[0], "item 1 repeats itself: ${list.items[0]}")
+        assertTrue("2." in list.items[1])
+        // Nothing is dropped either: both sentences survive exactly once.
+        val all = blocks(orderedAnswer).joinToString(" ") { b ->
+            when (b) {
+                is Block.ItemList -> b.items.joinToString(" ")
+                is Block.Paragraph -> b.text
+                is Block.Heading -> b.text
+                is Block.Quote -> b.text
+                is Block.Code -> b.text
+                is Block.Rule -> ""
+            }
+        }
+        assertEquals(1, Regex("Read UTF-8 text files").findAll(all).count())
+        assertEquals(1, Regex("Run shell commands").findAll(all).count())
     }
 
     @Test

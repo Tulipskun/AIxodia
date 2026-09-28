@@ -171,7 +171,7 @@ class ChatViewModel(
             return
         }
         liveAgent.value = agent.ifEmpty { "main" }
-        liveText.value = mergeLiveAnswer(liveText.value, chunk, replace = false)
+        liveText.value += chunk
         liveChars += chunk.length
         estimateTokens()
         busy.value = true
@@ -197,10 +197,9 @@ class ChatViewModel(
             noteSubAgent(frame, text.take(80))
             return
         }
-        // The daemon's own copy is the one that also lands in D1, so it
-        // replaces whatever streamed in — unless it is the same answer in a
-        // plainer form, in which case the streamed Markdown is the better copy.
-        liveText.value = mergeLiveAnswer(liveText.value, text, replace = true)
+        // Replace whatever streamed in with the daemon's own copy: it is the one
+        // that also lands in D1.
+        liveText.value = text
         liveThinkingMs.value = 0L
         recordUsage(frame)
         busy.value = true
