@@ -476,7 +476,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
         ) { pad ->
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 8.dp),
+                modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
@@ -1072,10 +1072,14 @@ private fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
     Column(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = onCopy)
-            .padding(vertical = 6.dp),
+            .padding(vertical = 4.dp),
+        horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (m.agent.isNotBlank() || isTool) {
                 AgentBadge(m)
                 if (m.toolName.isNotBlank()) {
@@ -1084,6 +1088,7 @@ private fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp),
                     )
                 }
             }
@@ -1098,18 +1103,54 @@ private fun MessageBlock(m: ChatMessage, onCopy: () -> Unit = {}) {
             )
         }
         if (isTool) {
-            Text(
-                body,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-            )
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .widthIn(max = 760.dp)
+                    .fillMaxWidth(if (mine) 1f else 0.94f)
+                    .combinedClickable(onClick = {}, onLongClick = onCopy),
+            ) {
+                Text(
+                    body,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
         } else {
-            MarkdownText(
-                text = body,
-                color = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
+            Surface(
+                color = if (mine) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                },
+                contentColor = if (mine) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                shape = if (mine) userShape else answerShape,
+                tonalElevation = if (mine) 1.dp else 0.dp,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .widthIn(max = 760.dp)
+                    .fillMaxWidth(if (mine) 0.88f else 0.94f)
+                    .combinedClickable(onClick = {}, onLongClick = onCopy)
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+            ) {
+                MarkdownText(
+                    text = body,
+                    color = if (mine) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
         }
         if (!mine && !isTool) {
             MessageFooter(m)
