@@ -576,8 +576,6 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
         )
     }
-        }
-    }
 }
 
 @Composable
@@ -598,7 +596,6 @@ private fun StatusBanner(text: String) {
                 modifier = Modifier.size(18.dp),
             )
             Text("  $text", style = MaterialTheme.typography.bodyMedium)
-            }
         }
     }
 }
