@@ -503,18 +503,20 @@ private fun TableBlock(
         // column is unreadable.
         (longest.coerceAtLeast(4).coerceAtMost(28) * 8).dp
     }
-    val natural = widths.sum() + cellGap
+    // Dp is a value class over Float with no Sum, so the total is folded by hand.
+    val natural = widths.fold(cellGap) { acc, w -> acc + w }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val available = maxWidth
         val scroll = natural > available
-        val tableWidth = if (scroll) available else natural
         Column(
             Modifier
-                .width(if (scroll) natural else tableWidth)
+                .width(natural)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
                 .verticalScroll(rememberScrollState())
-                .horizontalScroll(rememberScrollState()),
+                // Only the too-wide case gets a sideways scrollbar; a table
+                // that already fits must not invite a gesture that does nothing.
+                .then(if (scroll) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
         ) {
             TableRow(
                 cells = table.headerRow,
