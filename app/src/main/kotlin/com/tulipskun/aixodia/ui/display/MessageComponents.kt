@@ -52,6 +52,9 @@ fun formatSeconds(millis: Long): String = when {
     else -> "${millis / 1000}s"
 }
 
+/** "91 tokens", but "1 token" — a count reads wrong the moment it is pluralised wrong. */
+fun formatTokenText(tokens: Int): String = if (tokens == 1) "1 token" else "$tokens tokens"
+
 /** Cache usage is a subset of input/output, so it reads as its own clause. */
 fun formatCacheText(cacheRead: Int, cacheWrite: Int): String = when {
     cacheRead > 0 && cacheWrite > 0 -> " · cache $cacheRead/$cacheWrite"
@@ -185,7 +188,7 @@ fun MessageFooter(m: ChatMessage) {
     val line = buildString {
         if (m.model.isNotBlank()) append(m.model).append(" · ")
         if (m.tokensOut > 0 || m.tokensIn > 0 || m.cacheRead > 0 || m.cacheWrite > 0) {
-            append(m.tokensOut).append(" token")
+            append(formatTokenText(m.tokensOut))
             if (m.tokensIn > 0) append(" (↑").append(m.tokensIn).append(")")
             append(formatCacheText(m.cacheRead, m.cacheWrite))
         }
@@ -330,7 +333,7 @@ fun TurnStatsLine(stats: TurnStats, model: String, nowMs: Long, live: Boolean) {
         text = buildString {
             val route = stats.model.ifBlank { model }
             if (route.isNotBlank()) append(route).append(" · ")
-            append(mark).append(tokens).append(" token")
+            append(mark).append(formatTokenText(tokens))
             if (stats.inputTokens > 0) append(" (↑").append(stats.inputTokens).append(")")
             append(formatCacheText(stats.cacheRead, stats.cacheWrite))
             append(" · ").append(elapsed)

@@ -320,3 +320,6 @@
   cut by the edge of its own container, and the clock beside a turn stays on one
   line. A sub agent or a tool step keeps its badge, because it is a separate
   voice; the main agent carries none.
+- AX-103 — Nothing internal reaches the reader: a lost connection is one Thai
+  sentence saying what to do, not a raw exception, and the tunnel hostname and
+  stack trace stay in logcat.

@@ -1,5 +1,6 @@
 package com.tulipskun.aixodia.data.remote
 
+import android.util.Log
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.ConnConfig
@@ -36,6 +37,8 @@ enum class ConnState { OFFLINE, CONNECTING, ONLINE }
  * daemon keeps working when this socket is gone; on reconnect the app pulls the
  * newest turns from the DB and then takes the live tail again.
  */
+private const val TAG = "AiDirectSocket"
+
 class AiDirectSocket(private val settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
@@ -112,12 +115,29 @@ class AiDirectSocket(private val settings: SettingsStore) {
         return ws?.send(inAdapter.toJson(frame)) == true
     }
 
-    private fun describe(r: Response?, t: Throwable): String = when {
-        r == null -> "เชื่อมต่อไม่ได้: ${t.message ?: t::class.simpleName}"
-        r.code == 401 -> "401 token ไม่ผ่าน — daemon ไม่รับ D1 token นี้"
-        r.code == 429 -> "429 ถูกล็อกชั่วคราวจากการเดา token ผิดเกิน 5 ครั้ง"
-        r.code == 503 -> "503 daemon ตรวจ token กับ Cloudflare ไม่ได้ชั่วคราว"
-        else -> "HTTP ${r.code} ${r.message}".trim()
+    /**
+     * The banner sits under the composer, so it has to be a sentence a reader
+     * can act on. A raw `UnknownHostException: Unable to resolve host
+     * "draw-power-…trycloudflare.com"` filled three lines and leaked the tunnel
+     * hostname, so the cause is classified here and the full text goes to
+     * logcat where it is actually useful.
+     */
+    private fun describe(r: Response?, t: Throwable): String {
+        Log.w(TAG, "socket failure", t)
+        if (r != null) return when (r.code) {
+            401 -> "401 token ไม่ผ่าน — daemon ไม่รับ D1 token นี้"
+            429 -> "429 ถูกล็อกชั่วคราวจากการเดา token ผิดเกิน 5 ครั้ง"
+            503 -> "503 daemon ตรวจ token กับ Cloudflare ไม่ได้ชั่วคราว"
+            else -> "เชื่อมต่อไม่ได้ (HTTP ${r.code})"
+        }
+        val cause = generateSequence(t) { it.cause }.last()
+        return when (cause) {
+            is java.net.UnknownHostException -> "หาเครื่องปลายทางไม่พบ — ดูว่า daemon กับ tunnel ยังรันอยู่"
+            is java.net.ConnectException -> "เชื่อมต่อ daemon ไม่ได้"
+            is java.net.SocketTimeoutException -> "เชื่อมต่อหมดเวลา"
+            is javax.net.ssl.SSLException -> "ใบรับรอง TLS ใช้ไม่ได้"
+            else -> "เชื่อมต่อไม่ได้ (${cause::class.simpleName ?: "ไม่ทราบสาเหตุ"})"
+        }
     }
 
     private suspend fun loop() {
