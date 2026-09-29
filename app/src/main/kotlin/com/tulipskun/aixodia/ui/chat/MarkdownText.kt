@@ -2,7 +2,6 @@ package com.tulipskun.aixodia.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -513,9 +512,11 @@ private fun TableBlock(
                 .width(natural)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .verticalScroll(rememberScrollState())
-                // Only the too-wide case gets a sideways scrollbar; a table
-                // that already fits must not invite a gesture that does nothing.
+                // Sideways only, and only when the table genuinely cannot fit:
+                // a table that already fits must not invite a gesture that does
+                // nothing. There is deliberately no verticalScroll here — the
+                // thread is already the vertical scroller, and nesting one
+                // inside the other crashes the app on the first frame.
                 .then(if (scroll) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
         ) {
             TableRow(
