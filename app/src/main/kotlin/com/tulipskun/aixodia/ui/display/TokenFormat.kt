@@ -1,5 +1,11 @@
 package com.tulipskun.aixodia.ui.display
 
+/** Whole seconds, or one decimal under ten, so a short turn is not "0s". */
+fun formatSeconds(millis: Long): String = when {
+    millis < 10_000 -> String.format(java.util.Locale.US, "%.1fs", millis / 1000.0)
+    else -> "${millis / 1000}s"
+}
+
 /**
  * How the token footer is written, and which counts it shows.
  *
