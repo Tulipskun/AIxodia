@@ -118,6 +118,6 @@ data class TokenCounts(
         }
     }
 
-    fun render(fields: List<TokenField>, separator: String = SEPARATOR): String =
+    fun render(fields: List<TokenField>, separator: String = TokenField.SEPARATOR): String =
         parts(fields).joinToString(separator)
 }
