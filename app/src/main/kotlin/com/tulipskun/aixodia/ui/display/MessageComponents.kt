@@ -82,6 +82,9 @@ fun MessageBlock(
     // The main agent is the conversation itself, so it carries no name; a sub
     // agent or a tool step keeps its badge because it is a separate voice.
     val named = (m.agent.isNotBlank() && m.agent != "main") || isTool
+    // No "คุณ" badge: the bubble on the right already says whose turn it is,
+    // and a label on every question is noise. The clock is enough.
+    val showBadge = named && m.role != "user"
     Column(
         Modifier
             .fillMaxWidth()
@@ -93,7 +96,7 @@ fun MessageBlock(
             horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (named) {
+            if (showBadge) {
                 AgentBadge(m)
                 if (m.toolName.isNotBlank()) {
                     Text(
@@ -115,7 +118,7 @@ fun MessageBlock(
                 softWrap = false,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = if (named) 4.dp else 0.dp),
+                modifier = Modifier.padding(start = if (showBadge) 4.dp else 0.dp),
             )
         }
         if (isTool) {

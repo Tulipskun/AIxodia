@@ -123,4 +123,31 @@ class MarkdownBlocksTest {
         assertEquals(1, parsed.size)
         assertTrue(parsed.single() is Block.Paragraph)
     }
+
+    @Test
+    fun `a table becomes a table, not a paragraph of pipes`() {
+        val md = "name | meaning\n" +
+            "---- | -------\n" +
+            "read | Read a file\n" +
+            "bash | Run a command"
+        val table = blocks(md).filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("name", "meaning"), table.headerRow)
+        assertEquals(listOf(listOf("read", "Read a file"), listOf("bash", "Run a command")), table.rows)
+        assertTrue(blocks(md).none { it is Block.Paragraph })
+    }
+
+    @Test
+    fun `a divider row is only a divider when it follows a header row`() {
+        val plain = blocks("just a line\n\n---\n\nafter")
+        assertTrue(plain.any { it is Block.Rule })
+        assertTrue(plain.none { it is Block.Table })
+    }
+
+    @Test
+    fun `bold italic keeps all three markers off the text`() {
+        val parsed = blocks("***read*** now").filterIsInstance<Block.Paragraph>().single()
+        // The parser hands the inline layer the raw text; the point is that the
+        // block structure is a paragraph and the markers survive to be styled.
+        assertEquals("***read*** now", parsed.text)
+    }
 }

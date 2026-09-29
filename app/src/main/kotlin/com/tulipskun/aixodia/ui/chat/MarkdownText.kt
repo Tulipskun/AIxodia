@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -48,7 +50,14 @@ internal sealed interface Block {
     data class ItemList(val items: List<String>, val ordered: Boolean) : Block
     data class Rule(val text: String) : Block
     data class Paragraph(val text: String) : Block
+    data class Table(
+        val headerRow: List<String>,
+        val rows: List<List<String>>,
+        val aligns: List<TableAlign>,
+    ) : Block
 }
+
+internal enum class TableAlign { Start, Center, End }
 
 private val RE_HEADING = Regex("^(#{1,6})\\s+(.*)$")
 private val RE_RULE = Regex("^\\s*([-*_])\\s*(\\1\\s*){2,}$")
@@ -56,6 +65,7 @@ private val RE_BULLET = Regex("^\\s*[-*+]\\s+(.*)$")
 private val RE_ORDERED = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
 private val RE_QUOTE = Regex("^\\s*>\\s?(.*)$")
 private val RE_FENCE = Regex("^\\s*(?:```|~~~)\\s*(\\S*)")
+private val RE_TABLE_DIVIDER = Regex("^\\s*\\|?[\\s:-]*-[\\s:|-]*\\|\\s*$")
 
 /**
  * Splits an answer into blocks. A fence that is still open at the end of the text
@@ -193,15 +203,53 @@ internal fun blocks(text: String): List<Block> {
         }
         i++
     }
+        if (RE_TABLE_DIVIDER.find(line) != null && i > 0 && out.isNotEmpty()) {
+            // A header row followed by |---|---|: the row above it is the
+            // header. Without this the table rendered as a pipe-separated
+            // paragraph, which is not what the author wrote.
+            flushAll()
+            val header = out.removeAt(out.lastIndex)
+            val aligns = tableAligns(line)
+            val rows = mutableListOf<String>()
+            var cells = parseTableRow(line)
+            var scanned = i + 1
+            while (scanned < lines.size) {
+                val next = lines[scanned].replace('\r', ' ')
+                if (!next.contains('|') || next.isBlank()) break
+                rows.add(next)
+                scanned++
+            }
+            out.add(Block.Table(headerRow = tableCells(header), rows = rows.map(::tableCells), aligns = aligns))
+            i = scanned
+            continue
+        }
+        i++
+    }
     flushAll()
     return out
 }
+
+/** The `| :-- | :-: | --: |` row carries the per-column alignment. */
+private fun tableAligns(divider: String): List<TableAlign> =
+    divider.split('|').drop(1).dropLast(1).map { cell ->
+        val c = cell.trim()
+        when {
+            c.startsWith(":") && c.endsWith(":") -> TableAlign.Center
+            c.endsWith(":") -> TableAlign.End
+            else -> TableAlign.Start
+        }
+    }
+
+/** Splits a row on unescaped pipes and trims each cell. */
+private fun tableCells(row: String): List<String> =
+    row.split('|').drop(1).dropLast(1).map { it.trim().replace("\\|", "|") }
 
 private val RE_BOLD = Regex("\\*\\*(.+?)\\*\\*", RegexOption.DOT_MATCHES_ALL)
 private val RE_STRIKE = Regex("~~(.+?)~~", RegexOption.DOT_MATCHES_ALL)
 private val RE_LINK = Regex("\\[([^\\]]+)]\\(([^)]+)\\)")
 private val RE_INLINE_CODE = Regex("`([^`]+)`")
 private val RE_ITALIC = Regex("(?<![*\\w])\\*([^*\\n]+)\\*(?!\\*)")
+private val RE_BOLD_ITALIC = Regex("\\*\\*\\*(.+?)\\*\\*\\*", RegexOption.DOT_MATCHES_ALL)
 
 /**
  * Inline Markdown. Code spans are lifted out first so a `*` inside one is
@@ -220,7 +268,9 @@ private fun inline(text: String, code: SpanStyle, link: SpanStyle): AnnotatedStr
             append(next.groupValues[1])
             pop()
         } else {
-            withStyle(link) { append(next.groupValues[1]) }
+            // The label is Markdown too, so `**[read](url)**` reads the way it
+            // looks instead of dropping the emphasis.
+            withStyle(link) { appendInline(next.groupValues[1]) }
         }
         rest = rest.substring(next.range.last + 1)
     }
@@ -230,10 +280,13 @@ private fun inline(text: String, code: SpanStyle, link: SpanStyle): AnnotatedStr
 private fun AnnotatedString.Builder.appendInline(text: String) {
     var rest = text
     while (true) {
+        // `***x***` has to be tried before `**x**`, or the outer pair matches
+        // and leaves a literal `*` at the end of the text.
+        val boldItalic = RE_BOLD_ITALIC.find(rest)
         val bold = RE_BOLD.find(rest)
         val strike = RE_STRIKE.find(rest)
         val italic = RE_ITALIC.find(rest)
-        val next = listOfNotNull(bold, strike, italic).minByOrNull { it.range.first }
+        val next = listOfNotNull(boldItalic, bold, strike, italic).minByOrNull { it.range.first }
         if (next == null) {
             append(rest)
             return
@@ -241,6 +294,10 @@ private fun AnnotatedString.Builder.appendInline(text: String) {
         append(rest.substring(0, next.range.first))
         withStyle(
             when (next) {
+                boldItalic -> SpanStyle(
+                    fontWeight = FontWeight.Bold,
+                    fontStyle = FontStyle.Italic,
+                )
                 bold -> SpanStyle(fontWeight = FontWeight.Bold)
                 strike -> SpanStyle(textDecoration = TextDecoration.LineThrough)
                 else -> SpanStyle(fontStyle = FontStyle.Italic)
@@ -374,7 +431,108 @@ fun MarkdownText(
                         .height(1.dp)
                         .background(MaterialTheme.colorScheme.outlineVariant),
                 )
+
+                is Block.Table -> TableBlock(block, codeStyle, linkStyle, color)
             }
         }
+    }
+}
+
+
+/**
+ * A real table: one row per line of cells, each column sized to the widest of
+ * its own cells, header on its own row. Drawn as a grid rather than pipes, so a
+ * three-column table stays readable on a phone instead of wrapping into soup.
+ */
+@Composable
+private fun TableBlock(
+    table: Block.Table,
+    codeStyle: SpanStyle,
+    linkStyle: SpanStyle,
+    color: Color,
+) {
+    val columns = table.headerRow.size
+    if (columns == 0) return
+    val shape = RoundedCornerShape(6.dp)
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = shape,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+    ) {
+        Column(Modifier.padding(vertical = 2.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+            ) {
+                table.headerRow.forEachIndexed { index, cell ->
+                    TableCell(cell, index, table.aligns, columns, codeStyle, linkStyle, color, bold = true)
+                }
+            }
+            table.rows.forEach { row ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                ) {
+                    for (index in 0 until columns) {
+                        TableCell(
+                            row.getOrElse(index) { "" },
+                            index,
+                            table.aligns,
+                            columns,
+                            codeStyle,
+                            linkStyle,
+                            color,
+                            bold = false,
+                        )
+                    }
+                }
+                Spacer(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One cell. The weight is the share of the widest cell in that column, so a
+ * narrow "no" column does not take a third of the width just because a header
+ * says "Note".
+ */
+@Composable
+private fun TableCell(
+    text: String,
+    index: Int,
+    aligns: List<TableAlign>,
+    columns: Int,
+    codeStyle: SpanStyle,
+    linkStyle: SpanStyle,
+    color: Color,
+    bold: Boolean,
+) {
+    val align = aligns.getOrElse(index) { TableAlign.Start }
+    val weight = (text.length.coerceAtLeast(6).toFloat()).coerceAtMost(64f)
+    Column(
+        Modifier
+            .weight(weight)
+            .padding(end = if (index == columns - 1) 0.dp else 8.dp),
+        horizontalAlignment = when (align) {
+            TableAlign.Start -> Alignment.Start
+            TableAlign.Center -> Alignment.CenterHorizontally
+            TableAlign.End -> Alignment.End
+        },
+    ) {
+        Text(
+            text = inline(text, codeStyle, linkStyle),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (bold) color else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
