@@ -47,14 +47,19 @@ class TokenFormatTest {
 
     @Test
     fun `a spec round-trips through the preference string`() {
-        val spec = "in,out,cache,reasoning,rate,time"
+        val spec = "Input,Output,CacheRead,Reasoning,Rate,Time"
         assertEquals(spec, TokenField.render(TokenField.parse(spec)))
+        // And the short labels a reader would type resolve to the same fields.
+        assertEquals(spec, TokenField.render(TokenField.parse("in,out,cache,think,rate,time")))
     }
 
     @Test
     fun `a hand-edited spec with a typo keeps the fields it did name`() {
         val parsed = TokenField.parse("in, output, nonsense, rate")
         assertEquals(listOf(TokenField.Input, TokenField.Output, TokenField.Rate), parsed)
+        // The two spellings a reader might type both resolve: the enum name and
+        // the label they can see in the footer.
+        assertEquals(listOf(TokenField.CacheRead, TokenField.CacheWrite), TokenField.parse("cache,cacheWrite"))
         // Nothing usable means the default, so a typo cannot blank the footer.
         assertEquals(TokenField.DEFAULT, TokenField.parse("   "))
     }

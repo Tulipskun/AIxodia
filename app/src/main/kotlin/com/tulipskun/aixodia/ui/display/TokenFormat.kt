@@ -54,7 +54,16 @@ enum class TokenField(val label: String) {
          */
         fun parse(spec: String): List<TokenField> =
             spec.split(',', ' ', '|')
-                .mapNotNull { name -> entries.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) } }
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                // Both spellings work: the enum name (`CacheRead`) and the label
+                // a reader sees in the footer (`cache`). The labels are two
+                // characters and collide on case, so the name is tried first and
+                // an exact label match only after it.
+                .mapNotNull { token ->
+                    entries.firstOrNull { it.name.equals(token, ignoreCase = true) }
+                        ?: entries.firstOrNull { it.label == token }
+                }
                 .distinct()
 
         /**
