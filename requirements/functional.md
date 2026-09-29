@@ -311,10 +311,12 @@
   scrolls to its end, so the sub-agent block's save and clear actions are never
   left below the fold. State the sheet shows is read once per opening (not on
   every recomposition) and is collected lifecycle-aware.
-- AX-102 — One turn is shown once and the thread reads as a conversation: a
-  line of Markdown is exactly one construct, so a numbered or bulleted line
-  never also becomes a continuation of the item it started, and no item of a
-  list is lost. The reader's own turn is a soft bubble on the right; an agent
-  answer carries no name of its own (a sub agent or a tool step keeps its badge,
-  because it is a separate voice); a hairline separates a question from its
-  answer; and inline code is a quiet pill rather than a black box.
+- AX-102 — One turn is shown once and the thread reads like ChatGPT: a line of
+  Markdown is exactly one construct, so a numbered or bulleted line never also
+  becomes a continuation of the item it started, and no item of a list is lost.
+  The reader's own turn is a bubble on the right; an answer is plain text on the
+  background with no bubble around it, so a long answer is not a wall of rounded
+  boxes — only code, quotes and tools get a surface of their own. No text is ever
+  cut by the edge of its own container, and the clock beside a turn stays on one
+  line. A sub agent or a tool step keeps its badge, because it is a separate
+  voice; the main agent carries none.

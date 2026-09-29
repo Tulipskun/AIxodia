@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -47,10 +46,6 @@ import java.util.Locale
 val UserBubbleShape = RoundedCornerShape(
     topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp,
 )
-val AnswerBubbleShape = RoundedCornerShape(
-    topStart = 18.dp, topEnd = 18.dp, bottomStart = 6.dp, bottomEnd = 18.dp,
-)
-
 /** Whole seconds, or one decimal under ten, so a short turn is not "0s". */
 fun formatSeconds(millis: Long): String = when {
     millis < 10_000 -> String.format(Locale.US, "%.1fs", millis / 1000.0)
@@ -69,8 +64,8 @@ fun formatClock(ts: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
 /**
- * One message in the thread. User bubbles sit on the right (ChatGPT/Telegram),
- * assistant answers on the left with soft surface, tools as monospace cards.
+ * One message in the thread. A user turn is a bubble on the right, an answer is
+ * plain text on the background, a tool step is a monospace card.
  */
 @Composable
 fun MessageBlock(
@@ -95,15 +90,6 @@ fun MessageBlock(
             horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (startsAfterUser) {
-                // A hairline so an answer does not run into the next question.
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    modifier = Modifier
-                        .fillMaxWidth(if (mine) 0.88f else 0.94f)
-                        .padding(bottom = 8.dp),
-                )
-            }
             if (named) {
                 AgentBadge(m)
                 if (m.toolName.isNotBlank()) {
@@ -121,6 +107,9 @@ fun MessageBlock(
                     if (m.pending) append("กำลังส่ง… · ")
                     append(formatClock(m.createdAt))
                 },
+                // The clock is five characters; it has to stay one line.
+                maxLines = 1,
+                softWrap = false,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = if (named) 4.dp else 0.dp),
@@ -145,36 +134,41 @@ fun MessageBlock(
                     modifier = Modifier.padding(12.dp),
                 )
             }
-        } else {
+        } else if (mine) {
             Surface(
-                color = if (mine) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerLow
-                },
-                contentColor = if (mine) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                shape = if (mine) UserBubbleShape else AnswerBubbleShape,
-                tonalElevation = if (mine) 1.dp else 0.dp,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = UserBubbleShape,
+                tonalElevation = 1.dp,
                 modifier = Modifier
                     .padding(top = 4.dp)
                     .widthIn(max = 760.dp)
-                    .fillMaxWidth(if (mine) 0.88f else 0.94f)
-                    .combinedClickable(onClick = {}, onLongClick = onCopy)
-                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                    .fillMaxWidth(0.88f)
+                    .combinedClickable(onClick = {}, onLongClick = onCopy),
             ) {
+                // The padding goes on the content, not on the Surface's own
+                // modifier chain: a Surface clips what it lays out to its shape,
+                // so padding the surface itself shaved the first character off
+                // the left of every line of every message.
                 MarkdownText(
                     text = body,
-                    color = if (mine) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                 )
             }
+        } else {
+            // An answer is the page, not a bubble: the words sit straight on the
+            // background and the turn is read from the gap above it. Only code
+            // and quotes earn their own surface, which MarkdownText draws.
+            MarkdownText(
+                text = body,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .padding(top = if (startsAfterUser) 14.dp else 4.dp)
+                    .widthIn(max = 760.dp)
+                    .fillMaxWidth()
+                    .combinedClickable(onClick = {}, onLongClick = onCopy),
+            )
         }
         if (!mine && !isTool) {
             MessageFooter(m)
