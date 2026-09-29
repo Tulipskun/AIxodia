@@ -187,20 +187,6 @@ internal fun blocks(text: String): List<Block> {
             i++
             continue
         }
-        // A plain line continues the paragraph, the quote or the list item it
-        // is under, which is how models write hard-wrapped prose.
-        when {
-            quote.isNotEmpty() && bullets.isEmpty() && ordered.isEmpty() -> {
-                if (quote.isNotEmpty() && !quote.endsWith("\n")) quote.append('\n')
-                quote.append(line.trim())
-            }
-            bullets.isNotEmpty() && ordered.isEmpty() -> bullets[bullets.lastIndex] += " " + line.trim()
-            ordered.isNotEmpty() && bullets.isEmpty() -> ordered[ordered.lastIndex] += " " + line.trim()
-            else -> {
-                if (paragraph.isNotEmpty()) paragraph.append('\n')
-                paragraph.append(line.trimEnd())
-            }
-        }
         // A header row followed by |---|---|: the row above it is the header.
         // Without this a table rendered as a pipe-separated paragraph, which is
         // not what the author wrote.
@@ -230,6 +216,20 @@ internal fun blocks(text: String): List<Block> {
             )
             i = scanned
             continue
+        }
+        // A plain line continues the paragraph, the quote or the list item it
+        // is under, which is how models write hard-wrapped prose.
+        when {
+            quote.isNotEmpty() && bullets.isEmpty() && ordered.isEmpty() -> {
+                if (quote.isNotEmpty() && !quote.endsWith("\n")) quote.append('\n')
+                quote.append(line.trim())
+            }
+            bullets.isNotEmpty() && ordered.isEmpty() -> bullets[bullets.lastIndex] += " " + line.trim()
+            ordered.isNotEmpty() && bullets.isEmpty() -> ordered[ordered.lastIndex] += " " + line.trim()
+            else -> {
+                if (paragraph.isNotEmpty()) paragraph.append('\n')
+                paragraph.append(line.trimEnd())
+            }
         }
         i++
     }
