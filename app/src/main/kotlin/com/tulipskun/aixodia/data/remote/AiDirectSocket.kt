@@ -136,7 +136,9 @@ class AiDirectSocket(private val settings: SettingsStore) {
             is java.net.ConnectException -> "เชื่อมต่อ daemon ไม่ได้"
             is java.net.SocketTimeoutException -> "เชื่อมต่อหมดเวลา"
             is javax.net.ssl.SSLException -> "ใบรับรอง TLS ใช้ไม่ได้"
-            else -> "เชื่อมต่อไม่ได้ (${cause::class.simpleName ?: "ไม่ทราบสาเหตุ"})"
+            // Not a class name: `GaiException` is a Java-internal name and reads
+            // as noise. The throwable is already in logcat above.
+            else -> "เชื่อมต่อไม่ได้ — ดู logcat หรือกดลองใหม่"
         }
     }
 
