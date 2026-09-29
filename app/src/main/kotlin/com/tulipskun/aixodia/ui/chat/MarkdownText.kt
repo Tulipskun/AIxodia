@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -207,6 +208,16 @@ internal fun blocks(text: String): List<Block> {
         if (RE_TABLE_DIVIDER.matches(line) && out.isNotEmpty()) {
             flushAll()
             val header = out.removeAt(out.lastIndex)
+            val headerText = (header as? Block.Paragraph)?.text.orEmpty()
+            if (headerText.isBlank() || !headerText.contains('|')) {
+                // Not a header row after all: put it back and treat the
+                // divider as a horizontal rule, which is what it is.
+                out.add(header)
+                flushAll()
+                out.add(Block.Rule(line))
+                i++
+                continue
+            }
             val rows = mutableListOf<String>()
             var scanned = i + 1
             while (scanned < lines.size) {
@@ -217,7 +228,7 @@ internal fun blocks(text: String): List<Block> {
             }
             out.add(
                 Block.Table(
-                    headerRow = tableCells(header),
+                    headerRow = tableCells(headerText),
                     rows = rows.map(::tableCells),
                     aligns = tableAligns(line),
                 ),
@@ -508,7 +519,7 @@ private fun TableBlock(
  * says "Note".
  */
 @Composable
-private fun TableCell(
+private fun RowScope.TableCell(
     text: String,
     index: Int,
     aligns: List<TableAlign>,
