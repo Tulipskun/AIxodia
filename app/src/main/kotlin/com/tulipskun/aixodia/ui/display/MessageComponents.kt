@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.model.freshInputTokens
@@ -57,10 +58,6 @@ fun formatSeconds(millis: Long): String = when {
     else -> "${millis / 1000}s"
 }
 
-/** Cache written rather than read, which is the rarer and more interesting half. */
-fun formatCacheWriteText(cacheWrite: Int): String =
-    if (cacheWrite > 0) "เขียน $cacheWrite" else ""
-
 fun formatClock(ts: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
@@ -73,6 +70,7 @@ fun MessageBlock(
     m: ChatMessage,
     startsAfterUser: Boolean = false,
     onCopy: () -> Unit = {},
+    tokenFields: List<TokenField> = TokenField.DEFAULT,
 ) {
     val mine = m.role == "user"
     val isTool = m.role == "tool_call" || m.role == "tool_result"
@@ -202,27 +200,27 @@ fun MessageBlock(
             }
         }
         if (!mine && !isTool) {
-            MessageFooter(m)
+            MessageFooter(m, tokenFields)
         }
     }
 }
 
 /**
- * Footer of one answer: the model, then what it cost, then how long it took.
+ * Footer of one answer: which model, then the counts, then how long it took.
  *
- * Every count is named. The earlier line was `238 tokens (↑63701) · cache
- * 63424`, which asked the reader to know that the two providers count the
- * prompt differently — and whichever convention was in force, a cache number
- * sitting next to a smaller input number looked like an error. Now the input is
- * split the way the provider split it: `อ่านใหม่` is the part that was not
- * cached, `จาก cache` is the part that was, and they add up to the prompt.
+ * The wording and the order live in [TokenFields], not here, because providers
+ * differ in what they report and a reader may want a different set. The default
+ * is `model · in: fresh/total · out: answer/total · N t/s · ⏱ time`.
  */
 @Composable
-fun MessageFooter(m: ChatMessage) {
+fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT) {
+    val counts = m.toTokenCounts()
+    val shown = counts.visible(fields)
+    if (m.model.isBlank() && shown.isEmpty()) return
     Row(
         Modifier.fillMaxWidth().padding(top = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (m.model.isNotBlank()) {
             Text(
@@ -233,28 +231,30 @@ fun MessageFooter(m: ChatMessage) {
                 maxLines = 1,
             )
         }
-        val fresh = m.freshInputTokens()
-        val cache = m.cacheRead
-        val reasoning = m.reasoningTokens
-        val answer = m.tokensOut - reasoning
-        // Only the parts that are actually there, so an answer that reported
-        // nothing never shows a row of zeroes pretending to be a measurement.
-        if (fresh > 0) Count(label = "อ่านใหม่", value = fresh.toString())
-        if (cache > 0) Count(label = "จาก cache", value = cache.toString())
-        val write = formatCacheWriteText(m.cacheWrite)
-        if (write.isNotBlank()) Count(label = "cache", value = write)
-        if (reasoning > 0) Count(label = "คิด", value = "$reasoning")
-        if (m.tokensOut > 0) Count(label = "ตอบ", value = answer.coerceAtLeast(0).toString())
-        if (m.durationMs > 0L) {
-            Text(
-                formatSeconds(m.durationMs),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
+        // One Text rather than several: the counts are read as a single line of
+        // figures, and separate composables put spacing the format does not
+        // control between them.
+        Text(
+            counts.render(fields),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+        )
     }
 }
+
+/** This message's counts, already split by the convention its provider used. */
+fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
+    inputFresh = freshInputTokens(),
+    inputTotal = totalInputTokens(),
+    outputAnswer = (tokensOut - reasoningTokens).coerceAtLeast(0),
+    outputTotal = tokensOut,
+    cacheRead = cacheRead,
+    cacheWrite = cacheWrite,
+    reasoning = reasoningTokens,
+    ratePerSecond = if (durationMs > 0 && tokensOut > 0) tokensOut * 1000.0 / durationMs else 0.0,
+    millis = durationMs,
+)
 
 /**
  * The margin rule that says "this answer came from someone else". A two-pixel
@@ -278,27 +278,6 @@ fun AgentRule(m: ChatMessage) {
     )
 }
 
-/** One labelled count. The label is dim, the number is not, so a row scans. */
-@Composable
-private fun Count(label: String, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            maxLines = 1,
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            modifier = Modifier.padding(start = 3.dp),
-        )
-    }
-}
-
 /**
  * Who is speaking, as a colour rather than a word.
  *
@@ -311,12 +290,13 @@ private fun Count(label: String, value: String) {
 @Composable
 fun AgentBadge(m: ChatMessage) {
     val scheme = MaterialTheme.colorScheme
-    val (label, color) = when {
-        m.role == "user" -> Pair("คุณ", scheme.primary)
-        m.agent == "sub" -> Pair("SUB", scheme.tertiary)
-        m.agent == "worker" -> Pair("WORKER", scheme.secondary)
+    val (labelRes, color) = when {
+        m.role == "user" -> Pair(R.string.agent_user, scheme.primary)
+        m.agent == "sub" -> Pair(R.string.agent_sub, scheme.tertiary)
+        m.agent == "worker" -> Pair(R.string.agent_worker, scheme.secondary)
         else -> return
     }
+    val label = stringResource(labelRes)
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
@@ -331,7 +311,13 @@ fun AgentBadge(m: ChatMessage) {
  * "typing" affordance without inventing content.
  */
 @Composable
-fun LiveAnswer(text: String, stats: TurnStats, routeLabel: String, nowMs: Long) {
+fun LiveAnswer(
+    text: String,
+    stats: TurnStats,
+    routeLabel: String,
+    nowMs: Long,
+    tokenFields: List<TokenField> = TokenField.DEFAULT,
+) {
     val pulse by rememberInfiniteTransition(label = "live-answer").animateFloat(
         initialValue = 0.45f,
         targetValue = 1f,
@@ -343,9 +329,8 @@ fun LiveAnswer(text: String, stats: TurnStats, routeLabel: String, nowMs: Long) 
     )
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AgentBadge(ChatMessage(id = "live", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = "main"))
             Text(
-                "กำลังตอบ",
+                stringResource(R.string.live_answering),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulse),
             )
@@ -355,7 +340,7 @@ fun LiveAnswer(text: String, stats: TurnStats, routeLabel: String, nowMs: Long) 
             modifier = Modifier.padding(top = 2.dp),
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f),
         )
-        TurnStatsLine(stats = stats, model = routeLabel, nowMs = nowMs, live = true)
+        TurnStatsLine(stats = stats, model = routeLabel, nowMs = nowMs, live = true, fields = tokenFields)
     }
 }
 
@@ -367,7 +352,7 @@ fun ThinkingLine(reasoningMs: Long, agent: String) {
     ) {
         AgentBadge(ChatMessage(id = "thinking", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = agent))
         Text(
-            "กำลังคิด · " + formatSeconds(reasoningMs),
+            stringResource(R.string.live_thinking, formatSeconds(reasoningMs)),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -413,50 +398,62 @@ fun ToolSteps(steps: List<ToolStep>) {
 }
 
 /**
- * Footer numbers while streaming (≈) or after the provider reports exact usage.
+ * The same footer, while the answer is still streaming. It reuses the format
+ * rather than repeating it, so a reader who learned the settled line has not
+ * learned a second language when the turn is still running. The ≈ marks the
+ * counts that are estimates until the provider reports the real ones.
  */
 @Composable
-fun TurnStatsLine(stats: TurnStats, model: String, nowMs: Long, live: Boolean) {
+fun TurnStatsLine(
+    stats: TurnStats,
+    model: String,
+    nowMs: Long,
+    live: Boolean,
+    fields: List<TokenField> = TokenField.DEFAULT,
+) {
     if (stats.startedAtMs == 0L && model.isBlank()) return
-    val elapsed = formatSeconds(stats.elapsedMs(nowMs))
     val tokens = stats.outputTokensNow()
-    val rate = stats.tokensPerSecond(nowMs)
+    val counts = TokenCounts(
+        inputFresh = stats.freshInputTokens(),
+        inputTotal = stats.totalInputTokens(),
+        outputAnswer = (tokens - stats.reasoningTokens).coerceAtLeast(0),
+        outputTotal = tokens,
+        cacheRead = stats.cacheRead,
+        cacheWrite = stats.cacheWrite,
+        reasoning = stats.reasoningTokens,
+        ratePerSecond = stats.tokensPerSecond(nowMs),
+        millis = stats.elapsedMs(nowMs),
+    )
+    val shown = counts.visible(fields)
+    if (stats.model.isBlank() && model.isBlank() && shown.isEmpty()) return
+    val route = stats.model.ifBlank { model }
     val mark = if (stats.exact) "" else "≈"
-    // The live line labels the same counts as the settled footer, so a reader
-    // who learned one does not have to learn the other. Input is still an
-    // estimate while the answer streams, which the ≈ marks.
-    val line = buildString {
-        val route = stats.model.ifBlank { model }
-        if (route.isNotBlank()) append(route).append(" · ")
-        val fresh = stats.freshInputTokens()
-        if (fresh > 0) append(mark).append("อ่านใหม่ ").append(fresh)
-        if (stats.cacheRead > 0) {
-            if (isNotEmpty()) append(" · ")
-            append("จาก cache ").append(stats.cacheRead)
-        }
-        val write = formatCacheWriteText(stats.cacheWrite)
-        if (write.isNotBlank()) {
-            if (isNotEmpty()) append(" · ")
-            append("cache ").append(write)
-        }
-        if (stats.reasoningTokens > 0) {
-            if (isNotEmpty()) append(" · ")
-            append("คิด ").append(stats.reasoningTokens)
-        }
-        if (isNotEmpty()) append(" · ")
-        append(mark).append("ตอบ ").append((tokens - stats.reasoningTokens).coerceAtLeast(0))
-        append(" · ").append(elapsed)
-        if (rate > 0.0) append(" · ").append(mark).append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
-        if (live && stats.running) append(" · กำลังทำงาน")
+    val body = if (stats.exact) {
+        counts.render(fields)
+    } else {
+        // While streaming the split is an estimate of a total, so the second
+        // half of each pair is left off rather than printed as a wrong number.
+        estimatedCounts(counts, fields).render(fields)
     }
     Text(
-        text = line,
+        text = buildString {
+            if (route.isNotBlank()) append(route).append(" · ")
+            append(body)
+            if (!stats.exact) append(mark)
+            if (live && stats.running) append(" · ").append(stringResource(R.string.sub_agent_running))
+        },
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 2,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
     )
 }
+
+/** The same row with the unknown halves dropped, for a turn still running. */
+private fun estimatedCounts(counts: TokenCounts, fields: List<TokenField>) = counts.copy(
+    inputTotal = counts.inputFresh,
+    outputTotal = counts.outputAnswer,
+)
 
 /**
  * Sub-agent activity rows with per-job stop — stays in the display module so
@@ -467,6 +464,7 @@ fun SubAgentPanel(
     agents: List<SubAgentActivity>,
     nowMs: Long,
     onStop: (String) -> Unit,
+    tokenFields: List<TokenField> = TokenField.DEFAULT,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -478,7 +476,7 @@ fun SubAgentPanel(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                "SUB AGENT ${agents.size}",
+                stringResource(R.string.sub_agent_title, agents.size),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.tertiary,
@@ -517,7 +515,7 @@ fun SubAgentPanel(
                             modifier = Modifier.padding(start = 4.dp),
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Text("  หยุด")
+                            Text("  " + stringResource(R.string.sub_agent_stop))
                         }
                     }
                 }

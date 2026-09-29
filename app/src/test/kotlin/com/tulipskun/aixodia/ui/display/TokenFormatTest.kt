@@ -1,0 +1,66 @@
+package com.tulipskun.aixodia.ui.display
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * The footer text is data, not drawing, so it can be checked without a screen.
+ * These lock the two things a reader would otherwise have to guess: that a
+ * count is written part/total, and that a count nobody reported is absent
+ * rather than printed as zero.
+ */
+class TokenFormatTest {
+
+    private val openAiStyle = TokenCounts(
+        inputFresh = 63875,
+        inputTotal = 127683,
+        outputAnswer = 68,
+        outputTotal = 68,
+        cacheRead = 63808,
+        ratePerSecond = 5.7,
+        millis = 12000,
+    )
+
+    @Test
+    fun `the default row reads the way a developer expects`() {
+        assertEquals("in: 63875/127683 · out: 68/68 · 6 t/s · ⏱ 12.0s", openAiStyle.render(TokenField.DEFAULT))
+    }
+
+    @Test
+    fun `a count the provider did not report is left out, not zeroed`() {
+        // Anthropic has no reasoning count, so a reasoning field must vanish
+        // rather than print 0, which reads as a measurement.
+        val anthropic = openAiStyle.copy(reasoning = 0, cacheRead = 0, inputTotal = 63875)
+        assertEquals("in: 63875/63875 · out: 68/68 · 6 t/s · ⏱ 12.0s", anthropic.render(TokenField.DEFAULT))
+    }
+
+    @Test
+    fun `the order is the configured order, not the declaration order`() {
+        assertEquals("⏱ 12.0s · out: 68/68 · in: 63875/127683", openAiStyle.render(listOf(TokenField.Time, TokenField.Output, TokenField.Input)))
+    }
+
+    @Test
+    fun `cache and reasoning appear only when the provider reported them`() {
+        val row = openAiStyle.render(listOf(TokenField.Input, TokenField.CacheRead, TokenField.Reasoning, TokenField.CacheWrite))
+        assertEquals("in: 63875/127683 · cache 63808", row)
+    }
+
+    @Test
+    fun `a spec round-trips through the preference string`() {
+        val spec = "in,out,cache,reasoning,rate,time"
+        assertEquals(spec, TokenField.render(TokenField.parse(spec)))
+    }
+
+    @Test
+    fun `a hand-edited spec with a typo falls back instead of blanking the footer`() {
+        assertTrue(TokenField.parse("in, output, nonsense, rate").containsAll(listOf(TokenField.Input, TokenField.Output, TokenField.Rate)))
+        assertEquals(TokenField.DEFAULT, TokenField.parse("   "))
+    }
+
+    @Test
+    fun `the answer count excludes reasoning, because those tokens are not words read`() {
+        val withThinking = openAiStyle.copy(outputAnswer = 40, outputTotal = 68, reasoning = 28)
+        assertEquals("out: 40/68 · think 28", withThinking.render(listOf(TokenField.Output, TokenField.Reasoning)))
+    }
+}

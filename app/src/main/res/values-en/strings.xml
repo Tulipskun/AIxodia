@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The default in values/ is English on purpose: these labels are shared
+         technical vocabulary, and a Thai default would be the odd one out for
+         every reader who did not ask for Thai. Only the connection notices are
+         Thai, because they are the one place the app speaks in sentences. -->
+    <string name="offline_title">Cannot reach the daemon</string>
+    <string name="offline_unknown_host">Host not found — check the daemon and its tunnel are running</string>
+    <string name="offline_refused">The daemon refused the connection</string>
+    <string name="offline_timeout">The connection timed out</string>
+    <string name="offline_tls">The TLS certificate was rejected</string>
+    <string name="offline_generic">Could not connect — read logcat or try again</string>
+    <string name="offline_retry">Retry</string>
+    <string name="offline_token_rejected">401 — the daemon does not accept this D1 token</string>
+    <string name="offline_rate_limited">429 — locked out after more than 5 wrong tokens</string>
+    <string name="offline_token_unverified">503 — the daemon cannot verify the token with Cloudflare right now</string>
+    <string name="offline_http">Could not connect (HTTP %1$d)</string>
+    <string name="offline_closed">The connection closed (%1$d)</string>
+    <string name="composer_hint">Send a message…</string>
+    <string name="sub_agent_running">working</string>
+    <string name="sub_agent_stop">Stop</string>
+    <string name="sub_agent_title">SUB AGENT %1$d</string>
+    <string name="agent_user">you</string>
+    <string name="live_answering">answering</string>
+    <string name="live_thinking">thinking · %1$s</string>
+    <string name="copied">Message copied</string>
+    <string name="token_fields_label">Token counts shown</string>
+    <string name="token_fields_help">Comma separated, e.g. in,out,rate,time\nAvailable: in out cache cacheWrite reasoning rate time</string>
+</resources>

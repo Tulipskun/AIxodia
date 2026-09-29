@@ -97,6 +97,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
@@ -110,6 +111,7 @@ import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.MessageBlock
+import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SetupNeeded
 import com.tulipskun.aixodia.ui.display.SubAgentPanel
@@ -158,7 +160,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val messages by vm.messages.collectAsState(initial = emptyList())
     val sessions by vm.sessions.collectAsState(initial = emptyList())
     val conn by vm.conn.collectAsState(initial = ConnState.OFFLINE)
-    val socketErr by vm.socketError.collectAsState(initial = "")
+    val socketErr by vm.socketError.collectAsState(initial = 0)
     val status by vm.status.collectAsState()
     val notice by vm.notice.collectAsState()
     val busy by vm.busy.collectAsState()
@@ -167,7 +169,11 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val liveThinkingAgent by vm.liveThinkingAgent.collectAsState()
     val liveSteps by vm.liveSteps.collectAsState()
     val subAgents by vm.subAgents.collectAsState()
+    val context = LocalContext.current
     val stats by vm.turnStats.collectAsState()
+    // The footer format follows the provider, because what is worth printing
+    // differs: Anthropic has no reasoning count to show.
+    val tokenFields by vm.tokenFields.collectAsState(initial = TokenField.DEFAULT)
     val providers by vm.providers.collectAsState()
     val providerStatuses by vm.providerStatuses.collectAsState()
     val pickedProvider by vm.selectedProvider.collectAsState()
@@ -391,7 +397,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                         }
                         if (conn != ConnState.ONLINE) {
                             OfflineBanner(
-                                message = socketErr.ifBlank { "ต่อ daemon ไม่ได้" },
+                                messageRes = socketErr.takeIf { it != 0 } ?: R.string.offline_title,
                                 onRetry = { vm.refresh() },
                             )
                         }
@@ -424,10 +430,15 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                     item { EmptyChatState() }
                 }
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
-                    MessageBlock(m, startsAfterUser = index > 0 && messages[index - 1].role == "user", onCopy = {
-                        clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
-                        toast = "คัดลอกข้อความแล้ว"
-                    })
+                    MessageBlock(
+                        m,
+                        startsAfterUser = index > 0 && messages[index - 1].role == "user",
+                        onCopy = {
+                            clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
+                            toast = context.getString(R.string.copied)
+                        },
+                        tokenFields = tokenFields,
+                    )
                 }
                 // The answer being streamed right now. It is not in the
                 // database yet; the stored row replaces it when the turn ends.
@@ -436,7 +447,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                 }
                 if (liveText.isNotBlank()) {
                     item(key = "live-answer") {
-                        LiveAnswer(liveText, stats, routeLabel, nowMs)
+                        LiveAnswer(liveText, stats, routeLabel, nowMs, tokenFields)
                     }
                 }
                 if (liveSteps.isNotEmpty()) {

@@ -25,6 +25,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -124,7 +126,7 @@ fun EmptyChatState() {
 
 /** Offline / reconnect banner above the composer. */
 @Composable
-fun OfflineBanner(message: String, onRetry: () -> Unit) {
+fun OfflineBanner(@StringRes messageRes: Int, onRetry: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -136,11 +138,11 @@ fun OfflineBanner(message: String, onRetry: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                message.ifBlank { "ต่อ daemon ไม่ได้" },
+                stringResource(messageRes),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onRetry) { Text("ลองใหม่") }
+            TextButton(onClick = onRetry) { Text(stringResource(R.string.offline_retry)) }
         }
     }
 }

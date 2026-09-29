@@ -70,6 +70,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -80,6 +81,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.AgentRoute
 import com.tulipskun.aixodia.data.model.AgentSettings
 import com.tulipskun.aixodia.data.model.ModelView
@@ -117,6 +119,7 @@ fun SettingsScreen(
     val curDatabase by settings.databaseIdFlow.collectAsState(initial = "")
     val curSession by settings.sessionFlow.collectAsState(initial = "default")
     val conn by socket.state.collectAsState(initial = ConnState.OFFLINE)
+    val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsState(initial = emptyList())
 
     var address by remember(curEndpoint) { mutableStateOf(curEndpoint) }
     var token by remember(curToken) { mutableStateOf(curToken) }
@@ -423,6 +426,60 @@ fun SettingsScreen(
                     enabled = !busy && mainRoute.provider.isNotBlank() && mainRoute.model.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("บันทึกโมเดลของ agent") }
+            }
+
+            SectionCard(
+                stringResource(R.string.token_fields_label),
+                stringResource(R.string.token_fields_help),
+            ) {
+                var fieldSpec by remember(curEndpoint, tokenFields) {
+                    mutableStateOf(
+                        if (tokenFields.isEmpty()) "" else TokenField.render(tokenFields),
+                    )
+                }
+                OutlinedTextField(
+                    value = fieldSpec,
+                    onValueChange = { fieldSpec = it },
+                    label = { Text(stringResource(R.string.token_fields_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Button(
+                        onClick = {
+                            val parsed = TokenField.parse(fieldSpec)
+                            if (parsed.isEmpty()) {
+                                msg = "ไม่รู้จักชื่อฟิลด์ — ใช้ได้แค่: " +
+                                    TokenField.entries.joinToString(", ") { it.name }
+                                return@Button
+                            }
+                            scope.launch { settings.setTokenFields(TokenField.render(parsed)) }
+                        },
+                    ) { Text("บันทึก") }
+                    // A provider that reports no reasoning count should not show
+                    // a reasoning field, so each one gets its own list.
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                settings.setTokenFieldsForProvider(
+                                    curEndpoint,
+                                    TokenField.render(TokenField.parse(fieldSpec)),
+                                )
+                            }
+                        },
+                        enabled = curEndpoint.isNotBlank(),
+                    ) { Text("ใช้กับ provider นี้เท่านั้น") }
+                }
+                if (curEndpoint.isNotBlank()) {
+                    Text(
+                        "provider: $curEndpoint",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             SectionCard("แอป", "เชื่อมต่อกับ daemon: " + when (conn) {

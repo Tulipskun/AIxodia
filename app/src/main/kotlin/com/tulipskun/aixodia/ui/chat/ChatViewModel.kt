@@ -89,6 +89,10 @@ class ChatViewModel(
     /** Why the socket is down, straight from the daemon's HTTP answer. */
     val socketError = repo.socketError
 
+    /** The footer's field list for the current provider. */
+    val tokenFields: Flow<List<com.tulipskun.aixodia.ui.display.TokenField>> =
+        settings.tokenFieldsFlow(settings.current().endpoint)
+
     /** Latest live status line for the thread ("sub: web_fetch …"). */
     val status = MutableStateFlow("")
     val busy = MutableStateFlow(false)

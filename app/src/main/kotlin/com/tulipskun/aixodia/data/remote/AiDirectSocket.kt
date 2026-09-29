@@ -4,6 +4,7 @@ import android.util.Log
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.ConnConfig
+import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiInput
 import com.tulipskun.aixodia.data.model.AiOutput
@@ -52,8 +53,9 @@ class AiDirectSocket(private val settings: SettingsStore) {
     val state: StateFlow<ConnState> = _state
 
     /** Human-readable reason for the current state (e.g. "401 token ไม่ผ่าน"). */
-    private val _lastError = MutableStateFlow("")
-    val lastError: StateFlow<String> = _lastError
+    private val _lastError = MutableStateFlow(0)
+    /** A string resource id, so the wording stays in strings.xml. */
+    val lastError: StateFlow<Int> = _lastError
 
     private val _frames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 256)
     val frames: SharedFlow<AiOutput> = _frames
@@ -119,26 +121,30 @@ class AiDirectSocket(private val settings: SettingsStore) {
      * The banner sits under the composer, so it has to be a sentence a reader
      * can act on. A raw `UnknownHostException: Unable to resolve host
      * "draw-power-…trycloudflare.com"` filled three lines and leaked the tunnel
-     * hostname, so the cause is classified here and the full text goes to
-     * logcat where it is actually useful.
+     * hostname, so the cause is classified here, the wording lives in
+     * strings.xml, and the full text goes to logcat where it is actually useful.
+     *
+     * The reason is a resource id rather than a string because it has to be
+     * translatable, and because the classification is the part worth testing —
+     * not the English.
      */
-    private fun describe(r: Response?, t: Throwable): String {
+    private fun describe(r: Response?, t: Throwable): Int {
         Log.w(TAG, "socket failure", t)
         if (r != null) return when (r.code) {
-            401 -> "401 token ไม่ผ่าน — daemon ไม่รับ D1 token นี้"
-            429 -> "429 ถูกล็อกชั่วคราวจากการเดา token ผิดเกิน 5 ครั้ง"
-            503 -> "503 daemon ตรวจ token กับ Cloudflare ไม่ได้ชั่วคราว"
-            else -> "เชื่อมต่อไม่ได้ (HTTP ${r.code})"
+            401 -> R.string.offline_token_rejected
+            429 -> R.string.offline_rate_limited
+            503 -> R.string.offline_token_unverified
+            else -> R.string.offline_http
         }
         val cause = generateSequence(t) { it.cause }.last()
         return when (cause) {
-            is java.net.UnknownHostException -> "หาเครื่องปลายทางไม่พบ — ดูว่า daemon กับ tunnel ยังรันอยู่"
-            is java.net.ConnectException -> "เชื่อมต่อ daemon ไม่ได้"
-            is java.net.SocketTimeoutException -> "เชื่อมต่อหมดเวลา"
-            is javax.net.ssl.SSLException -> "ใบรับรอง TLS ใช้ไม่ได้"
+            is java.net.UnknownHostException -> R.string.offline_unknown_host
+            is java.net.ConnectException -> R.string.offline_refused
+            is java.net.SocketTimeoutException -> R.string.offline_timeout
+            is javax.net.ssl.SSLException -> R.string.offline_tls
             // Not a class name: `GaiException` is a Java-internal name and reads
             // as noise. The throwable is already in logcat above.
-            else -> "เชื่อมต่อไม่ได้ — ดู logcat หรือกดลองใหม่"
+            else -> R.string.offline_generic
         }
     }
 
@@ -166,7 +172,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
                 val ready = CompletableDeferred<Unit>()
                 ws = client.newWebSocket(req, object : WebSocketListener() {
                     override fun onOpen(w: WebSocket, r: Response) {
-                        _lastError.value = ""
+                        _lastError.value = 0
                         val hello = inAdapter.toJson(
                             AiInput(
                                 type = "hello",
@@ -205,7 +211,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
                     override fun onClosed(w: WebSocket, code: Int, reason: String) {
                         _state.value = ConnState.OFFLINE
                         if (code == 1008 || reason.isNotEmpty()) {
-                            _lastError.value = "ปิดการเชื่อมต่อ ($code) ${reason}".trim()
+                            _lastError.value = R.string.offline_closed
                         }
                     }
 

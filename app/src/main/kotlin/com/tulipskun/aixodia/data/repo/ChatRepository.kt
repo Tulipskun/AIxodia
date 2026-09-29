@@ -38,7 +38,8 @@ class ChatRepository(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val connState: StateFlow<ConnState> = socket.state
-    val socketError: StateFlow<String> = socket.lastError
+    /** A string resource id (0 = nothing wrong). */
+    val socketError: StateFlow<Int> = socket.lastError
     val liveFrames get() = socket.frames
 
     private val _active = MutableStateFlow("default")

@@ -30,6 +30,39 @@ class SettingsStore(private val ctx: Context) {
     private val accountId = stringPreferencesKey("account_id")
     private val databaseId = stringPreferencesKey("database_id")
     private val sessionId = stringPreferencesKey("session_id")
+    // Which counts the footer shows, in order. A stored comma-separated list of
+    // TokenField names, because providers differ: Anthropic reports no
+    // reasoning count, so a reasoning field there would print a zero that means
+    // "this provider does not say" rather than "the model did not think".
+    private val tokenFields = stringPreferencesKey("token_fields")
+    private val tokenFieldsByProvider =
+        stringPreferencesKey("token_fields_by_provider")
+
+    /** The footer format for a provider, falling back to the shared default. */
+    fun tokenFieldsFlow(provider: String) = ctx.ds.data.map { prefs ->
+        val byProvider = prefs[tokenFieldsByProvider].orEmpty()
+            .split(';')
+            .firstOrNull { it.substringBefore('=') == provider }
+            ?.substringAfter('=')
+        val spec = byProvider?.takeIf { it.isNotBlank() } ?: prefs[tokenFields]
+        com.tulipskun.aixodia.ui.display.TokenField.parse(spec.orEmpty())
+            .ifEmpty { com.tulipskun.aixodia.ui.display.TokenField.DEFAULT }
+    }
+
+    suspend fun setTokenFields(spec: String) {
+        ctx.ds.edit { it[tokenFields] = spec }
+    }
+
+    /** Pins a field list to one provider, leaving the shared one untouched. */
+    suspend fun setTokenFieldsForProvider(provider: String, spec: String) {
+        ctx.ds.edit { prefs ->
+            val kept = prefs[tokenFieldsByProvider].orEmpty()
+                .split(';')
+                .filter { it.isNotBlank() && it.substringBefore('=') != provider }
+            val entry = "$provider=$spec"
+            prefs[tokenFieldsByProvider] = (kept + entry).joinToString(";")
+        }
+    }
 
     val endpointFlow: Flow<String> = ctx.ds.data.map { it[endpoint] ?: "" }
     val wsUrlFlow: Flow<String> = ctx.ds.data.map { it[wsUrl] ?: "" }

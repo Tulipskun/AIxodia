@@ -1,4 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AIxodia</string>
+
+    <!-- Token footer. These are labels, not sentences: a footer is read at a
+         glance between two answers, so every one of them is a word a reader
+         already knows from every other tool. The full form of a count is
+         "part/total", which needs no explanation. -->
+    <string name="token_input">in</string>
+    <string name="token_output">out</string>
+    <string name="token_cache_read">cache</string>
+    <string name="token_cache_write">cache↑</string>
+    <string name="token_reasoning">think</string>
+    <string name="token_rate">%1$s t/s</string>
+    <string name="token_time">⏱ %1$s</string>
+
+    <string name="offline_title">ต่อ daemon ไม่ได้</string>
+    <string name="offline_unknown_host">หาเครื่องปลายทางไม่พบ — ดูว่า daemon กับ tunnel ยังรันอยู่</string>
+    <string name="offline_refused">เชื่อมต่อ daemon ไม่ได้</string>
+    <string name="offline_timeout">เชื่อมต่อหมดเวลา</string>
+    <string name="offline_tls">ใบรับรอง TLS ใช้ไม่ได้</string>
+    <string name="offline_generic">เชื่อมต่อไม่ได้ — ดู logcat หรือกดลองใหม่</string>
+    <string name="offline_retry">ลองใหม่</string>
+    <string name="offline_token_rejected">401 token ไม่ผ่าน — daemon ไม่รับ D1 token นี้</string>
+    <string name="offline_rate_limited">429 ถูกล็อกชั่วคราวจากการเดา token ผิดเกิน 5 ครั้ง</string>
+    <string name="offline_token_unverified">503 daemon ตรวจ token กับ Cloudflare ไม่ได้ชั่วคราว</string>
+    <string name="offline_http">เชื่อมต่อไม่ได้ (HTTP %1$d)</string>
+    <string name="offline_closed">ปิดการเชื่อมต่อ (%1$d)</string>
+
+    <string name="composer_hint">ส่งข้อความ…</string>
+    <string name="sub_agent_running">กำลังทำงาน</string>
+    <string name="sub_agent_stop">หยุด</string>
+    <string name="sub_agent_title">SUB AGENT %1$d</string>
+    <string name="agent_main">main</string>
+    <string name="agent_sub">SUB</string>
+    <string name="agent_worker">WORKER</string>
+    <string name="agent_user">คุณ</string>
+    <string name="live_answering">กำลังตอบ</string>
+    <string name="live_thinking">กำลังคิด · %1$s</string>
+    <string name="copied">คัดลอกข้อความแล้ว</string>
+    <string name="token_fields_label">แสดงตัวเลข token</string>
+    <string name="token_fields_help">คั่นด้วยจุลภาค เช่น in,out,rate,time\nใส่ได้: in out cache cacheWrite reasoning rate time</string>
 </resources>
