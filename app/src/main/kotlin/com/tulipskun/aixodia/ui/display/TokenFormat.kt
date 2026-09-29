@@ -34,6 +34,12 @@ enum class TokenField(val label: String) {
 
     companion object {
         /**
+         * The middle dot with a space either side. Named because a separator
+         * typed straight into a default argument is unreadable in a diff.
+         */
+        const val SEPARATOR: String = " \u00B7 "
+
+        /**
          * What to show when nothing configured: the prompt split, the answer,
          * the speed and the time. Cache and reasoning are left out unless the
          * provider actually reported them, which [visible] decides.
@@ -51,6 +57,10 @@ enum class TokenField(val label: String) {
                 .mapNotNull { name -> entries.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) } }
                 .distinct()
 
+        /**
+         * A spec round-trips: what is stored is the field name, never the label,
+         * because the label is display text and may be translated later.
+         */
         fun render(fields: List<TokenField>): String =
             fields.joinToString(",") { it.name }
     }
@@ -108,6 +118,6 @@ data class TokenCounts(
         }
     }
 
-    fun render(fields: List<TokenField>, separator: String = " \u00B7 "): String =
+    fun render(fields: List<TokenField>, separator: String = SEPARATOR): String =
         parts(fields).joinToString(separator)
 }

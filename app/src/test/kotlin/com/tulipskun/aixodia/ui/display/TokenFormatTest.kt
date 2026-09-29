@@ -1,7 +1,6 @@
 package com.tulipskun.aixodia.ui.display
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -24,7 +23,7 @@ class TokenFormatTest {
 
     @Test
     fun `the default row reads the way a developer expects`() {
-        assertEquals("in: 63875/127683 · out: 68/68 · 6 t/s · ⏱ 12.0s", openAiStyle.render(TokenField.DEFAULT))
+        assertEquals("in: 63875/127683 · out: 68/68 · 6 t/s · ⏱ 12s", openAiStyle.render(TokenField.DEFAULT))
     }
 
     @Test
@@ -32,12 +31,12 @@ class TokenFormatTest {
         // Anthropic has no reasoning count, so a reasoning field must vanish
         // rather than print 0, which reads as a measurement.
         val anthropic = openAiStyle.copy(reasoning = 0, cacheRead = 0, inputTotal = 63875)
-        assertEquals("in: 63875/63875 · out: 68/68 · 6 t/s · ⏱ 12.0s", anthropic.render(TokenField.DEFAULT))
+        assertEquals("in: 63875/63875 · out: 68/68 · 6 t/s · ⏱ 12s", anthropic.render(TokenField.DEFAULT))
     }
 
     @Test
     fun `the order is the configured order, not the declaration order`() {
-        assertEquals("⏱ 12.0s · out: 68/68 · in: 63875/127683", openAiStyle.render(listOf(TokenField.Time, TokenField.Output, TokenField.Input)))
+        assertEquals("⏱ 12s · out: 68/68 · in: 63875/127683", openAiStyle.render(listOf(TokenField.Time, TokenField.Output, TokenField.Input)))
     }
 
     @Test
@@ -53,9 +52,18 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `a hand-edited spec with a typo falls back instead of blanking the footer`() {
-        assertTrue(TokenField.parse("in, output, nonsense, rate").containsAll(listOf(TokenField.Input, TokenField.Output, TokenField.Rate)))
+    fun `a hand-edited spec with a typo keeps the fields it did name`() {
+        val parsed = TokenField.parse("in, output, nonsense, rate")
+        assertEquals(listOf(TokenField.Input, TokenField.Output, TokenField.Rate), parsed)
+        // Nothing usable means the default, so a typo cannot blank the footer.
         assertEquals(TokenField.DEFAULT, TokenField.parse("   "))
+    }
+
+    @Test
+    fun `twelve seconds reads as twelve seconds, not twelve point zero`() {
+        // formatSeconds drops the decimal above ten seconds, so a long turn does
+        // not get a spurious ".0s" that means nothing to a reader.
+        assertEquals("in: 1/1 · out: 1/1 · 1 t/s · ⏱ 12s", TokenCounts(1, 1, 1, 1, ratePerSecond = 1.0, millis = 12_000).render(TokenField.DEFAULT))
     }
 
     @Test
