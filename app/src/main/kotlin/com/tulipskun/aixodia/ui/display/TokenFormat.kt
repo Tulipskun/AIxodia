@@ -48,9 +48,9 @@ enum class TokenField(val label: String) {
 
         /**
          * Parses a stored setting. Unknown names are dropped rather than
-         * failing: a hand-edited preference should not be able to break the
-         * footer, and a typo should not silently blank it either — the caller
-         * falls back to [DEFAULT] when the result is empty.
+         * failing, and unusable input falls back to [DEFAULT] here rather than at
+         * each call site, so a typo in the preference cannot blank the footer no
+         * matter who reads it.
          */
         fun parse(spec: String): List<TokenField> =
             spec.split(',', ' ', '|')
@@ -65,6 +65,7 @@ enum class TokenField(val label: String) {
                         ?: entries.firstOrNull { it.label == token }
                 }
                 .distinct()
+                .ifEmpty { DEFAULT }
 
         /**
          * A spec round-trips: what is stored is the field name, never the label,

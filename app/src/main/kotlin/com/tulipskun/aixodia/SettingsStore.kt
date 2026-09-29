@@ -46,7 +46,6 @@ class SettingsStore(private val ctx: Context) {
             ?.substringAfter('=')
         val spec = byProvider?.takeIf { it.isNotBlank() } ?: prefs[tokenFields]
         com.tulipskun.aixodia.ui.display.TokenField.parse(spec.orEmpty())
-            .ifEmpty { com.tulipskun.aixodia.ui.display.TokenField.DEFAULT }
     }
 
     suspend fun setTokenFields(spec: String) {
