@@ -13,10 +13,12 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ToolStep
+import com.tulipskun.aixodia.data.model.freshInputTokens
 import com.tulipskun.aixodia.ui.chat.MarkdownText
 import com.tulipskun.aixodia.ui.chat.SubAgentActivity
 import com.tulipskun.aixodia.ui.chat.TurnStats
@@ -236,7 +239,7 @@ fun MessageFooter(m: ChatMessage) {
         val answer = m.tokensOut - reasoning
         // Only the parts that are actually there, so an answer that reported
         // nothing never shows a row of zeroes pretending to be a measurement.
-        if (fresh > 0) Count(label = "อ่านใหม่", value = fresh)
+        if (fresh > 0) Count(label = "อ่านใหม่", value = fresh.toString())
         if (cache > 0) Count(label = "จาก cache", value = cache)
         val write = formatCacheWriteText(m.cacheWrite)
         if (write.isNotBlank()) Count(label = "cache", value = write)
