@@ -240,7 +240,7 @@ fun MessageFooter(m: ChatMessage) {
         // Only the parts that are actually there, so an answer that reported
         // nothing never shows a row of zeroes pretending to be a measurement.
         if (fresh > 0) Count(label = "อ่านใหม่", value = fresh.toString())
-        if (cache > 0) Count(label = "จาก cache", value = cache)
+        if (cache > 0) Count(label = "จาก cache", value = cache.toString())
         val write = formatCacheWriteText(m.cacheWrite)
         if (write.isNotBlank()) Count(label = "cache", value = write)
         if (reasoning > 0) Count(label = "คิด", value = "$reasoning")
