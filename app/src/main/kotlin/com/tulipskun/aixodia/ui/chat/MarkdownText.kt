@@ -201,17 +201,13 @@ internal fun blocks(text: String): List<Block> {
                 paragraph.append(line.trimEnd())
             }
         }
-        i++
-    }
-        if (RE_TABLE_DIVIDER.find(line) != null && i > 0 && out.isNotEmpty()) {
-            // A header row followed by |---|---|: the row above it is the
-            // header. Without this the table rendered as a pipe-separated
-            // paragraph, which is not what the author wrote.
+        // A header row followed by |---|---|: the row above it is the header.
+        // Without this a table rendered as a pipe-separated paragraph, which is
+        // not what the author wrote.
+        if (RE_TABLE_DIVIDER.matches(line) && out.isNotEmpty()) {
             flushAll()
             val header = out.removeAt(out.lastIndex)
-            val aligns = tableAligns(line)
             val rows = mutableListOf<String>()
-            var cells = parseTableRow(line)
             var scanned = i + 1
             while (scanned < lines.size) {
                 val next = lines[scanned].replace('\r', ' ')
@@ -219,7 +215,13 @@ internal fun blocks(text: String): List<Block> {
                 rows.add(next)
                 scanned++
             }
-            out.add(Block.Table(headerRow = tableCells(header), rows = rows.map(::tableCells), aligns = aligns))
+            out.add(
+                Block.Table(
+                    headerRow = tableCells(header),
+                    rows = rows.map(::tableCells),
+                    aligns = tableAligns(line),
+                ),
+            )
             i = scanned
             continue
         }
