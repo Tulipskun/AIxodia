@@ -66,7 +66,6 @@ private val RE_BULLET = Regex("^\\s*[-*+]\\s+(.*)$")
 private val RE_ORDERED = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
 private val RE_QUOTE = Regex("^\\s*>\\s?(.*)$")
 private val RE_FENCE = Regex("^\\s*(?:```|~~~)\\s*(\\S*)")
-private val RE_TABLE_DIVIDER = Regex("^\\s*\\|?[\\s:-]*-[\\s:|-]*\\|\\s*$")
 
 /**
  * Splits an answer into blocks. A fence that is still open at the end of the text
@@ -205,30 +204,26 @@ internal fun blocks(text: String): List<Block> {
         // A header row followed by |---|---|: the row above it is the header.
         // Without this a table rendered as a pipe-separated paragraph, which is
         // not what the author wrote.
-        if (RE_TABLE_DIVIDER.matches(line) && out.isNotEmpty()) {
+        if (isTableDivider(line) && paragraph.isNotEmpty()) {
+            // The header is the last line of the paragraph in progress; anything
+            // above it was prose and stays prose.
+            val linesSoFar = paragraph.toString().split('\n')
+            val headerLine = linesSoFar.last()
+            val before = linesSoFar.dropLast(1).filter { it.isNotBlank() }
             flushAll()
-            val header = out.removeAt(out.lastIndex)
-            val headerText = (header as? Block.Paragraph)?.text.orEmpty()
-            if (headerText.isBlank() || !headerText.contains('|')) {
-                // Not a header row after all: put it back and treat the
-                // divider as a horizontal rule, which is what it is.
-                out.add(header)
-                flushAll()
-                out.add(Block.Rule(line))
-                i++
-                continue
-            }
+            if (before.isNotEmpty()) out.add(Block.Paragraph(before.joinToString("\n")))
+
             val rows = mutableListOf<String>()
             var scanned = i + 1
             while (scanned < lines.size) {
                 val next = lines[scanned].replace('\r', ' ')
-                if (!next.contains('|') || next.isBlank()) break
+                if (next.isBlank() || !next.contains('|') || isTableDivider(next)) break
                 rows.add(next)
                 scanned++
             }
             out.add(
                 Block.Table(
-                    headerRow = tableCells(headerText),
+                    headerRow = tableCells(headerLine),
                     rows = rows.map(::tableCells),
                     aligns = tableAligns(line),
                 ),
@@ -242,10 +237,28 @@ internal fun blocks(text: String): List<Block> {
     return out
 }
 
+/**
+ * A table divider is a row whose every cell is dashes and optional colons —
+ * `| --- | :-: |`, or the same without the outer pipes. It has to be a real
+ * test, not a pattern: a bare `---` is a horizontal rule and must stay one.
+ */
+private fun isTableDivider(line: String): Boolean {
+    if (!line.contains('|')) return false
+    val cells = splitTableRow(line)
+    return cells.isNotEmpty() && cells.all { RE_CELL_ALIGN.matches(it) }
+}
+
+private val RE_CELL_ALIGN = Regex("^:?-{1,}:?$")
+
+/** Splits a row on pipes, ignoring the empty cells an outer pipe leaves. */
+private fun splitTableRow(row: String): List<String> {
+    val trimmed = row.trim().removePrefix("|").removeSuffix("|")
+    return trimmed.split('|').map { it.trim() }
+}
+
 /** The `| :-- | :-: | --: |` row carries the per-column alignment. */
 private fun tableAligns(divider: String): List<TableAlign> =
-    divider.split('|').drop(1).dropLast(1).map { cell ->
-        val c = cell.trim()
+    splitTableRow(divider).map { c ->
         when {
             c.startsWith(":") && c.endsWith(":") -> TableAlign.Center
             c.endsWith(":") -> TableAlign.End
@@ -255,7 +268,7 @@ private fun tableAligns(divider: String): List<TableAlign> =
 
 /** Splits a row on unescaped pipes and trims each cell. */
 private fun tableCells(row: String): List<String> =
-    row.split('|').drop(1).dropLast(1).map { it.trim().replace("\\|", "|") }
+    splitTableRow(row).map { it.replace("\\|", "|") }
 
 private val RE_BOLD = Regex("\\*\\*(.+?)\\*\\*", RegexOption.DOT_MATCHES_ALL)
 private val RE_STRIKE = Regex("~~(.+?)~~", RegexOption.DOT_MATCHES_ALL)

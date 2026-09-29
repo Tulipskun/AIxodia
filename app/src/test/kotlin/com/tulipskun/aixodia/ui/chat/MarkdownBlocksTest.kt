@@ -138,10 +138,33 @@ class MarkdownBlocksTest {
     }
 
     @Test
-    fun `a divider row is only a divider when it follows a header row`() {
+    fun `a bare rule after prose stays a rule, not a one-cell table`() {
         val plain = blocks("just a line\n\n---\n\nafter")
         assertTrue(plain.any { it is Block.Rule })
         assertTrue(plain.none { it is Block.Table })
+    }
+
+    @Test
+    fun `a table with an outer pipe on every row parses the same`() {
+        val md = "| name | meaning |\n| ---- | ------- |\n| read | Read a file |"
+        val table = blocks(md).filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("name", "meaning"), table.headerRow)
+        assertEquals(listOf(listOf("read", "Read a file")), table.rows)
+    }
+
+    @Test
+    fun `alignment marks are read off the divider`() {
+        val md = "l | c | r\n:-- | :-: | --:\na | b | c"
+        val table = blocks(md).filterIsInstance<Block.Table>().single()
+        assertEquals(listOf(TableAlign.End, TableAlign.Center, TableAlign.End), table.aligns)
+    }
+
+    @Test
+    fun `prose above a table stays prose`() {
+        val md = "Here is the tool list:\nname | meaning\n---- | -------\nread | Read a file"
+        val parsed = blocks(md)
+        assertEquals("Here is the tool list:", parsed.filterIsInstance<Block.Paragraph>().single().text)
+        assertEquals(1, parsed.filterIsInstance<Block.Table>().size)
     }
 
     @Test
