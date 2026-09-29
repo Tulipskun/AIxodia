@@ -10,7 +10,10 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.ChatRepository
+import com.tulipskun.aixodia.ui.display.TokenField
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -89,9 +92,13 @@ class ChatViewModel(
     /** Why the socket is down, straight from the daemon's HTTP answer. */
     val socketError = repo.socketError
 
-    /** The footer's field list for the current provider. */
-    val tokenFields: Flow<List<com.tulipskun.aixodia.ui.display.TokenField>> =
-        settings.tokenFieldsFlow(settings.current().endpoint)
+    /**
+     * The footer's field list for the provider in use. Switched on the endpoint
+     * rather than read once, because settings.current() is suspend and the route
+     * can change under a live socket.
+     */
+    val tokenFields: Flow<List<TokenField>> =
+        settings.endpointFlow.flatMapLatest { settings.tokenFieldsFlow(it) }
 
     /** Latest live status line for the thread ("sub: web_fetch …"). */
     val status = MutableStateFlow("")
