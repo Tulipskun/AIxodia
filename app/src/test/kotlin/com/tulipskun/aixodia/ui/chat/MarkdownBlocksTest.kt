@@ -1,8 +1,6 @@
 package com.tulipskun.aixodia.ui.chat
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -94,8 +92,15 @@ class MarkdownBlocksTest {
     fun `a matched line is never also treated as a continuation`() {
         val list = blocks(orderedAnswer).filterIsInstance<Block.ItemList>().single()
         assertEquals(2, list.items.size)
-        assertFalse("item 1 repeats itself: ${list.items[0]}", "1." in list.items[0])
-        assertTrue("2." in list.items[1])
+        // Each line becomes its own item, verbatim, with the "1."/"2." consumed
+        // as the list marker rather than left inside the text.
+        assertEquals(
+            listOf(
+                "**read** - Read UTF-8 text files inside the workspace",
+                "**bash** - Run shell commands in a persistent session",
+            ),
+            list.items,
+        )
         // Nothing is dropped either: both sentences survive exactly once.
         val all = blocks(orderedAnswer).joinToString(" ") { b ->
             when (b) {
