@@ -111,6 +111,7 @@ class MarkdownBlocksTest {
                 is Block.Quote -> b.text
                 is Block.Code -> b.text
                 is Block.Rule -> ""
+                is Block.Table -> (listOf(b.headerRow) + b.rows).joinToString(" ") { row -> row.joinToString(" ") }
             }
         }
         assertEquals(1, Regex("Read UTF-8 text files").findAll(all).count())
