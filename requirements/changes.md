@@ -301,5 +301,8 @@ Status: accepted
 New: ใน `blocks()` ทุกบรรทัดที่จับคู่ regex แล้วต้องออกจาก loop ด้วยตัวเอง (`continue`) — ก่อนหน้านี้ใช้ `return@let` ซึ่งออกจาก lambda เท่านั้น บรรทัดจึงตกไปเข้าเงื่อนไขต่อบรรทัดถัดไปและถูกต่อท้ายกับ item ที่เพิ่งสร้าง ผลคือข้อ "1. **read** …" กลายเป็น item เดียวที่อ่านว่า "read … 1. read …" และ `i++` ครั้งที่สองกินบรรทัด "2. **bash** …" ทิ้งไปเลย นอกจากนี้ main agent ไม่ติดชื่อซ้ำบนทุกข้อความ เส้นคั่นบาง ๆ ระหว่างคำถามกับคำตอบ และ inline code เป็น pill สีอ่อน
 Reason: ดึงฐานข้อมูลบนเครื่องมาดูแล้วยืนยันว่าข้อความที่เก็บถูกต้องสมบูรณ์ ("1. **read** …" และ "2. **bash** …") จึงตัดปัญหาออกทาง parser แล้วจำลอง parser เป็น Java (regex ชุดเดียวกับ Kotlin) เพื่อหาสาเหตุ และยืนยันด้วยเทสต์ JVM ที่ใช้ข้อความจริงจากฐานข้อมูล
 Impact: app `ui/chat/MarkdownText.kt` (โครงสร้าง loop ของ blocks), `ui/chat/MarkdownBlocksTest.kt` (ใหม่, 9 เคส), `ui/display/MessageComponents.kt` (badge/เส้นคั่น), `ui/chat/ChatScreen.kt` (itemsIndexed), build.gradle.kts (junit), workflow (รัน unit tests + เก็บรายงาน)
-Validation: `gradle testDebugUnitTest` — parser คืน 2 item ครบ ไม่ซ้ำ ไม่หาย; ตรวจบนเครื่องจริงด้วย screenshot หลังติดตั้ง release
+Validation: `gradle testDebugUnitTest` ผ่าน 9/9 (run 36503802216) — parser คืน 2 item ครบ ทั้งข้อความที่ซ้ำและที่หายไปก่อนหน้านี้
+  ติดตั้ง release v0.1.152 บน emulator-5554 แล้วเปิดเซสชันเดิม (ข้อมูลเดิมจาก DB ไม่ถูกแก้) ผลจาก `uiautomator dump`:
+  "I have two available tools:" 1 ครั้ง, "Read UTF-8 text files inside the" 1 ครั้ง, "Run shell commands in a persistent session" 1 ครั้ง,
+  มีทั้งข้อ 1. และ 2. และไม่มีข้อความใดซ้ำซ้อน — ก่อนแก้ข้อความเดียวกันนี้ขึ้นเป็น item เดียวที่อ่านซ้ำสองรอบโดยไม่มีข้อ 2.
 Status: accepted
