@@ -261,9 +261,13 @@ private fun splitTableRow(row: String): List<String> {
 
 /** The `| :-- | :-: | --: |` row carries the per-column alignment. */
 private fun tableAligns(divider: String): List<TableAlign> =
+    // GitHub's rule, which every renderer follows: a leading colon is left, a
+    // trailing colon is right, both is centre. Note this is the opposite of
+    // what `:---` looks like it should mean, which is why it is written out.
     splitTableRow(divider).map { c ->
         when {
             c.startsWith(":") && c.endsWith(":") -> TableAlign.Center
+            c.startsWith(":") -> TableAlign.Start
             c.endsWith(":") -> TableAlign.End
             else -> TableAlign.Start
         }

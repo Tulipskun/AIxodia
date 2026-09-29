@@ -154,9 +154,11 @@ class MarkdownBlocksTest {
 
     @Test
     fun `alignment marks are read off the divider`() {
+        // Leading colon is left, trailing is right, both is centre - GitHub's
+        // rule, which is the opposite of what it looks like.
         val md = "l | c | r\n:-- | :-: | --:\na | b | c"
         val table = blocks(md).filterIsInstance<Block.Table>().single()
-        assertEquals(listOf(TableAlign.End, TableAlign.Center, TableAlign.End), table.aligns)
+        assertEquals(listOf(TableAlign.Start, TableAlign.Center, TableAlign.End), table.aligns)
     }
 
     @Test
