@@ -192,10 +192,13 @@ internal fun blocks(text: String): List<Block> {
         // not what the author wrote.
         if (isTableDivider(line) && paragraph.isNotEmpty()) {
             // The header is the last line of the paragraph in progress; anything
-            // above it was prose and stays prose.
+            // above it was prose and stays prose. The header has to be taken out
+            // of the buffer before the flush, or it is emitted a second time as
+            // a paragraph of its own.
             val linesSoFar = paragraph.toString().split('\n')
             val headerLine = linesSoFar.last()
             val before = linesSoFar.dropLast(1).filter { it.isNotBlank() }
+            paragraph.setLength(0)
             flushAll()
             if (before.isNotEmpty()) out.add(Block.Paragraph(before.joinToString("\n")))
 
