@@ -329,3 +329,13 @@
   itself carry emphasis. A table is a grid of cells sized to their own content
   and no wider than the text inside it, and only scrolls sideways when it cannot
   fit the thread at all.
+- AX-105 — Every token count names what it is. The footer and the live turn line
+  show the prompt the way the provider split it — the part that was not cached
+  and the part that was — so the two are never printed as if they were rivals,
+  and reasoning is counted apart from the answer because those tokens are output
+  the model spent thinking rather than words anyone read. A count the provider
+  did not report is left out rather than shown as zero.
+- AX-106 — Who is speaking is read from shape, not from a badge. The main agent
+  carries no name because it is the conversation; a sub agent's answer gets a thin
+  rule in the margin in its own colour and the name above it in that colour, so
+  the thread is scannable without decoding a word of every turn.
