@@ -13,6 +13,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -53,16 +54,9 @@ fun formatSeconds(millis: Long): String = when {
     else -> "${millis / 1000}s"
 }
 
-/** "91 tokens", but "1 token" — a count reads wrong the moment it is pluralised wrong. */
-fun formatTokenText(tokens: Int): String = if (tokens == 1) "1 token" else "$tokens tokens"
-
-/** Cache usage is a subset of input/output, so it reads as its own clause. */
-fun formatCacheText(cacheRead: Int, cacheWrite: Int): String = when {
-    cacheRead > 0 && cacheWrite > 0 -> " · cache $cacheRead/$cacheWrite"
-    cacheRead > 0 -> " · cache $cacheRead"
-    cacheWrite > 0 -> " · cache เขียน $cacheWrite"
-    else -> ""
-}
+/** Cache written rather than read, which is the rarer and more interesting half. */
+fun formatCacheWriteText(cacheWrite: Int): String =
+    if (cacheWrite > 0) "เขียน $cacheWrite" else ""
 
 fun formatClock(ts: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
@@ -190,15 +184,19 @@ fun MessageBlock(
             // An answer is the page, not a bubble: the words sit straight on the
             // background and the turn is read from the gap above it. Only code
             // and quotes earn their own surface, which MarkdownText draws.
-            MarkdownText(
-                text = body,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .padding(top = if (startsAfterUser) 14.dp else 4.dp)
-                    .widthIn(max = 760.dp)
-                    .fillMaxWidth()
-                    .combinedClickable(onClick = {}, onLongClick = onCopy),
-            )
+            Row(Modifier.fillMaxWidth()) {
+                AgentRule(m)
+                MarkdownText(
+                    text = body,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(top = if (startsAfterUser) 14.dp else 4.dp)
+                        .padding(start = if (m.agent != "main" && m.agent.isNotBlank()) 10.dp else 0.dp)
+                        .widthIn(max = 760.dp)
+                        .weight(1f, fill = false)
+                        .combinedClickable(onClick = {}, onLongClick = onCopy),
+                )
+            }
         }
         if (!mine && !isTool) {
             MessageFooter(m)
@@ -207,56 +205,121 @@ fun MessageBlock(
 }
 
 /**
- * Footer of one answer: model, tokens, duration, rate (AX-095).
- * Blank when the message never carried counts — no zero pretence.
+ * Footer of one answer: the model, then what it cost, then how long it took.
+ *
+ * Every count is named. The earlier line was `238 tokens (↑63701) · cache
+ * 63424`, which asked the reader to know that the two providers count the
+ * prompt differently — and whichever convention was in force, a cache number
+ * sitting next to a smaller input number looked like an error. Now the input is
+ * split the way the provider split it: `อ่านใหม่` is the part that was not
+ * cached, `จาก cache` is the part that was, and they add up to the prompt.
  */
 @Composable
 fun MessageFooter(m: ChatMessage) {
-    val line = buildString {
-        if (m.model.isNotBlank()) append(m.model).append(" · ")
-        if (m.tokensOut > 0 || m.tokensIn > 0 || m.cacheRead > 0 || m.cacheWrite > 0) {
-            append(formatTokenText(m.tokensOut))
-            if (m.tokensIn > 0) append(" (↑").append(m.tokensIn).append(")")
-            append(formatCacheText(m.cacheRead, m.cacheWrite))
+    Row(
+        Modifier.fillMaxWidth().padding(top = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (m.model.isNotBlank()) {
+            Text(
+                m.model,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
         }
+        val fresh = m.freshInputTokens()
+        val cache = m.cacheRead
+        val reasoning = m.reasoningTokens
+        val answer = m.tokensOut - reasoning
+        // Only the parts that are actually there, so an answer that reported
+        // nothing never shows a row of zeroes pretending to be a measurement.
+        if (fresh > 0) Count(label = "อ่านใหม่", value = fresh)
+        if (cache > 0) Count(label = "จาก cache", value = cache)
+        val write = formatCacheWriteText(m.cacheWrite)
+        if (write.isNotBlank()) Count(label = "cache", value = write)
+        if (reasoning > 0) Count(label = "คิด", value = "$reasoning")
+        if (m.tokensOut > 0) Count(label = "ตอบ", value = answer.coerceAtLeast(0).toString())
         if (m.durationMs > 0L) {
-            if (isNotEmpty()) append(" · ")
-            append(formatSeconds(m.durationMs))
-            val rate = if (m.durationMs > 0) m.tokensOut * 1000.0 / m.durationMs else 0.0
-            if (m.tokensOut > 0 && rate > 0.0) {
-                append(" · ").append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
-            }
+            Text(
+                formatSeconds(m.durationMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
         }
     }
-    if (line.isBlank()) return
-    Text(
-        line,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+}
+
+/**
+ * The margin rule that says "this answer came from someone else". A two-pixel
+ * line in the agent's own colour is enough to separate the voice from the main
+ * thread, and it costs no reading at all.
+ */
+@Composable
+fun AgentRule(m: ChatMessage) {
+    if (m.role == "user" || m.agent == "main" || m.agent.isBlank()) return
+    val color = when (m.agent) {
+        "sub" -> MaterialTheme.colorScheme.tertiary
+        "worker" -> MaterialTheme.colorScheme.secondary
+        else -> return
+    }
+    Spacer(
+        Modifier
+            .width(2.dp)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(1.dp))
+            .background(color),
     )
 }
 
+/** One labelled count. The label is dim, the number is not, so a row scans. */
+@Composable
+private fun Count(label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            maxLines = 1,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            modifier = Modifier.padding(start = 3.dp),
+        )
+    }
+}
+
+/**
+ * Who is speaking, as a colour rather than a word.
+ *
+ * Three labels per turn — MAIN, SUB, WORKER — is three things to read before
+ * the answer, and MAIN is the one that needs no label at all because it is the
+ * conversation. A sub answer is now a thin coloured rule in the margin with the
+ * agent's name in that same colour above it: a reader knows it is a separate
+ * voice from the shape, not from decoding a badge.
+ */
 @Composable
 fun AgentBadge(m: ChatMessage) {
     val scheme = MaterialTheme.colorScheme
-    val (label, bg, fg) = when {
-        m.role == "user" -> Triple("คุณ", scheme.primaryContainer, scheme.onPrimaryContainer)
-        m.agent == "main" -> Triple("MAIN", scheme.primaryContainer, scheme.onPrimaryContainer)
-        m.agent == "sub" -> Triple("SUB", scheme.tertiaryContainer, scheme.onTertiaryContainer)
-        m.agent == "worker" -> Triple("WORKER", scheme.secondaryContainer, scheme.onSecondaryContainer)
+    val (label, color) = when {
+        m.role == "user" -> Pair("คุณ", scheme.primary)
+        m.agent == "sub" -> Pair("SUB", scheme.tertiary)
+        m.agent == "worker" -> Pair("WORKER", scheme.secondary)
         else -> return
     }
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.Bold,
-        color = fg,
-        modifier = Modifier
-            .padding(end = 8.dp)
-            .clip(MaterialTheme.shapes.extraSmall)
-            .background(bg)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+        color = color,
+        modifier = Modifier.padding(end = 8.dp),
     )
 }
 
@@ -356,20 +419,38 @@ fun TurnStatsLine(stats: TurnStats, model: String, nowMs: Long, live: Boolean) {
     val tokens = stats.outputTokensNow()
     val rate = stats.tokensPerSecond(nowMs)
     val mark = if (stats.exact) "" else "≈"
+    // The live line labels the same counts as the settled footer, so a reader
+    // who learned one does not have to learn the other. Input is still an
+    // estimate while the answer streams, which the ≈ marks.
+    val line = buildString {
+        val route = stats.model.ifBlank { model }
+        if (route.isNotBlank()) append(route).append(" · ")
+        val fresh = stats.freshInputTokens()
+        if (fresh > 0) append(mark).append("อ่านใหม่ ").append(fresh)
+        if (stats.cacheRead > 0) {
+            if (isNotEmpty()) append(" · ")
+            append("จาก cache ").append(stats.cacheRead)
+        }
+        val write = formatCacheWriteText(stats.cacheWrite)
+        if (write.isNotBlank()) {
+            if (isNotEmpty()) append(" · ")
+            append("cache ").append(write)
+        }
+        if (stats.reasoningTokens > 0) {
+            if (isNotEmpty()) append(" · ")
+            append("คิด ").append(stats.reasoningTokens)
+        }
+        if (isNotEmpty()) append(" · ")
+        append(mark).append("ตอบ ").append((tokens - stats.reasoningTokens).coerceAtLeast(0))
+        append(" · ").append(elapsed)
+        if (rate > 0.0) append(" · ").append(mark).append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
+        if (live && stats.running) append(" · กำลังทำงาน")
+    }
     Text(
-        text = buildString {
-            val route = stats.model.ifBlank { model }
-            if (route.isNotBlank()) append(route).append(" · ")
-            append(mark).append(formatTokenText(tokens))
-            if (stats.inputTokens > 0) append(" (↑").append(stats.inputTokens).append(")")
-            append(formatCacheText(stats.cacheRead, stats.cacheWrite))
-            append(" · ").append(elapsed)
-            if (rate > 0.0) append(" · ").append(mark).append(String.format(Locale.US, "%.1f", rate)).append(" tok/s")
-            if (live && stats.running) append(" · กำลังทำงาน")
-        },
+        text = line,
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
+        maxLines = 2,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
     )
 }
@@ -394,9 +475,10 @@ fun SubAgentPanel(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                "sub agent ${agents.size}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                "SUB AGENT ${agents.size}",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.tertiary,
             )
             agents.forEach { a ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -408,8 +490,14 @@ fun SubAgentPanel(
                     Text(dot, color = tint, style = MaterialTheme.typography.labelMedium)
                     Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                         Text(
-                            "${a.label} · ${formatSeconds(a.elapsedMs(nowMs))}",
+                            a.label,
                             style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                        Text(
+                            formatSeconds(a.elapsedMs(nowMs)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (a.detail.isNotBlank()) {
                             Text(

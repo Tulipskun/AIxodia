@@ -94,6 +94,8 @@ class ChatRepository(
                 tokensOut = it.tokensOut,
                 cacheRead = it.cacheRead,
                 cacheWrite = it.cacheWrite,
+                reasoningTokens = it.reasoningTokens,
+                inputIncludesCache = it.inputIncludesCache,
                 model = it.model,
                 durationMs = it.durationMs,
             )
@@ -392,6 +394,8 @@ class ChatRepository(
         tokensOut = outputTokens,
         cacheRead = cacheRead,
         cacheWrite = cacheWrite,
+        reasoningTokens = reasoningTokens,
+        inputIncludesCache = inputIncludesCache,
         model = model,
         durationMs = durationMs,
     )

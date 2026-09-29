@@ -40,6 +40,11 @@ data class TurnStats(
     val outputTokens: Int = 0,
     val cacheRead: Int = 0,
     val cacheWrite: Int = 0,
+    // ReasoningTokens is output the model spent thinking. InputIncludesCache
+    // says whether inputTokens already contains cacheRead, so the footer can
+    // label the two numbers instead of printing them as rivals.
+    val reasoningTokens: Int = 0,
+    val inputIncludesCache: Boolean = false,
     val exact: Boolean = false,
     val startedAtMs: Long = 0L,
     val endedAtMs: Long = 0L,
@@ -52,6 +57,14 @@ data class TurnStats(
     }
 
     fun outputTokensNow(): Int = if (exact) outputTokens else estimatedTokens
+
+    /** The prompt that was not served from cache, under the provider's convention. */
+    fun freshInputTokens(): Int =
+        if (inputIncludesCache) (inputTokens - cacheRead).coerceAtLeast(0) else inputTokens
+
+    /** The whole prompt however the provider chose to split it. */
+    fun totalInputTokens(): Int =
+        if (inputIncludesCache) inputTokens else inputTokens + cacheRead + cacheWrite
 
     fun tokensPerSecond(nowMs: Long): Double {
         val millis = elapsedMs(nowMs)
@@ -221,7 +234,7 @@ class ChatViewModel(
         // it took, which is what the footer of that message says (AX-095). The
         // route stays as the fallback while the answer is still streaming.
         val model = frame.model.ifBlank { stats.model }
-        if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0) {
+        if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0 && frame.reasoningTokens <= 0) {
             if (model != stats.model) turnStats.value = stats.copy(model = model)
             return
         }
@@ -239,6 +252,8 @@ class ChatViewModel(
             outputTokens = output,
             cacheRead = cacheRead,
             cacheWrite = cacheWrite,
+            reasoningTokens = frame.reasoningTokens,
+            inputIncludesCache = frame.inputIncludesCache,
             exact = true,
             estimatedTokens = output,
             startedAtMs = started,

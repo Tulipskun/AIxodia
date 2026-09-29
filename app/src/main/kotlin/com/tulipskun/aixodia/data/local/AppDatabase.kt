@@ -41,6 +41,11 @@ data class MessageEntity(
     val tokensOut: Int = 0,
     val cacheRead: Int = 0,
     val cacheWrite: Int = 0,
+    // ReasoningTokens and inputIncludesCache came with the token footer rework:
+    // a thinking count, and the flag that says whether tokensIn already contains
+    // the cache part.
+    val reasoningTokens: Int = 0,
+    val inputIncludesCache: Boolean = false,
     val model: String = "",
     val durationMs: Long = 0,
 )
@@ -111,7 +116,7 @@ interface MessageDao {
     suspend fun deleteSession(sid: String)
 }
 
-@Database(entities = [SessionEntity::class, MessageEntity::class], version = 4, exportSchema = false)
+@Database(entities = [SessionEntity::class, MessageEntity::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessions(): SessionDao
     abstract fun messages(): MessageDao
@@ -150,10 +155,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v5 adds the reasoning count and the flag that says whether the input
+        // total already contains the cache part. Old rows keep zero/false and
+        // are read with the old convention, which is the honest default when
+        // nothing recorded which convention produced them.
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN reasoningTokens INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN inputIncludesCache INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { inst = it }
         }

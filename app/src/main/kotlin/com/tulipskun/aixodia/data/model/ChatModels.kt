@@ -111,6 +111,14 @@ data class AiOutput(
     @Json(name = "cache_read_tokens") val cacheRead: Int = 0,
     @Json(name = "cache_write_tokens") val cacheWrite: Int = 0,
     @Json(name = "reasoning_ms") val reasoningMs: Long = 0,
+    // ReasoningTokens is output the model spent thinking before answering, and
+    // InputIncludesCache says whether InputTokens already contains the cache
+    // parts. OpenAI and Gemini report the prompt total with cache inside it,
+    // Anthropic reports cache beside it; without this flag the two conventions
+    // are indistinguishable and a cache count looks bigger than the input it
+    // belongs to.
+    @Json(name = "reasoning_tokens") val reasoningTokens: Int = 0,
+    @Json(name = "input_includes_cache") val inputIncludesCache: Boolean = false,
     @Json(name = "tool_duration_ms") val toolDurationMs: Long = 0,
     // Footer of this one message (AX-095): the model that produced it and how
     // long it took, straight off the terminal trace.
@@ -139,6 +147,9 @@ data class Usage(
     @Json(name = "total_tokens") val totalTokens: Int = 0,
     @Json(name = "cache_read_tokens") val cacheRead: Int = 0,
     @Json(name = "cache_write_tokens") val cacheWrite: Int = 0,
+    @Json(name = "reasoning_tokens") val reasoningTokens: Int = 0,
+    // D1 hands this back as 0/1 from an INTEGER column.
+    @Json(name = "input_includes_cache") val inputIncludesCache: Boolean = false,
 )
 
 data class ChatMessage(
@@ -158,9 +169,22 @@ data class ChatMessage(
     val tokensOut: Int = 0,
     val cacheRead: Int = 0,
     val cacheWrite: Int = 0,
+    val reasoningTokens: Int = 0,
+    val inputIncludesCache: Boolean = false,
     val model: String = "",
     val durationMs: Long = 0,
 )
+
+/**
+ * The prompt split by the convention the provider used. `fresh` is the part that
+ * was not served from cache and `total` is the whole prompt, so a reader can
+ * compare the two without guessing which one contains the other.
+ */
+fun ChatMessage.freshInputTokens(): Int =
+    if (inputIncludesCache) (tokensIn - cacheRead).coerceAtLeast(0) else tokensIn
+
+fun ChatMessage.totalInputTokens(): Int =
+    if (inputIncludesCache) tokensIn else tokensIn + cacheRead + cacheWrite
 
 data class ChatSession(
     val id: String,

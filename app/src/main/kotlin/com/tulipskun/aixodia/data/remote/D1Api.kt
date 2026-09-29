@@ -268,6 +268,9 @@ class D1Api(private val settings: SettingsStore) {
                 outputTokens = row.optInt("output_tokens"),
                 cacheRead = row.optInt("cache_read_tokens"),
                 cacheWrite = row.optInt("cache_write_tokens"),
+                reasoningTokens = row.optInt("reasoning_tokens"),
+                // D1 stores the flag as an INTEGER, so it comes back as 0/1.
+                inputIncludesCache = row.optInt("input_includes_cache") != 0,
                 durationMs = row.optLong("duration_ms"),
             )
         }.reversed()
