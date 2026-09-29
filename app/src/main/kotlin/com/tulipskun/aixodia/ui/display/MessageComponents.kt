@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stop
@@ -91,35 +92,42 @@ fun MessageBlock(
             .padding(top = if (startsAfterUser) 10.dp else 4.dp, bottom = 4.dp),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (showBadge) {
-                AgentBadge(m)
-                if (m.toolName.isNotBlank()) {
-                    Text(
-                        m.toolName,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
+        val clock = buildString {
+            if (m.pending) append("กำลังส่ง… · ")
+            append(formatClock(m.createdAt))
+        }
+        // A question wears the clock inside its own bubble, bottom right, the way
+        // a chat app does. An answer and a tool card keep it above, in the
+        // quiet strip that belongs to them.
+        val clockInBubble = mine
+        if (!clockInBubble) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (showBadge) {
+                    AgentBadge(m)
+                    if (m.toolName.isNotBlank()) {
+                        Text(
+                            m.toolName,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+                    }
                 }
+                Text(
+                    text = clock,
+                    // The clock is five characters; it has to stay one line.
+                    maxLines = 1,
+                    softWrap = false,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = if (showBadge) 4.dp else 0.dp),
+                )
             }
-            Text(
-                text = buildString {
-                    if (m.pending) append("กำลังส่ง… · ")
-                    append(formatClock(m.createdAt))
-                },
-                // The clock is five characters; it has to stay one line.
-                maxLines = 1,
-                softWrap = false,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = if (showBadge) 4.dp else 0.dp),
-            )
         }
         if (isTool) {
             Surface(
@@ -149,18 +157,34 @@ fun MessageBlock(
                 modifier = Modifier
                     .padding(top = 4.dp)
                     .widthIn(max = 760.dp)
+                    // The bubble takes the width of the text and stops there. A
+                    // fixed 88% meant "ok" and a three-line question drew exactly
+                    // the same slab, which is not how a bubble reads.
                     .fillMaxWidth(0.88f)
+                    .wrapContentWidth(align = Alignment.End)
                     .combinedClickable(onClick = {}, onLongClick = onCopy),
             ) {
-                // The padding goes on the content, not on the Surface's own
-                // modifier chain: a Surface clips what it lays out to its shape,
-                // so padding the surface itself shaved the first character off
-                // the left of every line of every message.
-                MarkdownText(
-                    text = body,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                )
+                Column(
+                    Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    // Padding goes on the content, not on the Surface's own
+                    // modifier chain: a Surface clips what it lays out to its
+                    // shape, so padding the surface itself shaved the first
+                    // character off the left of every line of every message.
+                    MarkdownText(
+                        text = body,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Text(
+                        text = clock,
+                        maxLines = 1,
+                        softWrap = false,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
             }
         } else {
             // An answer is the page, not a bubble: the words sit straight on the

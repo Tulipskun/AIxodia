@@ -2,16 +2,18 @@ package com.tulipskun.aixodia.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +34,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -473,9 +476,14 @@ fun MarkdownText(
 
 
 /**
- * A real table: one row per line of cells, each column sized to the widest of
- * its own cells, header on its own row. Drawn as a grid rather than pipes, so a
- * three-column table stays readable on a phone instead of wrapping into soup.
+ * A real table, and only as wide as it needs to be.
+ *
+ * The first cut filled the thread width and gave every cell a share by
+ * character count, which turned a two-column file list into two cells marooned
+ * at opposite ends of the screen with a canyon of nothing between them. Now the
+ * table is measured: every column takes the width of its widest cell, and the
+ * table shrinks to the sum. Only when that sum cannot fit the thread does it
+ * scroll sideways, which is the case where sideways actually is the answer.
  */
 @Composable
 private fun TableBlock(
@@ -486,86 +494,101 @@ private fun TableBlock(
 ) {
     val columns = table.headerRow.size
     if (columns == 0) return
-    val shape = RoundedCornerShape(6.dp)
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = shape,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-    ) {
-        Column(Modifier.padding(vertical = 2.dp)) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-            ) {
-                table.headerRow.forEachIndexed { index, cell ->
-                    TableCell(cell, index, table.aligns, columns, codeStyle, linkStyle, color, bold = true)
-                }
-            }
+    val cellGap = 20.dp
+    val widths = List(columns) { column ->
+        val longest = (table.headerRow.getOrElse(column) { "" } to table.rows)
+            .let { (header, rows) -> listOf(header) + rows.map { it.getOrElse(column) { "" } } }
+            .maxOf { it.length }
+        // A cell is allowed to wrap, but not to vanish: below this a one-word
+        // column is unreadable.
+        (longest.coerceAtLeast(4).coerceAtMost(28) * 8).dp
+    }
+    val natural = widths.sum() + cellGap
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val available = maxWidth
+        val scroll = natural > available
+        val tableWidth = if (scroll) available else natural
+        Column(
+            Modifier
+                .width(if (scroll) natural else tableWidth)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .verticalScroll(rememberScrollState())
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            TableRow(
+                cells = table.headerRow,
+                widths = widths,
+                cellGap = cellGap,
+                aligns = table.aligns,
+                codeStyle = codeStyle,
+                linkStyle = linkStyle,
+                color = color,
+                header = true,
+            )
             table.rows.forEach { row ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                ) {
-                    for (index in 0 until columns) {
-                        TableCell(
-                            row.getOrElse(index) { "" },
-                            index,
-                            table.aligns,
-                            columns,
-                            codeStyle,
-                            linkStyle,
-                            color,
-                            bold = false,
-                        )
-                    }
-                }
-                Spacer(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                TableRow(
+                    cells = row,
+                    widths = widths,
+                    cellGap = cellGap,
+                    aligns = table.aligns,
+                    codeStyle = codeStyle,
+                    linkStyle = linkStyle,
+                    color = color,
+                    header = false,
                 )
             }
         }
     }
 }
 
-/**
- * One cell. The weight is the share of the widest cell in that column, so a
- * narrow "no" column does not take a third of the width just because a header
- * says "Note".
- */
+/** One line of the grid: the header on a raised background, a rule under each row. */
 @Composable
-private fun RowScope.TableCell(
-    text: String,
-    index: Int,
+private fun TableRow(
+    cells: List<String>,
+    widths: List<Dp>,
+    cellGap: Dp,
     aligns: List<TableAlign>,
-    columns: Int,
     codeStyle: SpanStyle,
     linkStyle: SpanStyle,
     color: Color,
-    bold: Boolean,
+    header: Boolean,
 ) {
-    val align = aligns.getOrElse(index) { TableAlign.Start }
-    val weight = (text.length.coerceAtLeast(6).toFloat()).coerceAtMost(64f)
-    Column(
+    Row(
         Modifier
-            .weight(weight)
-            .padding(end = if (index == columns - 1) 0.dp else 8.dp),
-        horizontalAlignment = when (align) {
-            TableAlign.Start -> Alignment.Start
-            TableAlign.Center -> Alignment.CenterHorizontally
-            TableAlign.End -> Alignment.End
-        },
+            .fillMaxWidth()
+            .then(
+                if (header) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                else Modifier,
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        Text(
-            text = inline(text, codeStyle, linkStyle),
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (bold) color else MaterialTheme.colorScheme.onSurfaceVariant,
+        widths.forEachIndexed { index, width ->
+            val align = aligns.getOrElse(index) { TableAlign.Start }
+            Box(
+                Modifier.width(width),
+                contentAlignment = when (align) {
+                    TableAlign.Start -> Alignment.CenterStart
+                    TableAlign.Center -> Alignment.Center
+                    TableAlign.End -> Alignment.CenterEnd
+                },
+            ) {
+                Text(
+                    text = inline(cells.getOrElse(index) { "" }, codeStyle, linkStyle),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (header) color else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (index != widths.lastIndex) Spacer(Modifier.width(cellGap))
+        }
+    }
+    if (!header) {
+        Spacer(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
         )
     }
 }

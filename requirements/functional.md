@@ -314,12 +314,11 @@
 - AX-102 — One turn is shown once and the thread reads like ChatGPT: a line of
   Markdown is exactly one construct, so a numbered or bulleted line never also
   becomes a continuation of the item it started, and no item of a list is lost.
-  The reader's own turn is a bubble on the right with nothing written above it —
-  the bubble says whose turn it is — and an answer is plain text on the
-  background with no bubble around it, so a long answer is not a wall of rounded
-  boxes. No text is ever cut by the edge of its own container, and the clock
-  beside a turn stays on one line. A sub agent or a tool step keeps its badge,
-  because it is a separate voice; the main agent carries none.
+  A question is a bubble on the right, no wider than its own text needs, with the
+  clock inside it at the bottom right; an answer is plain text on the background
+  with no bubble around it, so a long answer is not a wall of rounded boxes. No
+  text is ever cut by the edge of its own container. A sub agent or a tool step
+  keeps its badge, because it is a separate voice; the main agent carries none.
 - AX-103 — Nothing internal reaches the reader: a lost connection is one Thai
   sentence saying what to do, not a raw exception, and the tunnel hostname and
   stack trace stay in logcat.
@@ -327,4 +326,6 @@
   quote, ordered and bulleted list, table, fenced code with its language, and
   horizontal rule each keep their own shape. Inline, bold, italic, bold-italic,
   strikethrough, code and link all render as themselves, and a link label may
-  itself carry emphasis. A table is a grid of aligned cells, not a run of pipes.
+  itself carry emphasis. A table is a grid of cells sized to their own content
+  and no wider than the text inside it, and only scrolls sideways when it cannot
+  fit the thread at all.
