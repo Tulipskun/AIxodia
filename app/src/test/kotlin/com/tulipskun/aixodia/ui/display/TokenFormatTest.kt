@@ -33,7 +33,7 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `the prompt total is nowhere in the footer`() {
+    fun `the prompt total is nowhere in the footer text`() {
         // It was a third number and a reader never asked for it: the sum of the
         // halves is the provider's figure, not something the app measures.
         val text = openAi.render(TokenField.DEFAULT)
@@ -59,7 +59,7 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `the order is the configured order within each line`() {
+    fun `the order is the configured order inside one line`() {
         assertEquals(
             "in: 63524/0\nmimo-v2.5-free · 12 t/s · ⏱ 19s  19:28",
             openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
