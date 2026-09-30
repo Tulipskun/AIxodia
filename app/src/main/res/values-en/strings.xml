@@ -25,5 +25,5 @@
     <string name="live_thinking">thinking · %1$s</string>
     <string name="copied">Message copied</string>
     <string name="token_fields_label">Token counts shown</string>
-    <string name="token_fields_help">Comma separated, e.g. in,out,rate,time\nAvailable: in out cache cacheWrite reasoning rate time</string>
+    <string name="token_fields_help">Comma separated, in the order you want to read them\nAvailable: in out rate model time\nDefault: in,out,rate,model,time</string>
 </resources>

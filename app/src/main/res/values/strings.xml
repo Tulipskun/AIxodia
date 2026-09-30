@@ -6,13 +6,7 @@
          glance between two answers, so every one of them is a word a reader
          already knows from every other tool. The full form of a count is
          "part/total", which needs no explanation. -->
-    <string name="token_input">in</string>
-    <string name="token_output">out</string>
-    <string name="token_cache_read">cache</string>
-    <string name="token_cache_write">cache↑</string>
-    <string name="token_reasoning">think</string>
-    <string name="token_rate">%1$s t/s</string>
-    <string name="token_time">⏱ %1$s</string>
+
 
     <string name="offline_title">ต่อ daemon ไม่ได้</string>
     <string name="offline_unknown_host">หาเครื่องปลายทางไม่พบ — ดูว่า daemon กับ tunnel ยังรันอยู่</string>
@@ -39,5 +33,5 @@
     <string name="live_thinking">กำลังคิด · %1$s</string>
     <string name="copied">คัดลอกข้อความแล้ว</string>
     <string name="token_fields_label">แสดงตัวเลข token</string>
-    <string name="token_fields_help">คั่นด้วยจุลภาค เช่น in,out,rate,time\nใส่ได้: in out cache cacheWrite reasoning rate time</string>
+    <string name="token_fields_help">คั่นด้วยจุลภาค เรียงตามลำดับที่อยากเห็น\nใส่ได้: in out rate model time\nค่าเริ่มต้น: in,out,rate,model,time</string>
 </resources>
