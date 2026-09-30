@@ -13,8 +13,8 @@ class TokenFormatTest {
     private val openAi = TokenCounts(
         cacheRead = 63524,
         cacheWrite = 0,
-        reportsCacheWrite = true,
-        reportsReasoning = false,
+        reportsCacheWrite = false,
+        reportsReasoning = true,
         reasoning = 0,
         output = 238,
         ratePerSecond = 12.0,
@@ -28,7 +28,7 @@ class TokenFormatTest {
         // A rate is a count per second, so it belongs on the line with the
         // counts; the model and the clock are about which turn this was.
         assertEquals(
-            "in: 1/0  out: 0/1  7 t/s\nmodel-x · ⏱ 1.0s  09:00",
+            "in: 1  out: 0/1  7 t/s\nmodel-x · ⏱ 1.0s  09:00",
             openAi.copy(cacheRead = 1, cacheWrite = 0, reasoning = 0, output = 1, ratePerSecond = 7.0, millis = 1_000, model = "model-x", clock = "09:00")
                 .render(TokenField.DEFAULT),
         )
@@ -38,7 +38,7 @@ class TokenFormatTest {
     fun `two lines hold the two pairs and then the turn`() {
         assertEquals(
             """
-            in: 63524/0  out: 0/238  12 t/s
+            in: 63524  out: 0/238  12 t/s
             mimo-v2.5-free · ⏱ 19s  19:28
             """.trimIndent(),
             openAi.render(TokenField.DEFAULT),
@@ -56,7 +56,7 @@ class TokenFormatTest {
 
     @Test
     fun `a pair stays when either half has something in it`() {
-        assertEquals("in: 0/40", openAi.copy(cacheRead = 0, cacheWrite = 40)
+        assertEquals("in: 0/40", openAi.copy(cacheRead = 0, cacheWrite = 40, reportsCacheWrite = true)
             .render(listOf(TokenField.Input)).lines().first())
     }
 
@@ -79,19 +79,18 @@ class TokenFormatTest {
         assertEquals(
             "in: 2112  out: 0/605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
             openAi.copy(cacheRead = 2112, output = 605, ratePerSecond = 32.0, millis = 18_000,
-                    reportsCacheWrite = false, reportsReasoning = true, clock = "19:33")
-                .render(TokenField.DEFAULT),
+                    clock = "19:33").render(TokenField.DEFAULT),
         )
     }
 
     @Test
     fun `a count the provider did not report is left out, not zeroed`() {
-        // Anthropic reports no reasoning count, so the pair goes rather than
-        // printing out: 0/238, which reads as a measurement.
-        val anthropic = openAi.copy(cacheRead = 0, cacheWrite = 0)
+        // A turn that cached nothing shows no in: line at all rather than a pair
+        // of zeroes, which would read as two measurements.
+        val uncached = openAi.copy(cacheRead = 0, cacheWrite = 0)
         assertEquals(
             "out: 0/238  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
-            anthropic.render(TokenField.DEFAULT),
+            uncached.render(TokenField.DEFAULT),
         )
     }
 
