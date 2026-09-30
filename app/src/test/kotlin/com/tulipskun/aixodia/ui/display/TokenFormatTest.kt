@@ -22,11 +22,22 @@ class TokenFormatTest {
     )
 
     @Test
+    fun `the speed sits with the counts and not with the model`() {
+        // A rate is a count per second, so it belongs on the line with the
+        // counts; the model and the clock are about which turn this was.
+        assertEquals(
+            "in: 1/0  out: 0/1  7 t/s\nmodel-x · ⏱ 1s  09:00",
+            openAi.copy(cacheRead = 1, cacheWrite = 0, reasoning = 0, output = 1, ratePerSecond = 7.0, millis = 1_000, model = "model-x", clock = "09:00")
+                .render(TokenField.DEFAULT),
+        )
+    }
+
+    @Test
     fun `two lines hold the two pairs and then the turn`() {
         assertEquals(
             """
-            in: 63524/0  out: 0/238
-            12 t/s · mimo-v2.5-free · ⏱ 19s  19:28
+            in: 63524/0  out: 0/238  12 t/s
+            mimo-v2.5-free · ⏱ 19s  19:28
             """.trimIndent(),
             openAi.render(TokenField.DEFAULT),
         )
@@ -53,7 +64,7 @@ class TokenFormatTest {
         // printing out: 0/238, which reads as a measurement.
         val anthropic = openAi.copy(cacheRead = 0, cacheWrite = 0)
         assertEquals(
-            "out: 0/238\n12 t/s · mimo-v2.5-free · ⏱ 19s  19:28",
+            "out: 0/238  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
             anthropic.render(TokenField.DEFAULT),
         )
     }
@@ -61,7 +72,7 @@ class TokenFormatTest {
     @Test
     fun `the order is the configured order inside one line`() {
         assertEquals(
-            "in: 63524/0\nmimo-v2.5-free · 12 t/s · ⏱ 19s  19:28",
+            "in: 63524/0  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
             openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
         )
     }

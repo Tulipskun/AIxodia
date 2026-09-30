@@ -12,12 +12,14 @@ fun formatSeconds(millis: Long): String = when {
  * How the token footer is written.
  *
  * Two lines, because the footer answers two questions and they want different
- * amounts of attention. The first is what it cost: the prompt and the answer,
- * each split into the two halves that cost something different — the cache read
- * against the cache write, and the thinking against the words. The second is
- * which turn this was: how fast, which model, how long, and when. A single line
- * of five figures forces the reader to hold all of it to find the one they came
- * for, and a line per figure means scrolling to see what model answered.
+ * amounts of attention. The first is what it cost and how fast: the prompt and
+ * the answer, each split into the two halves that cost something different — the
+ * cache read against the cache write, and the thinking against the words — with
+ * the speed beside them, since a rate is a count per second and belongs with the
+ * counts. The second is which turn this was: which model, how long it took, and
+ * when it was asked. A single line of five figures forces the reader to hold all
+ * of it to find the one they came for, and a line per figure means scrolling to
+ * see what model answered.
  *
  * The prompt total is not shown. It was here earlier as a third number, and it
  * is the one a reader never asked for: what they want to know is what was
@@ -122,13 +124,18 @@ data class TokenCounts(
 
     /**
      * The two lines, split the way the footer draws them: the two token pairs on
-     * the first, everything identifying the turn on the second. The split is
-     * fixed rather than configured because it is the only arrangement where the
-     * cost of a turn and the identity of a turn stay legible together.
+     * the first with the speed beside them, then the model, the elapsed time and
+     * the wall clock on the second. The speed belongs with the counts because it
+     * is a count per second, and the rest belongs together because it is all
+     * about which turn this was.
+     *
+     * The split is fixed rather than configured because it is the only
+     * arrangement where the cost of a turn and the identity of a turn stay
+     * legible together.
      */
     fun render(fields: List<TokenField>): String {
-        val cost = lines(fields.filter { it == TokenField.Input || it == TokenField.Output })
-        val turn = lines(fields.filter { it == TokenField.Rate || it == TokenField.Model || it == TokenField.Time })
+        val cost = lines(fields.filter { it == TokenField.Input || it == TokenField.Output || it == TokenField.Rate })
+        val turn = lines(fields.filter { it == TokenField.Model || it == TokenField.Time })
         return listOf(
             cost.joinToString("  "),
             turn.joinToString(" \u00B7 "),
