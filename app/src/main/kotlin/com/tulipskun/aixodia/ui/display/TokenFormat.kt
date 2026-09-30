@@ -111,9 +111,14 @@ data class TokenCounts(
             // time used and the wall clock on one line: how long the turn took
             // and when it was asked, which is what you want when you are looking
             // for an answer you read this morning.
+            // trimEnd, because the gap belongs between the two halves and there
+            // is nothing to put after it when the clock is missing.
             TokenField.Time -> buildString {
-                if (millis > 0L) append("\u23F1 ${formatSeconds(millis)}  ")
-                append(clock)
+                if (millis > 0L) append("\u23F1 ${formatSeconds(millis)}")
+                if (clock.isNotBlank()) {
+                    if (isNotEmpty()) append("  ")
+                    append(clock)
+                }
             }
         }
     }
