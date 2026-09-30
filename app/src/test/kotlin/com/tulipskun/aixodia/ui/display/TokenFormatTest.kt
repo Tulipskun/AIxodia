@@ -22,7 +22,7 @@ class TokenFormatTest {
     )
 
     @Test
-    fun `two lines: the two pairs, then the turn`() {
+    fun `two lines hold the two pairs and then the turn`() {
         assertEquals(
             """
             in: 63524/0  out: 0/238
