@@ -13,7 +13,7 @@ class TokenFormatTest {
     private val openAi = TokenCounts(
         cacheRead = 63524,
         cacheWrite = 0,
-        cacheWriteReported = true,
+        reportsExtras = true,
         reasoning = 0,
         output = 238,
         ratePerSecond = 12.0,
@@ -60,23 +60,26 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `a provider that does not count writes shows the read alone`() {
-        // OpenAI and Gemini cache implicitly and report reads only. Printing a
-        // zero for the write half would read as a measurement of something the
-        // provider never told us.
-        val openAiStyle = openAi.copy(cacheWriteReported = false)
+    fun `a provider that reports neither shows one number per pair`() {
+        // OpenAI and Gemini cache implicitly and report reads only, and a model
+        // that does not think reports zero reasoning. Printing a zero for either
+        // missing half would read as a measurement of something the provider
+        // never told us. The reasoning zero here is real, so out keeps its pair.
+        val openAiStyle = openAi.copy(reportsExtras = false)
         assertEquals("in: 63524", openAiStyle.render(listOf(TokenField.Input)).lines().first())
         assertEquals(
-            "in: 2112  out: 605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
+            "in: 2112  out: 0/605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
             openAiStyle.copy(cacheRead = 2112, output = 605, ratePerSecond = 32.0, millis = 18_000, clock = "19:33")
                 .render(TokenField.DEFAULT),
         )
     }
 
     @Test
-    fun `a provider that reports writes keeps the pair even at zero`() {
-        // Anthropic has a real write count, so a genuine zero stays visible.
+    fun `a provider that reports the extras keeps both pairs even at zero`() {
+        // Anthropic has a real write count and a real thinking count, so a
+        // genuine zero on either side stays visible.
         assertEquals("in: 63524/0", openAi.render(listOf(TokenField.Input)).lines().first())
+        assertEquals("out: 0/238", openAi.render(listOf(TokenField.Output)).lines().first())
     }
 
     @Test
