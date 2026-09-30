@@ -222,6 +222,10 @@ fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT)
 fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
     cacheRead = cacheRead,
     cacheWrite = cacheWrite,
+    // Exactly the providers that count the prompt with the cache inside it are
+    // the ones that never report a write, so the flag the daemon already sends
+    // for that distinction is the one that answers this too.
+    cacheWriteReported = !inputIncludesCache,
     reasoning = reasoningTokens,
     output = (tokensOut - reasoningTokens).coerceAtLeast(0),
     ratePerSecond = if (durationMs > 0 && tokensOut > 0) tokensOut * 1000.0 / durationMs else 0.0,

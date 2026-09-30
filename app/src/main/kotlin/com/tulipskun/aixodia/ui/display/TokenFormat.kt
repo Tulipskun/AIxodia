@@ -32,7 +32,7 @@ fun formatSeconds(millis: Long): String = when {
  * say".
  */
 enum class TokenField(val aliases: List<String>) {
-    /** `in: cacheRead/cacheWrite` */
+    /** `in: cacheRead`, with `/cacheWrite` only when the provider reports writes */
     Input(listOf("in", "input")),
 
     /** `out: reasoning/output` */
@@ -79,6 +79,13 @@ enum class TokenField(val aliases: List<String>) {
 data class TokenCounts(
     val cacheRead: Int = 0,
     val cacheWrite: Int = 0,
+    /**
+     * Whether this provider counts cache writes at all. Only Anthropic does —
+     * it has an explicit cache breakpoint and reports what it wrote. OpenAI and
+     * Gemini cache implicitly and report reads only, so a write count of zero
+     * there means "no such number", and printing it would read as a measurement.
+     */
+    val cacheWriteReported: Boolean = false,
     val reasoning: Int = 0,
     val output: Int = 0,
     val ratePerSecond: Double = 0.0,
@@ -95,7 +102,7 @@ data class TokenCounts(
      */
     fun visible(fields: List<TokenField>): List<TokenField> = fields.filter { field ->
         when (field) {
-            TokenField.Input -> cacheRead > 0 || cacheWrite > 0
+            TokenField.Input -> cacheRead > 0 || (cacheWriteReported && cacheWrite > 0)
             TokenField.Output -> output > 0 || reasoning > 0
             TokenField.Rate -> output > 0 && ratePerSecond > 0.0
             TokenField.Model -> model.isNotBlank()
@@ -106,7 +113,8 @@ data class TokenCounts(
     /** One line per part, already formatted. Data, so a test can check the text. */
     fun lines(fields: List<TokenField>): List<String> = visible(fields).map { field ->
         when (field) {
-            TokenField.Input -> "in: $cacheRead/$cacheWrite"
+            TokenField.Input ->
+                if (cacheWriteReported) "in: $cacheRead/$cacheWrite" else "in: $cacheRead"
             TokenField.Output -> "out: $reasoning/$output"
             TokenField.Rate -> String.format(Locale.US, "%.0f t/s", ratePerSecond)
             TokenField.Model -> model
