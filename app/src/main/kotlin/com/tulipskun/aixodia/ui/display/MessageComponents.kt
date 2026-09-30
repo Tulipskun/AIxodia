@@ -88,36 +88,27 @@ fun MessageBlock(
             append(formatClock(m.createdAt))
         }
         // A question wears the clock inside its own bubble, bottom right, the way
-        // a chat app does. An answer and a tool card keep it above, in the
-        // quiet strip that belongs to them.
-        val clockInBubble = mine
-        if (!clockInBubble) {
+        // a chat app does. An answer carries it in its own footer line instead, so
+        // the strip above is left for the badge and the tool name only.
+        // The strip above an answer exists only to name who spoke and which tool
+        // ran. The clock is in the footer next to the time used, so a main agent
+        // answer draws no strip at all rather than an empty one.
+        if (!mine && showBadge) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (showBadge) {
-                    AgentBadge(m)
-                    if (m.toolName.isNotBlank()) {
-                        Text(
-                            m.toolName,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
-                    }
+                AgentBadge(m)
+                if (m.toolName.isNotBlank()) {
+                    Text(
+                        m.toolName,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
                 }
-                Text(
-                    text = clock,
-                    // The clock is five characters; it has to stay one line.
-                    maxLines = 1,
-                    softWrap = false,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = if (showBadge) 4.dp else 0.dp),
-                )
             }
         }
         if (isTool) {
@@ -240,6 +231,7 @@ fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
     ratePerSecond = if (durationMs > 0 && tokensOut > 0) tokensOut * 1000.0 / durationMs else 0.0,
     millis = durationMs,
     model = model,
+    clock = if (createdAt > 0L) formatClock(createdAt) else "",
 )
 
 /**

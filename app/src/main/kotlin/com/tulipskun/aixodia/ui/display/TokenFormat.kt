@@ -35,6 +35,11 @@ enum class TokenField(val label: String) {
     Time("time"),
     ;
 
+    // The clock is not a field: it belongs to the message it sits beside, and a
+    // question wears it inside its own bubble while an answer carries it in the
+    // strip above. Time is the elapsed length of the turn, which is a different
+    // thing and is what the footer is for.
+
     companion object {
         /**
          * What to show when nothing is configured. The four lines that are
@@ -76,6 +81,8 @@ data class TokenCounts(
     val ratePerSecond: Double = 0.0,
     val millis: Long = 0L,
     val model: String = "",
+    /** The wall clock of the turn, or blank when the message never carried one. */
+    val clock: String = "",
 ) {
     /**
      * The lines that carry something worth printing. A count the provider did
@@ -88,7 +95,9 @@ data class TokenCounts(
             TokenField.Output -> output > 0 || reasoning > 0
             TokenField.Rate -> output > 0 && ratePerSecond > 0.0
             TokenField.Model -> model.isNotBlank()
-            TokenField.Time -> millis > 0L
+            // A clock with no elapsed time still says when the turn happened, and
+            // the other way round, so this line appears if either half is there.
+            TokenField.Time -> millis > 0L || clock.isNotBlank()
         }
     }
 
@@ -99,7 +108,13 @@ data class TokenCounts(
             TokenField.Output -> "${field.label}: $reasoning/$output"
             TokenField.Rate -> String.format(Locale.US, "%.0f t/s", ratePerSecond)
             TokenField.Model -> model
-            TokenField.Time -> "\u23F1 ${formatSeconds(millis)}"
+            // time used and the wall clock on one line: how long the turn took
+            // and when it was asked, which is what you want when you are looking
+            // for an answer you read this morning.
+            TokenField.Time -> buildString {
+                if (millis > 0L) append("\u23F1 ${formatSeconds(millis)}  ")
+                append(clock)
+            }
         }
     }
 

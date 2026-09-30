@@ -18,6 +18,7 @@ class TokenFormatTest {
         ratePerSecond = 12.0,
         millis = 19_000,
         model = "mimo-v2.5-free",
+        clock = "19:28",
     )
 
     @Test
@@ -28,7 +29,7 @@ class TokenFormatTest {
             out: 0/238
             12 t/s
             mimo-v2.5-free
-            ⏱ 19s
+            ⏱ 19s  19:28
             """.trimIndent(),
             openAi.render(TokenField.DEFAULT),
         )
@@ -46,7 +47,7 @@ class TokenFormatTest {
         // printing out: 0/238, which reads as a measurement.
         val anthropic = openAi.copy(cacheRead = 0, cacheWrite = 0)
         assertEquals(
-            listOf("out: 0/238", "12 t/s", "mimo-v2.5-free", "⏱ 19s"),
+            listOf("out: 0/238", "12 t/s", "mimo-v2.5-free", "⏱ 19s  19:28"),
             anthropic.lines(TokenField.DEFAULT),
         )
     }
@@ -54,7 +55,7 @@ class TokenFormatTest {
     @Test
     fun `the order is the configured order, not the declaration order`() {
         assertEquals(
-            listOf("⏱ 19s", "mimo-v2.5-free", "12 t/s"),
+            listOf("⏱ 19s  19:28", "mimo-v2.5-free", "12 t/s"),
             openAi.lines(listOf(TokenField.Time, TokenField.Model, TokenField.Rate)),
         )
     }
@@ -86,8 +87,18 @@ class TokenFormatTest {
     @Test
     fun `a blank model drops its line rather than an empty one`() {
         assertEquals(
-            listOf("in: 63524/0", "out: 0/238", "12 t/s", "⏱ 19s"),
+            listOf("in: 63524/0", "out: 0/238", "12 t/s", "⏱ 19s  19:28"),
             openAi.copy(model = "").lines(TokenField.DEFAULT),
         )
+    }
+
+    @Test
+    fun `the last line is time used and the wall clock together`() {
+        // Both halves are wanted when looking for an answer you read this
+        // morning, so they share the line rather than taking one each.
+        assertEquals("⏱ 19s  19:28", openAi.render(listOf(TokenField.Time)))
+        // Either half alone still keeps the line.
+        assertEquals("⏱ 19s", openAi.copy(clock = "").render(listOf(TokenField.Time)))
+        assertEquals("19:28", openAi.copy(millis = 0L).render(listOf(TokenField.Time)))
     }
 }
