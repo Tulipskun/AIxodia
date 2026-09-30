@@ -9,48 +9,50 @@ fun formatSeconds(millis: Long): String = when {
 }
 
 /**
- * How the token footer is written, and which lines it has.
+ * How the token footer is written.
  *
- * The shape is one item per line rather than a run of middots, because these
- * are four different things being said — a split of the prompt, a split of the
- * answer, a rate and a model — and a single line forces the reader to hold all
- * of it to find the one number they wanted.
+ * Two lines, because the footer answers two questions and they want different
+ * amounts of attention. The first is what it cost: the prompt and the answer,
+ * each split into the two halves that cost something different — the cache read
+ * against the cache write, and the thinking against the words. The second is
+ * which turn this was: how fast, which model, how long, and when. A single line
+ * of five figures forces the reader to hold all of it to find the one they came
+ * for, and a line per figure means scrolling to see what model answered.
  *
- * The pairs are the two numbers that cost something different and so belong
- * together: `in` is what was read from cache over what was written into it, and
- * `out` is what the model spent thinking over what it actually said. Both are
- * read as "first/second" with no label, which is why the label names the pair
- * and not the halves.
+ * The prompt total is not shown. It was here earlier as a third number, and it
+ * is the one a reader never asked for: what they want to know is what was
+ * reused and what was generated, and the sum of those is the provider's number,
+ * not the app's.
  *
- * Which lines appear, and in what order, is a list of [TokenField] rather than
- * a fixed string because providers differ: Anthropic reports no reasoning count
- * at all, and a reasoning line there would print a zero that reads as a
- * measurement when it means "this provider does not say".
+ * Which of the five parts appear, and their order, is a list of [TokenField]
+ * because providers differ: Anthropic reports no reasoning count at all, and a
+ * zero there would read as a measurement rather than as "this provider does not
+ * say".
  */
-enum class TokenField(val label: String) {
-    Input("in"),
-    Output("out"),
-    Rate("rate"),
-    Model("model"),
-    Time("time"),
+enum class TokenField {
+    /** `in: cacheRead/cacheWrite` */
+    Input,
+
+    /** `out: reasoning/output` */
+    Output,
+
+    /** `12 t/s` */
+    Rate,
+
+    /** the model name on its own */
+    Model,
+
+    /** the elapsed time and the wall clock, together */
+    Time,
     ;
 
-    // The clock is not a field: it belongs to the message it sits beside, and a
-    // question wears it inside its own bubble while an answer carries it in the
-    // strip above. Time is the elapsed length of the turn, which is a different
-    // thing and is what the footer is for.
-
     companion object {
-        /**
-         * What to show when nothing is configured. The four lines that are
-         * always true of a turn, in the order a reader wants them.
-         */
         val DEFAULT: List<TokenField> = listOf(Input, Output, Rate, Model, Time)
 
         /**
-         * Both spellings resolve: the enum name (`Output`) and the label a
-         * reader sees in the footer (`out`). The name is tried first because the
-         * labels are short and would collide on case.
+         * Both spellings resolve: the enum name (`Output`) and the lower-case
+         * form a reader would type. The name is tried first so a typo cannot
+         * collide with another field.
          */
         fun parse(spec: String): List<TokenField> =
             spec.split(',', ' ', '|', '\n')
@@ -58,21 +60,18 @@ enum class TokenField(val label: String) {
                 .filter { it.isNotEmpty() }
                 .mapNotNull { token ->
                     entries.firstOrNull { it.name.equals(token, ignoreCase = true) }
-                        ?: entries.firstOrNull { it.label == token }
+                        ?: entries.firstOrNull { it.name.lowercase() == token.lowercase() }
                 }
                 .distinct()
                 .ifEmpty { DEFAULT }
 
-        /** A spec stores field names, never labels: labels may be translated. */
+        /** A spec stores field names, never display text. */
         fun render(fields: List<TokenField>): String =
             fields.joinToString(",") { it.name }
     }
 }
 
-/**
- * The counts a footer is built from, already split the way the two prompts and
- * the answer split.
- */
+/** The counts the footer is built from, already split into the two halves. */
 data class TokenCounts(
     val cacheRead: Int = 0,
     val cacheWrite: Int = 0,
@@ -81,13 +80,14 @@ data class TokenCounts(
     val ratePerSecond: Double = 0.0,
     val millis: Long = 0L,
     val model: String = "",
-    /** The wall clock of the turn, or blank when the message never carried one. */
+    /** The wall clock of the turn, blank when the message never carried one. */
     val clock: String = "",
 ) {
     /**
-     * The lines that carry something worth printing. A count the provider did
-     * not report leaves its line out entirely rather than printing a zero, and
-     * a pair only stays when one of its halves has something in it.
+     * A part that has nothing in it is left out rather than printed as a zero,
+     * which would read as a measurement. A pair only stays when one of its
+     * halves has something in it, and the time part stays if either the elapsed
+     * time or the clock is there.
      */
     fun visible(fields: List<TokenField>): List<TokenField> = fields.filter { field ->
         when (field) {
@@ -95,24 +95,19 @@ data class TokenCounts(
             TokenField.Output -> output > 0 || reasoning > 0
             TokenField.Rate -> output > 0 && ratePerSecond > 0.0
             TokenField.Model -> model.isNotBlank()
-            // A clock with no elapsed time still says when the turn happened, and
-            // the other way round, so this line appears if either half is there.
             TokenField.Time -> millis > 0L || clock.isNotBlank()
         }
     }
 
-    /** The footer lines, already formatted. Data, so a test can check the text. */
+    /** One line per part, already formatted. Data, so a test can check the text. */
     fun lines(fields: List<TokenField>): List<String> = visible(fields).map { field ->
         when (field) {
-            TokenField.Input -> "${field.label}: $cacheRead/$cacheWrite"
-            TokenField.Output -> "${field.label}: $reasoning/$output"
+            TokenField.Input -> "in: $cacheRead/$cacheWrite"
+            TokenField.Output -> "out: $reasoning/$output"
             TokenField.Rate -> String.format(Locale.US, "%.0f t/s", ratePerSecond)
             TokenField.Model -> model
-            // time used and the wall clock on one line: how long the turn took
-            // and when it was asked, which is what you want when you are looking
-            // for an answer you read this morning.
-            // trimEnd, because the gap belongs between the two halves and there
-            // is nothing to put after it when the clock is missing.
+            // The gap belongs between the two halves and there is nothing to put
+            // after it when the clock is missing.
             TokenField.Time -> buildString {
                 if (millis > 0L) append("\u23F1 ${formatSeconds(millis)}")
                 if (clock.isNotBlank()) {
@@ -123,6 +118,18 @@ data class TokenCounts(
         }
     }
 
-    fun render(fields: List<TokenField>, separator: String = "\n"): String =
-        lines(fields).joinToString(separator)
+    /**
+     * The two lines, split the way the footer draws them: the two token pairs on
+     * the first, everything identifying the turn on the second. The split is
+     * fixed rather than configured because it is the only arrangement where the
+     * cost of a turn and the identity of a turn stay legible together.
+     */
+    fun render(fields: List<TokenField>): String {
+        val cost = lines(fields.filter { it == TokenField.Input || it == TokenField.Output })
+        val turn = lines(fields.filter { it == TokenField.Rate || it == TokenField.Model || it == TokenField.Time })
+        return listOf(
+            cost.joinToString("  "),
+            turn.joinToString(" \u00B7 "),
+        ).filter { it.isNotBlank() }.joinToString("\n")
+    }
 }

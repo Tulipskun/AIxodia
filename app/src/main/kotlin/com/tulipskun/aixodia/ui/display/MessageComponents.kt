@@ -205,17 +205,13 @@ fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT)
     val counts = m.toTokenCounts()
     val shown = counts.visible(fields)
     if (shown.isEmpty()) return
-    Column(Modifier.fillMaxWidth().padding(top = 5.dp)) {
-        counts.lines(fields).forEach { line ->
-            Text(
-                line,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-    }
+    Text(
+        counts.render(fields),
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
+    )
 }
 
 /**
@@ -401,25 +397,21 @@ fun TurnStatsLine(
         model = stats.model.ifBlank { model },
     )
     if (counts.visible(fields).isEmpty()) return
-    val body = counts.lines(fields)
-    Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        body.forEach { line ->
-            Text(
-                if (stats.exact) line else line + "\u2248",
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-        if (live && stats.running) {
-            Text(
-                stringResource(R.string.sub_agent_running),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
+    Text(
+        text = counts.render(fields) + if (stats.exact) "" else "\u2248",
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    )
+    if (live && stats.running) {
+        Text(
+            stringResource(R.string.sub_agent_running),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

@@ -5,8 +5,8 @@ import org.junit.Test
 
 /**
  * The footer text is data, not drawing, so it can be checked without a screen.
- * These lock the shape that was asked for: one item per line, the two pairs
- * written first/second, and a count nobody reported left out rather than zeroed.
+ * These lock the two lines that were asked for: the two token pairs on the
+ * first, the turn's identity on the second, and no prompt total anywhere.
  */
 class TokenFormatTest {
 
@@ -22,41 +22,47 @@ class TokenFormatTest {
     )
 
     @Test
-    fun `the default is one item per line, in the order asked for`() {
+    fun `two lines: the two pairs, then the turn`() {
         assertEquals(
             """
-            in: 63524/0
-            out: 0/238
-            12 t/s
-            mimo-v2.5-free
-            ⏱ 19s  19:28
+            in: 63524/0  out: 0/238
+            12 t/s · mimo-v2.5-free · ⏱ 19s  19:28
             """.trimIndent(),
             openAi.render(TokenField.DEFAULT),
         )
     }
 
     @Test
-    fun `a pair stays when either half has something in it`() {
-        val onlyWrite = openAi.copy(cacheRead = 0, cacheWrite = 40)
-        assertEquals("in: 0/40", onlyWrite.render(listOf(TokenField.Input)))
+    fun `the prompt total is nowhere in the footer`() {
+        // It was a third number and a reader never asked for it: the sum of the
+        // halves is the provider's figure, not something the app measures.
+        val text = openAi.render(TokenField.DEFAULT)
+        assertEquals(false, text.contains("127125"))
+        assertEquals(listOf("in: 63524/0", "out: 0/238"), openAi.lines(TokenField.DEFAULT).take(2))
     }
 
     @Test
-    fun `a count the provider did not report leaves its line out`() {
-        // Anthropic reports no reasoning count, so the line goes rather than
+    fun `a pair stays when either half has something in it`() {
+        assertEquals("in: 0/40", openAi.copy(cacheRead = 0, cacheWrite = 40)
+            .render(listOf(TokenField.Input)).lines().first())
+    }
+
+    @Test
+    fun `a count the provider did not report is left out, not zeroed`() {
+        // Anthropic reports no reasoning count, so the pair goes rather than
         // printing out: 0/238, which reads as a measurement.
         val anthropic = openAi.copy(cacheRead = 0, cacheWrite = 0)
         assertEquals(
-            listOf("out: 0/238", "12 t/s", "mimo-v2.5-free", "⏱ 19s  19:28"),
-            anthropic.lines(TokenField.DEFAULT),
+            "out: 0/238\n12 t/s · mimo-v2.5-free · ⏱ 19s  19:28",
+            anthropic.render(TokenField.DEFAULT),
         )
     }
 
     @Test
-    fun `the order is the configured order, not the declaration order`() {
+    fun `the order is the configured order within each line`() {
         assertEquals(
-            listOf("⏱ 19s  19:28", "mimo-v2.5-free", "12 t/s"),
-            openAi.lines(listOf(TokenField.Time, TokenField.Model, TokenField.Rate)),
+            "in: 63524/0\nmimo-v2.5-free · 12 t/s · ⏱ 19s  19:28",
+            openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
         )
     }
 
@@ -64,8 +70,7 @@ class TokenFormatTest {
     fun `a spec round-trips through the preference string`() {
         val spec = "Input,Output,Rate,Model,Time"
         assertEquals(spec, TokenField.render(TokenField.parse(spec)))
-        // And the short labels a reader would type resolve to the same fields.
-        assertEquals(spec, TokenField.render(TokenField.parse("in,out,rate,model,time")))
+        assertEquals(spec, TokenField.render(TokenField.parse("input,output,rate,model,time")))
     }
 
     @Test
@@ -79,26 +84,15 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `reasoning is the first half of out because it is not words anyone read`() {
-        val thinking = openAi.copy(reasoning = 28, output = 40)
-        assertEquals("out: 28/40", thinking.render(listOf(TokenField.Output)))
+    fun `the elapsed time and the wall clock share one part`() {
+        assertEquals("⏱ 19s  19:28", openAi.render(listOf(TokenField.Time)).lines().first())
+        // Either half alone still keeps the part.
+        assertEquals("⏱ 19s", openAi.copy(clock = "").render(listOf(TokenField.Time)).lines().first())
+        assertEquals("19:28", openAi.copy(millis = 0L).render(listOf(TokenField.Time)).lines().first())
     }
 
     @Test
-    fun `a blank model drops its line rather than an empty one`() {
-        assertEquals(
-            listOf("in: 63524/0", "out: 0/238", "12 t/s", "⏱ 19s  19:28"),
-            openAi.copy(model = "").lines(TokenField.DEFAULT),
-        )
-    }
-
-    @Test
-    fun `the last line is time used and the wall clock together`() {
-        // Both halves are wanted when looking for an answer you read this
-        // morning, so they share the line rather than taking one each.
-        assertEquals("⏱ 19s  19:28", openAi.render(listOf(TokenField.Time)))
-        // Either half alone still keeps the line.
-        assertEquals("⏱ 19s", openAi.copy(clock = "").render(listOf(TokenField.Time)))
-        assertEquals("19:28", openAi.copy(millis = 0L).render(listOf(TokenField.Time)))
+    fun `a turn with no counts at all renders nothing rather than a blank line`() {
+        assertEquals("", TokenCounts().render(TokenField.DEFAULT))
     }
 }
