@@ -26,7 +26,7 @@ class TokenFormatTest {
         // A rate is a count per second, so it belongs on the line with the
         // counts; the model and the clock are about which turn this was.
         assertEquals(
-            "in: 1/0  out: 0/1  7 t/s\nmodel-x · ⏱ 1s  09:00",
+            "in: 1/0  out: 0/1  7 t/s\nmodel-x · ⏱ 1.0s  09:00",
             openAi.copy(cacheRead = 1, cacheWrite = 0, reasoning = 0, output = 1, ratePerSecond = 7.0, millis = 1_000, model = "model-x", clock = "09:00")
                 .render(TokenField.DEFAULT),
         )
