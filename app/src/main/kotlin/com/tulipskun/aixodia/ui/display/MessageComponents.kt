@@ -222,10 +222,12 @@ fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT)
 fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
     cacheRead = cacheRead,
     cacheWrite = cacheWrite,
-    // Exactly the providers that count the prompt with the cache inside it are
-    // the ones that report neither a cache write nor a thinking count, so the
-    // flag the daemon already sends for that distinction answers both.
-    reportsExtras = !inputIncludesCache,
+    // The two halves are missing from opposite ends of the provider set, so the
+    // one flag the daemon already sends for this distinction answers both — with
+    // opposite polarity. Anthropic counts cache writes and no thinking; OpenAI
+    // and Gemini the reverse.
+    reportsCacheWrite = !inputIncludesCache,
+    reportsReasoning = inputIncludesCache,
     reasoning = reasoningTokens,
     output = (tokensOut - reasoningTokens).coerceAtLeast(0),
     ratePerSecond = if (durationMs > 0 && tokensOut > 0) tokensOut * 1000.0 / durationMs else 0.0,

@@ -13,7 +13,8 @@ class TokenFormatTest {
     private val openAi = TokenCounts(
         cacheRead = 63524,
         cacheWrite = 0,
-        reportsExtras = true,
+        reportsCacheWrite = true,
+        reportsReasoning = false,
         reasoning = 0,
         output = 238,
         ratePerSecond = 12.0,
@@ -60,26 +61,27 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `a provider that reports neither shows one number per pair`() {
-        // OpenAI and Gemini cache implicitly and report reads only, and a model
-        // that does not think reports zero reasoning. Printing a zero for either
-        // missing half would read as a measurement of something the provider
-        // never told us. The reasoning zero here is real, so out keeps its pair.
-        val openAiStyle = openAi.copy(reportsExtras = false)
+    fun `each half drops itself when its provider does not count it`() {
+        // The two halves are missing from opposite ends of the provider set, so
+        // one rule cannot cover both: Anthropic counts cache writes and no
+        // thinking, OpenAI and Gemini the reverse.
+        val openAiStyle = openAi.copy(reportsCacheWrite = false, reportsReasoning = true)
         assertEquals("in: 63524", openAiStyle.render(listOf(TokenField.Input)).lines().first())
-        assertEquals(
-            "in: 2112  out: 0/605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
-            openAiStyle.copy(cacheRead = 2112, output = 605, ratePerSecond = 32.0, millis = 18_000, clock = "19:33")
-                .render(TokenField.DEFAULT),
-        )
+        assertEquals("out: 0/238", openAiStyle.render(listOf(TokenField.Output)).lines().first())
+
+        val anthropic = openAi.copy(reportsCacheWrite = true, reportsReasoning = false)
+        assertEquals("in: 63524/0", anthropic.render(listOf(TokenField.Input)).lines().first())
+        assertEquals("out: 238", anthropic.render(listOf(TokenField.Output)).lines().first())
     }
 
     @Test
-    fun `a provider that reports the extras keeps both pairs even at zero`() {
-        // Anthropic has a real write count and a real thinking count, so a
-        // genuine zero on either side stays visible.
-        assertEquals("in: 63524/0", openAi.render(listOf(TokenField.Input)).lines().first())
-        assertEquals("out: 0/238", openAi.render(listOf(TokenField.Output)).lines().first())
+    fun `the provider on screen drops only the half it does not count`() {
+        assertEquals(
+            "in: 2112  out: 0/605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
+            openAi.copy(cacheRead = 2112, output = 605, ratePerSecond = 32.0, millis = 18_000,
+                    reportsCacheWrite = false, reportsReasoning = true, clock = "19:33")
+                .render(TokenField.DEFAULT),
+        )
     }
 
     @Test
