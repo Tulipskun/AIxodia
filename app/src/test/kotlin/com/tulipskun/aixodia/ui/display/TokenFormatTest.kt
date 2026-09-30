@@ -51,7 +51,7 @@ class TokenFormatTest {
         // halves is the provider's figure, not something the app measures.
         val text = openAi.render(TokenField.DEFAULT)
         assertEquals(false, text.contains("127125"))
-        assertEquals(listOf("in: 63524/0", "out: 0/238"), openAi.lines(TokenField.DEFAULT).take(2))
+        assertEquals(listOf("in: 63524", "out: 0/238"), openAi.lines(TokenField.DEFAULT).take(2))
     }
 
     @Test
@@ -97,7 +97,7 @@ class TokenFormatTest {
     @Test
     fun `the order is the configured order inside one line`() {
         assertEquals(
-            "in: 63524/0  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
+            "in: 63524  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
             openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
         )
     }
