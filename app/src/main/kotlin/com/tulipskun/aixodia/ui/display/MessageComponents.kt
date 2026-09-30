@@ -202,54 +202,44 @@ fun MessageBlock(
 }
 
 /**
- * Footer of one answer: which model, then the counts, then how long it took.
+ * The footer of one answer: the two token splits, the rate, the model and how
+ * long it took, one item per line.
  *
- * The wording and the order live in [TokenFields], not here, because providers
- * differ in what they report and a reader may want a different set. The default
- * is `model · in: fresh/total · out: answer/total · N t/s · ⏱ time`.
+ * The wording, the order and which lines appear live in [TokenField], not here,
+ * because providers differ in what they report and a reader may want a
+ * different set. Drawing knows nothing about the format.
  */
 @Composable
 fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT) {
     val counts = m.toTokenCounts()
     val shown = counts.visible(fields)
-    if (m.model.isBlank() && shown.isEmpty()) return
-    Row(
-        Modifier.fillMaxWidth().padding(top = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (m.model.isNotBlank()) {
+    if (shown.isEmpty()) return
+    Column(Modifier.fillMaxWidth().padding(top = 5.dp)) {
+        counts.lines(fields).forEach { line ->
             Text(
-                m.model,
+                line,
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
             )
         }
-        // One Text rather than several: the counts are read as a single line of
-        // figures, and separate composables put spacing the format does not
-        // control between them.
-        Text(
-            counts.render(fields),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-        )
     }
 }
 
-/** This message's counts, already split by the convention its provider used. */
+/**
+ * This message's counts, already split by the convention its provider used.
+ * The cache numbers are the input side and the reasoning count is taken off the
+ * answer, because those are the tokens that produced no words anyone read.
+ */
 fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
-    inputFresh = freshInputTokens(),
-    inputTotal = totalInputTokens(),
-    outputAnswer = (tokensOut - reasoningTokens).coerceAtLeast(0),
-    outputTotal = tokensOut,
     cacheRead = cacheRead,
     cacheWrite = cacheWrite,
     reasoning = reasoningTokens,
+    output = (tokensOut - reasoningTokens).coerceAtLeast(0),
     ratePerSecond = if (durationMs > 0 && tokensOut > 0) tokensOut * 1000.0 / durationMs else 0.0,
     millis = durationMs,
+    model = model,
 )
 
 /**
@@ -410,46 +400,36 @@ fun TurnStatsLine(
     if (stats.startedAtMs == 0L && model.isBlank()) return
     val tokens = stats.outputTokensNow()
     val counts = TokenCounts(
-        inputFresh = stats.freshInputTokens(),
-        inputTotal = stats.totalInputTokens(),
-        outputAnswer = (tokens - stats.reasoningTokens).coerceAtLeast(0),
-        outputTotal = tokens,
         cacheRead = stats.cacheRead,
         cacheWrite = stats.cacheWrite,
         reasoning = stats.reasoningTokens,
+        output = (tokens - stats.reasoningTokens).coerceAtLeast(0),
         ratePerSecond = stats.tokensPerSecond(nowMs),
         millis = stats.elapsedMs(nowMs),
+        model = stats.model.ifBlank { model },
     )
-    val shown = counts.visible(fields)
-    if (stats.model.isBlank() && model.isBlank() && shown.isEmpty()) return
-    val route = stats.model.ifBlank { model }
-    val mark = if (stats.exact) "" else "≈"
-    val body = if (stats.exact) {
-        counts.render(fields)
-    } else {
-        // While streaming the split is an estimate of a total, so the second
-        // half of each pair is left off rather than printed as a wrong number.
-        estimatedCounts(counts, fields).render(fields)
+    if (counts.visible(fields).isEmpty()) return
+    val body = counts.lines(fields)
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        body.forEach { line ->
+            Text(
+                if (stats.exact) line else line + "\u2248",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        if (live && stats.running) {
+            Text(
+                stringResource(R.string.sub_agent_running),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
     }
-    Text(
-        text = buildString {
-            if (route.isNotBlank()) append(route).append(" · ")
-            append(body)
-            if (!stats.exact) append(mark)
-            if (live && stats.running) append(" · ").append(stringResource(R.string.sub_agent_running))
-        },
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 2,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    )
 }
-
-/** The same row with the unknown halves dropped, for a turn still running. */
-private fun estimatedCounts(counts: TokenCounts, fields: List<TokenField>) = counts.copy(
-    inputTotal = counts.inputFresh,
-    outputTotal = counts.outputAnswer,
-)
 
 /**
  * Sub-agent activity rows with per-job stop — stays in the display module so
