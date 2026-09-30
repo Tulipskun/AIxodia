@@ -71,6 +71,8 @@ class TokenFormatTest {
         val spec = "Input,Output,Rate,Model,Time"
         assertEquals(spec, TokenField.render(TokenField.parse(spec)))
         assertEquals(spec, TokenField.render(TokenField.parse("input,output,rate,model,time")))
+        // And the short forms the footer itself shows.
+        assertEquals(spec, TokenField.render(TokenField.parse("in,out,rate,model,time")))
     }
 
     @Test

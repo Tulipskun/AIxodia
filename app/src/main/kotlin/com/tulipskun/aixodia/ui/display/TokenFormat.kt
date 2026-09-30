@@ -29,30 +29,32 @@ fun formatSeconds(millis: Long): String = when {
  * zero there would read as a measurement rather than as "this provider does not
  * say".
  */
-enum class TokenField {
+enum class TokenField(val aliases: List<String>) {
     /** `in: cacheRead/cacheWrite` */
-    Input,
+    Input(listOf("in", "input")),
 
     /** `out: reasoning/output` */
-    Output,
+    Output(listOf("out", "output")),
 
     /** `12 t/s` */
-    Rate,
+    Rate(listOf("rate", "tps", "t/s")),
 
     /** the model name on its own */
-    Model,
+    Model(listOf("model")),
 
     /** the elapsed time and the wall clock, together */
-    Time,
+    Time(listOf("time", "clock")),
     ;
 
     companion object {
         val DEFAULT: List<TokenField> = listOf(Input, Output, Rate, Model, Time)
 
         /**
-         * Both spellings resolve: the enum name (`Output`) and the lower-case
-         * form a reader would type. The name is tried first so a typo cannot
-         * collide with another field.
+         * Every spelling a reader might type resolves: the enum name, the short
+         * form the footer shows (`in`, `out`, `t/s`), and the word the field is
+         * called. The names are tried first so a typo cannot collide with an
+         * alias, and an unusable spec falls back to the default rather than
+         * blanking the footer.
          */
         fun parse(spec: String): List<TokenField> =
             spec.split(',', ' ', '|', '\n')
@@ -60,7 +62,7 @@ enum class TokenField {
                 .filter { it.isNotEmpty() }
                 .mapNotNull { token ->
                     entries.firstOrNull { it.name.equals(token, ignoreCase = true) }
-                        ?: entries.firstOrNull { it.name.lowercase() == token.lowercase() }
+                        ?: entries.firstOrNull { entry -> entry.aliases.any { it.equals(token, ignoreCase = true) } }
                 }
                 .distinct()
                 .ifEmpty { DEFAULT }
