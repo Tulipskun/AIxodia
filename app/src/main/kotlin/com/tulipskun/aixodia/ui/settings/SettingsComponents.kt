@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -148,8 +149,8 @@ fun LabelledField(
     minLines: Int = 1,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
-    trailing: @Composable (() -> Unit)? = null,
-    leading: @Composable (() -> Unit)? = null,
+    trailing: @Composable (RowScope.() -> Unit)? = null,
+    leading: @Composable (RowScope.() -> Unit)? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -161,8 +162,20 @@ fun LabelledField(
         minLines = minLines,
         visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptions,
-        trailingIcon = trailing,
-        leadingIcon = leading,
+        trailingIcon = trailing?.let(::iconRow),
+        leadingIcon = leading?.let(::iconRow),
         modifier = modifier.fillMaxWidth(),
     )
+}
+
+/**
+ * Material hands the trailing and leading slots a single centred box, so two
+ * icons emitted into it land on top of each other instead of beside each
+ * other — which is exactly how the token field came to have its paste and
+ * visibility buttons stacked. The slots are typed as [RowScope] and wrapped
+ * here, so a caller cannot produce an overlap by listing two icons.
+ */
+@Composable
+private fun iconRow(content: @Composable RowScope.() -> Unit): @Composable () -> Unit = {
+    Row(verticalAlignment = Alignment.CenterVertically, content = content)
 }

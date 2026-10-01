@@ -343,3 +343,8 @@
   assertively, because a red banner that no screen reader speaks about is the one
   moment a reader most needs to hear. Every gesture a message offers names itself,
   so a control never announces itself and then does nothing.
+- AX-108 — A control is reachable, not merely drawn. Two actions in the same slot
+  of a field sit side by side and each one is pressable, so the token field's paste
+  and reveal buttons are two buttons and not one shape where the two overlap. A
+  control does not go dead because the field beside it happens to be revealed: what
+  is on screen can always be acted on.

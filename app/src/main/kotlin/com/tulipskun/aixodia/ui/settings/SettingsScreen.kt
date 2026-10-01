@@ -225,7 +225,6 @@ fun SettingsScreen(
                     trailing = {
                         IconButton(
                             onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
-                            enabled = !showToken,
                         ) { Icon(Icons.Default.ContentCopy, contentDescription = "วางจากคลิปบอร์ด") }
                         IconButton(onClick = { showToken = !showToken }) {
                             Icon(
