@@ -222,12 +222,13 @@ fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT)
 fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
     cacheRead = cacheRead,
     // The second half of in: is the part of the prompt the cache could not help
-    // with — the tokens that had to be processed fresh. Whether the provider
-    // counted that separately or folded it into the prompt total, it is the
-    // difference between the two, so it is derived rather than read. Rows
-    // recorded before the daemon sent inputIncludesCache carry the default, and
-    // deriving it makes those right too.
-    cacheWrite = if (inputIncludesCache) 0 else freshInputTokens(),
+    // with — total input minus what the cache served. Derived by subtraction from
+    // the two numbers the provider gave, so it does not depend on a convention
+    // flag: every row on the device, including those recorded before that flag
+    // existed, adds up to the prompt. When the cache figure exceeds the prompt
+    // figure the provider counted them separately, and then all of the prompt
+    // is fresh.
+    cacheWrite = if (cacheRead <= tokensIn) tokensIn - cacheRead else tokensIn,
     // Anthropic has no thinking count in its usage; OpenAI and Gemini report a
     // real one, zero on a model that does not think.
     reportsReasoning = inputIncludesCache,

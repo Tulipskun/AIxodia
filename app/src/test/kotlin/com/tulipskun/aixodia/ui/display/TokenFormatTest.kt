@@ -71,11 +71,11 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `the cache pair is always two numbers`() {
-        // The second half is derived as the prompt the cache could not serve, so
-        // it exists under either provider convention and the pair never collapses
-        // to a single figure with a slash pointing at nothing.
-        assertEquals("in: 63524/277", openAi.copy(cacheWrite = 277)
+    fun `the cache pair is the two halves, not the total`() {
+        // The second half is what the cache could not serve, so the two figures
+        // add up to the prompt rather than one of them being the prompt.
+        assertEquals("in: 63524/277", openAi.render(listOf(TokenField.Input)).lines().first())
+        assertEquals("in: 0/1926", openAi.copy(cacheRead = 0, cacheWrite = 1926)
             .render(listOf(TokenField.Input)).lines().first())
     }
 
