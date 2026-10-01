@@ -339,3 +339,7 @@
   carries no name because it is the conversation; a sub agent's answer gets a thin
   rule in the margin in its own colour and the name above it in that colour, so
   the thread is scannable without decoding a word of every turn.
+- AX-107 — Nothing important is visual-only. A lost connection is announced
+  assertively, because a red banner that no screen reader speaks about is the one
+  moment a reader most needs to hear. Every gesture a message offers names itself,
+  so a control never announces itself and then does nothing.
