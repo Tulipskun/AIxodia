@@ -80,6 +80,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -129,10 +130,10 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryApi, socket: AiDirectSocket) {
-    val endpoint by settings.endpointFlow.collectAsState(initial = "")
-    val token by settings.tokenFlow.collectAsState(initial = "")
+    val endpoint by settings.endpointFlow.collectAsStateWithLifecycle(initial = "")
+    val token by settings.tokenFlow.collectAsStateWithLifecycle(initial = "")
     val configured = endpoint.isNotBlank() && token.isNotBlank()
-    val sessId by settings.sessionFlow.collectAsState(initial = "")
+    val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initial = "")
     var showSettings by remember { mutableStateOf(false) }
 
     // Settings is a screen branch of the chat, not a separate Android route: the
@@ -155,34 +156,34 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     }
 
     val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, settings, sessId) }
-    val messages by vm.messages.collectAsState(initial = emptyList())
-    val sessions by vm.sessions.collectAsState(initial = emptyList())
-    val conn by vm.conn.collectAsState(initial = ConnState.OFFLINE)
-    val socketErr by vm.socketError.collectAsState(initial = 0)
-    val status by vm.status.collectAsState()
-    val notice by vm.notice.collectAsState()
-    val busy by vm.busy.collectAsState()
-    val liveText by vm.liveText.collectAsState()
-    val liveThinkingMs by vm.liveThinkingMs.collectAsState()
-    val liveThinkingAgent by vm.liveThinkingAgent.collectAsState()
-    val liveSteps by vm.liveSteps.collectAsState()
-    val subAgents by vm.subAgents.collectAsState()
+    val messages by vm.messages.collectAsStateWithLifecycle(initial = emptyList())
+    val sessions by vm.sessions.collectAsStateWithLifecycle(initial = emptyList())
+    val conn by vm.conn.collectAsStateWithLifecycle(initial = ConnState.OFFLINE)
+    val socketErr by vm.socketError.collectAsStateWithLifecycle(initial = 0)
+    val status by vm.status.collectAsStateWithLifecycle()
+    val notice by vm.notice.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val liveText by vm.liveText.collectAsStateWithLifecycle()
+    val liveThinkingMs by vm.liveThinkingMs.collectAsStateWithLifecycle()
+    val liveThinkingAgent by vm.liveThinkingAgent.collectAsStateWithLifecycle()
+    val liveSteps by vm.liveSteps.collectAsStateWithLifecycle()
+    val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val stats by vm.turnStats.collectAsState()
+    val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
     // differs: Anthropic has no reasoning count to show.
-    val tokenFields by vm.tokenFields.collectAsState(initial = TokenField.DEFAULT)
-    val providers by vm.providers.collectAsState()
-    val providerStatuses by vm.providerStatuses.collectAsState()
-    val pickedProvider by vm.selectedProvider.collectAsState()
-    val pickedModel by vm.selectedModel.collectAsState()
-    val hasStoredRoute by vm.hasStoredRoute.collectAsState()
+    val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initial = TokenField.DEFAULT)
+    val providers by vm.providers.collectAsStateWithLifecycle()
+    val providerStatuses by vm.providerStatuses.collectAsStateWithLifecycle()
+    val pickedProvider by vm.selectedProvider.collectAsStateWithLifecycle()
+    val pickedModel by vm.selectedModel.collectAsStateWithLifecycle()
+    val hasStoredRoute by vm.hasStoredRoute.collectAsStateWithLifecycle()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    var draft by remember { mutableStateOf("") }
+    var draft by rememberSaveable { mutableStateOf("") }
     var pending by remember { mutableStateOf<ChatSession?>(null) }
     var renameTarget by remember { mutableStateOf<ChatSession?>(null) }
-    var renameText by remember { mutableStateOf("") }
+    var renameText by rememberSaveable { mutableStateOf("") }
     var deleting by remember { mutableStateOf<ChatSession?>(null) }
     var showModelPicker by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf<ChatMessage?>(null) }
@@ -472,7 +473,7 @@ private fun ChatModelSheet(
     onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val provider = providers.firstOrNull { it.id == pickedProvider }
     val models = provider?.models.orEmpty()
     // The daemon's default model is the one a health check actually got an

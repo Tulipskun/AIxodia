@@ -64,10 +64,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -113,17 +115,17 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val curEndpoint by settings.endpointFlow.collectAsState(initial = "")
-    val curWs by settings.wsUrlFlow.collectAsState(initial = "")
-    val curToken by settings.tokenFlow.collectAsState(initial = "")
-    val curAccount by settings.accountIdFlow.collectAsState(initial = "")
-    val curDatabase by settings.databaseIdFlow.collectAsState(initial = "")
-    val curSession by settings.sessionFlow.collectAsState(initial = "default")
-    val conn by socket.state.collectAsState(initial = ConnState.OFFLINE)
-    val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsState(initial = emptyList())
+    val curEndpoint by settings.endpointFlow.collectAsStateWithLifecycle(initial = "")
+    val curWs by settings.wsUrlFlow.collectAsStateWithLifecycle(initial = "")
+    val curToken by settings.tokenFlow.collectAsStateWithLifecycle(initial = "")
+    val curAccount by settings.accountIdFlow.collectAsStateWithLifecycle(initial = "")
+    val curDatabase by settings.databaseIdFlow.collectAsStateWithLifecycle(initial = "")
+    val curSession by settings.sessionFlow.collectAsStateWithLifecycle(initial = "default")
+    val conn by socket.state.collectAsStateWithLifecycle(initial = ConnState.OFFLINE)
+    val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsStateWithLifecycle(initial = emptyList())
 
-    var address by remember(curEndpoint) { mutableStateOf(curEndpoint) }
-    var token by remember(curToken) { mutableStateOf(curToken) }
+    var address by rememberSaveable(curEndpoint) { mutableStateOf(curEndpoint) }
+    var token by rememberSaveable(curToken) { mutableStateOf(curToken) }
     var showToken by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -173,7 +175,10 @@ fun SettingsScreen(
     // The provider list, the model catalogue and the saved agent routes are
     // loaded on entry, so the model picker is never empty just because nobody
     // pressed a refresh button first.
-    LaunchedEffect(Unit) { load(false) }
+    // Keyed to the session, not to Unit: the screen is a branch of the chat and
+    // comes back in place on every settings toggle, so a Unit key would load
+    // once and never again.
+    LaunchedEffect(sessionId) { load(false) }
 
     val modelsByProvider = remember(catalogue) { catalogue.associate { it.id to it.models } }
     val routable = remember(providers) {
@@ -648,7 +653,7 @@ private fun ProviderCard(
     testing: Boolean,
     onDelete: () -> Unit,
 ) {
-    var key by remember { mutableStateOf("") }
+    var key by rememberSaveable { mutableStateOf("") }
     val scheme = MaterialTheme.colorScheme
     Card(
         colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainer),
@@ -848,7 +853,7 @@ private fun ModelSheet(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val filtered = remember(models, query) {
         if (query.isBlank()) models else models.filter { it.id.contains(query, true) || it.name.contains(query, true) }
     }
@@ -925,11 +930,11 @@ private fun AddProviderDialog(
     onDismiss: () -> Unit,
     onAdd: (String, String, String, String, Boolean) -> Unit,
 ) {
-    var id by remember { mutableStateOf("") }
-    var adapter by remember { mutableStateOf("openai") }
-    var endpoint by remember { mutableStateOf("") }
-    var key by remember { mutableStateOf("") }
-    var freeOnly by remember { mutableStateOf(false) }
+    var id by rememberSaveable { mutableStateOf("") }
+    var adapter by rememberSaveable { mutableStateOf("openai") }
+    var endpoint by rememberSaveable { mutableStateOf("") }
+    var key by rememberSaveable { mutableStateOf("") }
+    var freeOnly by rememberSaveable { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("เพิ่ม provider") },
@@ -987,7 +992,7 @@ private fun ReplaceKeysDialog(
     onDismiss: () -> Unit,
     onReplace: (List<String>) -> Unit,
 ) {
-    var text by remember { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf("") }
     val keys = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1061,7 +1066,7 @@ private fun NodeCard(
 private fun UpdateRow(settings: SettingsStore) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
-    var msg by remember { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
+    var msg by rememberSaveable { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)

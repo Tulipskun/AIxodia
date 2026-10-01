@@ -35,7 +35,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 // Answers come back as Markdown, and a phone is a bad place to show the source
 // of it: `**bold**` and `- item` and ```fences``` have to read as a document,
@@ -365,9 +364,11 @@ fun MarkdownText(
     val parsed = remember(text) { blocks(text) }
     // Inline code reads as a quiet pill, not a black box: a name the user is
     // meant to notice, not one that competes with the sentence around it.
+    // The size comes from the theme rather than a literal, so a text-scale change
+    // or a font swap moves the code with the sentence around it.
     val codeStyle = SpanStyle(
         fontFamily = FontFamily.Monospace,
-        fontSize = 13.sp,
+        fontSize = MaterialTheme.typography.bodySmall.fontSize,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         background = MaterialTheme.colorScheme.surfaceContainerHigh,
     )
