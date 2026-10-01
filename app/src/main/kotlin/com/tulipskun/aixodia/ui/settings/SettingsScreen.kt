@@ -115,14 +115,14 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val curEndpoint by settings.endpointFlow.collectAsStateWithLifecycle(initial = "")
-    val curWs by settings.wsUrlFlow.collectAsStateWithLifecycle(initial = "")
-    val curToken by settings.tokenFlow.collectAsStateWithLifecycle(initial = "")
-    val curAccount by settings.accountIdFlow.collectAsStateWithLifecycle(initial = "")
-    val curDatabase by settings.databaseIdFlow.collectAsStateWithLifecycle(initial = "")
-    val curSession by settings.sessionFlow.collectAsStateWithLifecycle(initial = "default")
-    val conn by socket.state.collectAsStateWithLifecycle(initial = ConnState.OFFLINE)
-    val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsStateWithLifecycle(initial = emptyList<TokenField>())
+    val curEndpoint by settings.endpointFlow.collectAsStateWithLifecycle(initialValue = "")
+    val curWs by settings.wsUrlFlow.collectAsStateWithLifecycle(initialValue = "")
+    val curToken by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
+    val curAccount by settings.accountIdFlow.collectAsStateWithLifecycle(initialValue = "")
+    val curDatabase by settings.databaseIdFlow.collectAsStateWithLifecycle(initialValue = "")
+    val curSession by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "default")
+    val conn by socket.state.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
+    val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsStateWithLifecycle(initialValue = emptyList<TokenField>())
 
     var address by rememberSaveable(curEndpoint) { mutableStateOf(curEndpoint) }
     var token by rememberSaveable(curToken) { mutableStateOf(curToken) }

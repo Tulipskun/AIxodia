@@ -130,10 +130,10 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryApi, socket: AiDirectSocket) {
-    val endpoint by settings.endpointFlow.collectAsStateWithLifecycle(initial = "")
-    val token by settings.tokenFlow.collectAsStateWithLifecycle(initial = "")
+    val endpoint by settings.endpointFlow.collectAsStateWithLifecycle(initialValue = "")
+    val token by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
     val configured = endpoint.isNotBlank() && token.isNotBlank()
-    val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initial = "")
+    val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     var showSettings by remember { mutableStateOf(false) }
 
     // Settings is a screen branch of the chat, not a separate Android route: the
@@ -156,10 +156,10 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     }
 
     val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, settings, sessId) }
-    val messages by vm.messages.collectAsStateWithLifecycle(initial = emptyList())
-    val sessions by vm.sessions.collectAsStateWithLifecycle(initial = emptyList())
-    val conn by vm.conn.collectAsStateWithLifecycle(initial = ConnState.OFFLINE)
-    val socketErr by vm.socketError.collectAsStateWithLifecycle(initial = 0)
+    val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
+    val sessions by vm.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val conn by vm.conn.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
+    val socketErr by vm.socketError.collectAsStateWithLifecycle(initialValue = 0)
     val status by vm.status.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -172,7 +172,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
     // differs: Anthropic has no reasoning count to show.
-    val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initial = TokenField.DEFAULT)
+    val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initialValue = TokenField.DEFAULT)
     val providers by vm.providers.collectAsStateWithLifecycle()
     val providerStatuses by vm.providerStatuses.collectAsStateWithLifecycle()
     val pickedProvider by vm.selectedProvider.collectAsStateWithLifecycle()
