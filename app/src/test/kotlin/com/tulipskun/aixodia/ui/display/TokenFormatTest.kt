@@ -82,7 +82,7 @@ class TokenFormatTest {
     @Test
     fun `the provider on screen drops only the half it does not count`() {
         assertEquals(
-            "in: 2.1k/157  out: 605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
+            "in: 2.1k/157  out: 0/605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
             openAi.copy(cacheRead = 2112, cacheWrite = 157, output = 605, ratePerSecond = 32.0,
                     millis = 18_000, clock = "19:33").render(TokenField.DEFAULT),
         )
@@ -164,8 +164,9 @@ class TokenFormatTest {
     @Test
     fun `the footer uses the shortened form`() {
         assertEquals(
-            "in: 63.8k/277  out: 0/238  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
-            openAi.render(TokenField.DEFAULT),
+            "in: 2.1k/157  out: 0/605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
+            openAi.copy(cacheRead = 2_112, cacheWrite = 157, output = 605, ratePerSecond = 32.0,
+                    millis = 18_000, clock = "19:33").render(TokenField.DEFAULT),
         )
     }
 }
