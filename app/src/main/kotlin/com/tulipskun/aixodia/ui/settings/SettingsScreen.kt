@@ -53,7 +53,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -219,11 +218,11 @@ fun SettingsScreen(
                 "ใส่ Cloudflare API token ตัวเดียว — account/database ถูกค้นหาให้อัตโนมัติ (ไม่มี Worker แล้ว)",
             ) {
                 val clip = LocalClipboardManager.current
-                OutlinedTextField(
+                LabelledField(
                     value = token, onValueChange = { token = it },
-                    label = { Text("Cloudflare API token") },
+                    label = "Cloudflare API token",
                     visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
+                    trailing = {
                         IconButton(
                             onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
                             enabled = !showToken,
@@ -235,8 +234,6 @@ fun SettingsScreen(
                             )
                         }
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
@@ -281,19 +278,20 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 HorizontalDivider()
-                OutlinedTextField(
+                LabelledField(
                     value = address,
                     onValueChange = { address = it },
-                    label = { Text("ที่อยู่ daemon (tunnel) — แชทสด และ provider/model") },
-                    placeholder = { Text("https://xxxx.trycloudflare.com") },
-                    supportingText = {
-                        Text(
-                            if (address.isBlank()) "เว้นว่างได้: ประวัติยังอ่าน/เขียนได้จาก D1 ตรง"
-                            else "สดจะต่อ wss://<host>/ws และ provider/model จะถาม daemon ที่นี่",
-                        )
+                    label = "ที่อยู่ daemon (tunnel)",
+                    placeholder = "https://xxxx.trycloudflare.com",
+                    hint = if (address.isBlank()) {
+                        "เว้นว่างได้ — ประวัติยังอ่าน/เขียนจาก D1 ตรง · แชทสดจะต่อ wss://<host>/ws"
+                    } else {
+                        "แชทสดจะต่อ wss://<host>/ws · provider/model จะถาม daemon ที่นี่"
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+                    // A tunnel URL is long and has nowhere to break, so it wraps
+                    // rather than ending mid-word at the field's edge.
+                    singleLine = false,
+                    minLines = 2,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
@@ -436,19 +434,20 @@ fun SettingsScreen(
 
             SectionCard(
                 stringResource(R.string.token_fields_label),
-                stringResource(R.string.token_fields_help),
+                stringResource(R.string.token_fields_subtitle),
             ) {
                 var fieldSpec by remember(curEndpoint, tokenFields) {
                     mutableStateOf(
                         if (tokenFields.isEmpty()) "" else TokenField.render(tokenFields),
                     )
                 }
-                OutlinedTextField(
+                LabelledField(
                     value = fieldSpec,
                     onValueChange = { fieldSpec = it },
-                    label = { Text(stringResource(R.string.token_fields_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    label = stringResource(R.string.token_fields_label),
+                    hint = stringResource(R.string.token_fields_help),
+                    singleLine = false,
+                    minLines = 2,
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -696,13 +695,12 @@ private fun ProviderCard(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val clip = LocalClipboardManager.current
-                OutlinedTextField(
+                LabelledField(
                     value = key,
                     onValueChange = { key = it },
-                    label = { Text("เพิ่ม API key") },
-                    singleLine = true,
+                    label = "เพิ่ม API key",
                     modifier = Modifier.weight(1f),
-                    trailingIcon = {
+                    trailing = {
                         IconButton(onClick = {
                             clip.getText()?.text?.let { if (it.isNotBlank()) key = it.trim() }
                         }) { Icon(Icons.Default.ContentCopy, contentDescription = "วาง key จากคลิปบอร์ด") }
@@ -863,13 +861,11 @@ private fun ModelSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
+            LabelledField(
                 value = query,
                 onValueChange = { query = it },
-                singleLine = true,
-                label = { Text("ค้นหาโมเดล") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth(),
+                label = "ค้นหาโมเดล",
+                leading = { Icon(Icons.Default.Search, contentDescription = null) },
             )
             when {
                 provider.isBlank() -> Text(
@@ -943,22 +939,19 @@ private fun AddProviderDialog(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedTextField(
+                LabelledField(
                     value = id, onValueChange = { id = it },
-                    label = { Text("ชื่อ (เช่น my-gateway)") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    label = "ชื่อ", placeholder = "my-gateway",
                 )
-                OutlinedTextField(
+                LabelledField(
                     value = endpoint, onValueChange = { endpoint = it },
-                    label = { Text("endpoint") }, singleLine = true,
-                    placeholder = { Text("https://api.example.com/v1") },
-                    modifier = Modifier.fillMaxWidth(),
+                    label = "endpoint", placeholder = "https://api.example.com/v1",
+                    singleLine = false, minLines = 2,
                 )
-                OutlinedTextField(
+                LabelledField(
                     value = key, onValueChange = { key = it },
-                    label = { Text("API key") }, singleLine = true,
+                    label = "API key",
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
                 )
                 Text("adapter", style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1000,12 +993,12 @@ private fun ReplaceKeysDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("ใส่ key ทีละบรรทัด — pool เดิมจะถูกแทนที่ทั้งหมด", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(
+                LabelledField(
                     value = text, onValueChange = { text = it },
-                    label = { Text("key (บรรทัดละ 1) ตอนนี้ ${provider.keyCount} ตัว") },
-                    minLines = 3,
+                    label = "key",
+                    hint = "บรรทัดละ 1 · ตอนนี้ ${provider.keyCount} ตัว",
+                    singleLine = false, minLines = 3,
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
@@ -1027,7 +1020,12 @@ private fun NodeCard(
     var err by remember { mutableStateOf("") }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("ค้นหา ai daemon จากแถว nodes ใน D1", style = MaterialTheme.typography.titleSmall)
+        HorizontalDivider()
+        Text(
+            "ค้นหา ai daemon จากแถว nodes ใน D1",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {

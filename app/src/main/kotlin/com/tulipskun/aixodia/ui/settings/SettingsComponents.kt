@@ -11,15 +11,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.AgentRoute
 
@@ -118,4 +121,48 @@ fun PickerRow(label: String, value: String, hint: String = "", onPick: () -> Uni
             Icon(Icons.Default.ExpandMore, contentDescription = null)
         }
     }
+}
+
+/**
+ * One text field, one anatomy: short label, the box, then the explanation.
+ *
+ * The screen used to write `OutlinedTextField` nine times with the label, the
+ * placeholder and the explanation arranged differently in each place. One of them
+ * put a whole sentence in the label — "ที่อยู่ daemon (tunnel) — แชทสด และ
+ * provider/model" — which wrapped to two lines and drew the second line across
+ * the field's own outline.
+ *
+ * A Material label floats above the box, so it has to stay a label. Anything that
+ * needs explaining belongs in [hint], which sits under the box where there is
+ * room for it, and is omitted when there is nothing to say.
+ */
+@Composable
+fun LabelledField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    hint: String? = null,
+    placeholder: String? = null,
+    singleLine: Boolean = true,
+    minLines: Int = 1,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    trailing: @Composable (() -> Unit)? = null,
+    leading: @Composable (() -> Unit)? = null,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        placeholder = placeholder?.let { { Text(it) } },
+        supportingText = hint?.let { { Text(it) } },
+        singleLine = singleLine,
+        minLines = minLines,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        trailingIcon = trailing,
+        leadingIcon = leading,
+        modifier = modifier.fillMaxWidth(),
+    )
 }
