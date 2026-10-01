@@ -38,7 +38,7 @@ enum class TokenField(val aliases: List<String>) {
     /** `out: output`, with `/reasoning` only when the provider reports thinking */
     Output(listOf("out", "output")),
 
-    /** `12 t/s` */
+    /** `32t/s` */
     Rate(listOf("rate", "tps", "t/s")),
 
     /** the model name on its own */
@@ -119,7 +119,7 @@ data class TokenCounts(
             TokenField.Input -> "in: $cacheRead/$cacheWrite"
             TokenField.Output ->
                 if (reportsReasoning) "out: $reasoning/$output" else "out: $output"
-            TokenField.Rate -> String.format(Locale.US, "%.0f t/s", ratePerSecond)
+            TokenField.Rate -> String.format(Locale.US, "%.0ft/s", ratePerSecond)
             TokenField.Model -> model
             // The gap belongs between the two halves and there is nothing to put
             // after it when the clock is missing.

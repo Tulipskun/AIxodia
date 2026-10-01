@@ -27,7 +27,7 @@ class TokenFormatTest {
         // A rate is a count per second, so it belongs on the line with the
         // counts; the model and the clock are about which turn this was.
         assertEquals(
-            "in: 1/0  out: 0/1  7 t/s\nmodel-x · ⏱ 1.0s  09:00",
+            "in: 1/0  out: 0/1  7t/s\nmodel-x · ⏱ 1.0s  09:00",
             openAi.copy(cacheRead = 1, cacheWrite = 0, reasoning = 0, output = 1, ratePerSecond = 7.0, millis = 1_000, model = "model-x", clock = "09:00")
                 .render(TokenField.DEFAULT),
         )
@@ -82,7 +82,7 @@ class TokenFormatTest {
     @Test
     fun `the provider on screen drops only the half it does not count`() {
         assertEquals(
-            "in: 2112/157  out: 0/605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
+            "in: 2112/157  out: 0/605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
             openAi.copy(cacheRead = 2112, cacheWrite = 157, output = 605, ratePerSecond = 32.0,
                     millis = 18_000, clock = "19:33").render(TokenField.DEFAULT),
         )
