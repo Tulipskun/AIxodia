@@ -122,7 +122,7 @@ fun SettingsScreen(
     val curDatabase by settings.databaseIdFlow.collectAsStateWithLifecycle(initial = "")
     val curSession by settings.sessionFlow.collectAsStateWithLifecycle(initial = "default")
     val conn by socket.state.collectAsStateWithLifecycle(initial = ConnState.OFFLINE)
-    val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsStateWithLifecycle(initial = emptyList())
+    val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsStateWithLifecycle(initial = emptyList<TokenField>())
 
     var address by rememberSaveable(curEndpoint) { mutableStateOf(curEndpoint) }
     var token by rememberSaveable(curToken) { mutableStateOf(curToken) }
