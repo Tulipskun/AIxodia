@@ -32,6 +32,7 @@
     <string name="live_answering">กำลังตอบ</string>
     <string name="live_thinking">กำลังคิด · %1$s</string>
     <string name="copied">คัดลอกข้อความแล้ว</string>
+    <string name="copy_long_press">คัดลอกข้อความ</string>
     <string name="token_fields_label">แสดงตัวเลข token</string>
     <string name="token_fields_help">คั่นด้วยจุลภาค เรียงตามลำดับที่อยากเห็น\nใส่ได้: in out rate model time\nค่าเริ่มต้น: in,out,rate,model,time</string>
 </resources>

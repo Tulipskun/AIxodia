@@ -67,6 +67,7 @@ fun MessageBlock(
     startsAfterUser: Boolean = false,
     onCopy: () -> Unit = {},
     tokenFields: List<TokenField> = TokenField.DEFAULT,
+    copyLabel: String = "",
 ) {
     val mine = m.role == "user"
     val isTool = m.role == "tool_call" || m.role == "tool_result"
@@ -120,7 +121,15 @@ fun MessageBlock(
                     .padding(top = 4.dp)
                     .widthIn(max = 760.dp)
                     .fillMaxWidth(if (mine) 1f else 0.94f)
-                    .combinedClickable(onClick = {}, onLongClick = onCopy),
+                    .combinedClickable(
+                        // A tap that does nothing is worse than no tap: it
+                        // announces itself as a button and then does not
+                        // behave like one. Only the long press that copies is
+                        // offered, and it says so.
+                        onClick = {},
+                        onLongClick = onCopy,
+                        onLongClickLabel = copyLabel,
+                    ),
             ) {
                 Text(
                     body,
@@ -144,7 +153,15 @@ fun MessageBlock(
                     // the same slab, which is not how a bubble reads.
                     .fillMaxWidth(0.88f)
                     .wrapContentWidth(align = Alignment.End)
-                    .combinedClickable(onClick = {}, onLongClick = onCopy),
+                    .combinedClickable(
+                        // A tap that does nothing is worse than no tap: it
+                        // announces itself as a button and then does not
+                        // behave like one. Only the long press that copies is
+                        // offered, and it says so.
+                        onClick = {},
+                        onLongClick = onCopy,
+                        onLongClickLabel = copyLabel,
+                    ),
             ) {
                 Column(
                     Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp),
@@ -182,7 +199,15 @@ fun MessageBlock(
                         .padding(start = if (m.agent != "main" && m.agent.isNotBlank()) 10.dp else 0.dp)
                         .widthIn(max = 760.dp)
                         .weight(1f, fill = false)
-                        .combinedClickable(onClick = {}, onLongClick = onCopy),
+                        .combinedClickable(
+                        // A tap that does nothing is worse than no tap: it
+                        // announces itself as a button and then does not
+                        // behave like one. Only the long press that copies is
+                        // offered, and it says so.
+                        onClick = {},
+                        onLongClick = onCopy,
+                        onLongClickLabel = copyLabel,
+                    ),
                 )
             }
         }

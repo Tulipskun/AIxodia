@@ -436,6 +436,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
                             toast = context.getString(R.string.copied)
                         },
                         tokenFields = tokenFields,
+                        copyLabel = context.getString(R.string.copy_long_press),
                     )
                 }
                 // The answer being streamed right now. It is not in the

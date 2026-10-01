@@ -26,6 +26,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
@@ -132,7 +135,13 @@ fun OfflineBanner(@StringRes messageRes: Int, onRetry: () -> Unit) {
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
         shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            // A red box is a visual-only error: nothing announced it, so a
+            // screen reader user finds out only when they reach the text by
+            // accident. Assertive because it interrupts to say the app is down.
+            .semantics { liveRegion = LiveRegionMode.Assertive },
     ) {
         Row(
             Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),

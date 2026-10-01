@@ -24,6 +24,7 @@
     <string name="live_answering">answering</string>
     <string name="live_thinking">thinking · %1$s</string>
     <string name="copied">Message copied</string>
+    <string name="copy_long_press">Copy message</string>
     <string name="token_fields_label">Token counts shown</string>
     <string name="token_fields_help">Comma separated, in the order you want to read them\nAvailable: in out rate model time\nDefault: in,out,rate,model,time</string>
 </resources>
