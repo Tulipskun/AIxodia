@@ -162,8 +162,8 @@ fun LabelledField(
         minLines = minLines,
         visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptions,
-        trailingIcon = trailing?.let(::iconRow),
-        leadingIcon = leading?.let(::iconRow),
+        trailingIcon = trailing?.let(::iconRowSlot),
+        leadingIcon = leading?.let(::iconRowSlot),
         modifier = modifier.fillMaxWidth(),
     )
 }
@@ -175,7 +175,6 @@ fun LabelledField(
  * visibility buttons stacked. The slots are typed as [RowScope] and wrapped
  * here, so a caller cannot produce an overlap by listing two icons.
  */
-@Composable
-private fun iconRow(content: @Composable RowScope.() -> Unit): @Composable () -> Unit = {
+private fun iconRowSlot(content: @Composable RowScope.() -> Unit): @Composable () -> Unit = {
     Row(verticalAlignment = Alignment.CenterVertically, content = content)
 }
