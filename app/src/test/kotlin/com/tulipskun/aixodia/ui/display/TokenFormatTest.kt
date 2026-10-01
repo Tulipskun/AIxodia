@@ -37,7 +37,7 @@ class TokenFormatTest {
     fun `two lines hold the two pairs and then the turn`() {
         assertEquals(
             """
-            in: 63524/277  out: 0/238  12t/s
+            in: 63.5k/277  out: 0/238  12t/s
             mimo-v2.5-free · ⏱ 19s  19:28
             """.trimIndent(),
             openAi.render(TokenField.DEFAULT),
@@ -50,7 +50,7 @@ class TokenFormatTest {
         // halves is the provider's figure, not something the app measures.
         val text = openAi.render(TokenField.DEFAULT)
         assertEquals(false, text.contains("127125"))
-        assertEquals(listOf("in: 63524/277", "out: 0/238"), openAi.copy(cacheWrite = 277).lines(TokenField.DEFAULT).take(2))
+        assertEquals(listOf("in: 63.5k/277", "out: 0/238"), openAi.copy(cacheWrite = 277).lines(TokenField.DEFAULT).take(2))
     }
 
     @Test
@@ -74,7 +74,7 @@ class TokenFormatTest {
     fun `the cache pair is the two halves, not the total`() {
         // The second half is what the cache could not serve, so the two figures
         // add up to the prompt rather than one of them being the prompt.
-        assertEquals("in: 63524/277", openAi.render(listOf(TokenField.Input)).lines().first())
+        assertEquals("in: 63.5k/277", openAi.render(listOf(TokenField.Input)).lines().first())
         assertEquals("in: 0/1926", openAi.copy(cacheRead = 0, cacheWrite = 1926)
             .render(listOf(TokenField.Input)).lines().first())
     }
@@ -102,7 +102,7 @@ class TokenFormatTest {
     @Test
     fun `the order is the configured order inside one line`() {
         assertEquals(
-            "in: 63524/277  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
+            "in: 63.5k/277  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
             openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
         )
     }
@@ -137,5 +137,35 @@ class TokenFormatTest {
     @Test
     fun `a turn with no counts at all renders nothing rather than a blank line`() {
         assertEquals("", TokenCounts().render(TokenField.DEFAULT))
+    }
+
+    @Test
+    fun `a count stays whole until it stops being readable`() {
+        // Six digits is where counting stops working in your head.
+        assertEquals("0", formatCount(0))
+        assertEquals("999", formatCount(999))
+        assertEquals("1.0k", formatCount(1_000))
+        assertEquals("1.2k", formatCount(1_234))
+        assertEquals("63.8k", formatCount(63_808))
+        assertEquals("638.1k", formatCount(638_075))
+        assertEquals("1.0M", formatCount(1_000_000))
+        assertEquals("2.5M", formatCount(2_450_000))
+        assertEquals("1.0B", formatCount(1_000_000_000))
+    }
+
+    @Test
+    fun `the decimal is always there so the figures do not change width`() {
+        // 47k and 1.2k side by side would make the line jump about as it is
+        // read; 47.0k and 1.2k do not.
+        assertEquals("1.2k", formatCount(1_200))
+        assertEquals("47.0k", formatCount(47_000))
+    }
+
+    @Test
+    fun `the footer uses the shortened form`() {
+        assertEquals(
+            "in: 63.8k/277  out: 0/238  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
+            openAi.render(TokenField.DEFAULT),
+        )
     }
 }

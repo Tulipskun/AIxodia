@@ -2,6 +2,22 @@ package com.tulipskun.aixodia.ui.display
 
 import java.util.Locale
 
+/**
+ * A token count, shortened once it stops being readable in full.
+ *
+ * Six digits is where counting stops working: 63808 is a number you can hold in
+ * your head, 127125 is not. Past that the figure is written 63.8k, and the
+ * decimal is always there so the column does not change width between 1.2k and
+ * 47k — a footer whose numbers jump about as you read them is worse than one
+ * with slightly imprecise figures.
+ */
+fun formatCount(n: Int): String = when {
+    n < 1_000 -> n.toString()
+    n < 1_000_000 -> String.format(Locale.US, "%.1fk", n / 1_000.0)
+    n < 1_000_000_000 -> String.format(Locale.US, "%.1fM", n / 1_000_000.0)
+    else -> String.format(Locale.US, "%.1fB", n / 1_000_000_000.0)
+}
+
 /** Whole seconds, or one decimal under ten, so a short turn is not "0s". */
 fun formatSeconds(millis: Long): String = when {
     millis < 10_000 -> String.format(Locale.US, "%.1fs", millis / 1000.0)
@@ -116,9 +132,13 @@ data class TokenCounts(
     /** One line per part, already formatted. Data, so a test can check the text. */
     fun lines(fields: List<TokenField>): List<String> = visible(fields).map { field ->
         when (field) {
-            TokenField.Input -> "in: $cacheRead/$cacheWrite"
+            TokenField.Input -> "in: ${formatCount(cacheRead)}/${formatCount(cacheWrite)}"
             TokenField.Output ->
-                if (reportsReasoning) "out: $reasoning/$output" else "out: $output"
+                if (reportsReasoning) {
+                    "out: ${formatCount(reasoning)}/${formatCount(output)}"
+                } else {
+                    "out: ${formatCount(output)}"
+                }
             TokenField.Rate -> String.format(Locale.US, "%.0ft/s", ratePerSecond)
             TokenField.Model -> model
             // The gap belongs between the two halves and there is nothing to put
