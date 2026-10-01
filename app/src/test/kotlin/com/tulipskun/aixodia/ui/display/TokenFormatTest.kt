@@ -37,7 +37,7 @@ class TokenFormatTest {
     fun `two lines hold the two pairs and then the turn`() {
         assertEquals(
             """
-            in: 63524/277  out: 0/238  12 t/s
+            in: 63524/277  out: 0/238  12t/s
             mimo-v2.5-free · ⏱ 19s  19:28
             """.trimIndent(),
             openAi.render(TokenField.DEFAULT),
@@ -94,7 +94,7 @@ class TokenFormatTest {
         // of zeroes, which would read as two measurements.
         val uncached = openAi.copy(cacheRead = 0, cacheWrite = 0)
         assertEquals(
-            "out: 0/238  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
+            "out: 0/238  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
             uncached.render(TokenField.DEFAULT),
         )
     }
@@ -102,7 +102,7 @@ class TokenFormatTest {
     @Test
     fun `the order is the configured order inside one line`() {
         assertEquals(
-            "in: 63524/277  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
+            "in: 63524/277  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
             openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
         )
     }
