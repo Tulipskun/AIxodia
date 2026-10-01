@@ -75,14 +75,14 @@ class TokenFormatTest {
         // The second half is what the cache could not serve, so the two figures
         // add up to the prompt rather than one of them being the prompt.
         assertEquals("in: 63.5k/277", openAi.render(listOf(TokenField.Input)).lines().first())
-        assertEquals("in: 0/1926", openAi.copy(cacheRead = 0, cacheWrite = 1926)
+        assertEquals("in: 0/1.9k", openAi.copy(cacheRead = 0, cacheWrite = 1926)
             .render(listOf(TokenField.Input)).lines().first())
     }
 
     @Test
     fun `the provider on screen drops only the half it does not count`() {
         assertEquals(
-            "in: 2112/157  out: 0/605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
+            "in: 2.1k/157  out: 605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
             openAi.copy(cacheRead = 2112, cacheWrite = 157, output = 605, ratePerSecond = 32.0,
                     millis = 18_000, clock = "19:33").render(TokenField.DEFAULT),
         )
