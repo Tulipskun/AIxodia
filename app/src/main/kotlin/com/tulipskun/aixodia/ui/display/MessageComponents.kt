@@ -221,12 +221,15 @@ fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT)
  */
 fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
     cacheRead = cacheRead,
-    cacheWrite = cacheWrite,
-    // The two halves are missing from opposite ends of the provider set, so the
-    // one flag the daemon already sends for this distinction answers both — with
-    // opposite polarity. Anthropic counts cache writes and no thinking; OpenAI
-    // and Gemini the reverse.
-    reportsCacheWrite = !inputIncludesCache,
+    // The second half of in: is the part of the prompt the cache could not help
+    // with — the tokens that had to be processed fresh. Whether the provider
+    // counted that separately or folded it into the prompt total, it is the
+    // difference between the two, so it is derived rather than read. Rows
+    // recorded before the daemon sent inputIncludesCache carry the default, and
+    // deriving it makes those right too.
+    cacheWrite = if (inputIncludesCache) 0 else freshInputTokens(),
+    // Anthropic has no thinking count in its usage; OpenAI and Gemini report a
+    // real one, zero on a model that does not think.
     reportsReasoning = inputIncludesCache,
     reasoning = reasoningTokens,
     output = (tokensOut - reasoningTokens).coerceAtLeast(0),

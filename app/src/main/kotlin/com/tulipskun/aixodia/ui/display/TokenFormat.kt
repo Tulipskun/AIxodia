@@ -80,19 +80,14 @@ data class TokenCounts(
     val cacheRead: Int = 0,
     val cacheWrite: Int = 0,
     /**
-     * Which half of each pair the provider actually counts.
+     * Whether the provider counts reasoning separately. Anthropic's usage block
+     * has no thinking count at all, so the half is dropped there; OpenAI and
+     * Gemini report one, a genuine zero on a model that does not think.
      *
-     * The two are not the same set of providers and it is worth saying why.
-     * Anthropic has an explicit cache breakpoint, so it knows what it wrote into
-     * the cache — but its usage block has no thinking count. OpenAI and Gemini
-     * cache implicitly and report reads only, and their usage does carry a
-     * reasoning count, a genuine zero on a model that does not think.
-     *
-     * So a zero from a provider that does not count the thing means "no such
-     * number", and printing it reads as a measurement. Each half drops itself
-     * rather than borrowing the other half's rule.
+     * The cache pair never needs this: its second half is derived as the part of
+     * the prompt the cache could not serve, which is the difference between the
+     * prompt total and what was read from cache either way.
      */
-    val reportsCacheWrite: Boolean = false,
     val reportsReasoning: Boolean = false,
     val reasoning: Int = 0,
     val output: Int = 0,
@@ -110,7 +105,7 @@ data class TokenCounts(
      */
     fun visible(fields: List<TokenField>): List<TokenField> = fields.filter { field ->
         when (field) {
-            TokenField.Input -> cacheRead > 0 || (reportsCacheWrite && cacheWrite > 0)
+            TokenField.Input -> cacheRead > 0 || cacheWrite > 0
             TokenField.Output -> output > 0 || reasoning > 0
             TokenField.Rate -> output > 0 && ratePerSecond > 0.0
             TokenField.Model -> model.isNotBlank()
@@ -121,8 +116,7 @@ data class TokenCounts(
     /** One line per part, already formatted. Data, so a test can check the text. */
     fun lines(fields: List<TokenField>): List<String> = visible(fields).map { field ->
         when (field) {
-            TokenField.Input ->
-                if (reportsCacheWrite) "in: $cacheRead/$cacheWrite" else "in: $cacheRead"
+            TokenField.Input -> "in: $cacheRead/$cacheWrite"
             TokenField.Output ->
                 if (reportsReasoning) "out: $reasoning/$output" else "out: $output"
             TokenField.Rate -> String.format(Locale.US, "%.0f t/s", ratePerSecond)

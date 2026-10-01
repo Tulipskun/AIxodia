@@ -12,8 +12,7 @@ class TokenFormatTest {
 
     private val openAi = TokenCounts(
         cacheRead = 63524,
-        cacheWrite = 0,
-        reportsCacheWrite = false,
+        cacheWrite = 277,
         reportsReasoning = true,
         reasoning = 0,
         output = 238,
@@ -28,7 +27,7 @@ class TokenFormatTest {
         // A rate is a count per second, so it belongs on the line with the
         // counts; the model and the clock are about which turn this was.
         assertEquals(
-            "in: 1  out: 0/1  7 t/s\nmodel-x · ⏱ 1.0s  09:00",
+            "in: 1/0  out: 0/1  7 t/s\nmodel-x · ⏱ 1.0s  09:00",
             openAi.copy(cacheRead = 1, cacheWrite = 0, reasoning = 0, output = 1, ratePerSecond = 7.0, millis = 1_000, model = "model-x", clock = "09:00")
                 .render(TokenField.DEFAULT),
         )
@@ -38,7 +37,7 @@ class TokenFormatTest {
     fun `two lines hold the two pairs and then the turn`() {
         assertEquals(
             """
-            in: 63524  out: 0/238  12 t/s
+            in: 63524/277  out: 0/238  12 t/s
             mimo-v2.5-free · ⏱ 19s  19:28
             """.trimIndent(),
             openAi.render(TokenField.DEFAULT),
@@ -51,35 +50,41 @@ class TokenFormatTest {
         // halves is the provider's figure, not something the app measures.
         val text = openAi.render(TokenField.DEFAULT)
         assertEquals(false, text.contains("127125"))
-        assertEquals(listOf("in: 63524", "out: 0/238"), openAi.lines(TokenField.DEFAULT).take(2))
+        assertEquals(listOf("in: 63524/277", "out: 0/238"), openAi.copy(cacheWrite = 277).lines(TokenField.DEFAULT).take(2))
     }
 
     @Test
     fun `a pair stays when either half has something in it`() {
-        assertEquals("in: 0/40", openAi.copy(cacheRead = 0, cacheWrite = 40, reportsCacheWrite = true)
+        assertEquals("in: 0/40", openAi.copy(cacheRead = 0, cacheWrite = 40)
             .render(listOf(TokenField.Input)).lines().first())
     }
 
     @Test
-    fun `each half drops itself when its provider does not count it`() {
-        // The two halves are missing from opposite ends of the provider set, so
-        // one rule cannot cover both: Anthropic counts cache writes and no
-        // thinking, OpenAI and Gemini the reverse.
-        val openAiStyle = openAi.copy(reportsCacheWrite = false, reportsReasoning = true)
-        assertEquals("in: 63524", openAiStyle.render(listOf(TokenField.Input)).lines().first())
-        assertEquals("out: 0/238", openAiStyle.render(listOf(TokenField.Output)).lines().first())
+    fun `the reasoning half drops only where the provider does not count it`() {
+        assertEquals("out: 0/238", openAi.render(listOf(TokenField.Output)).lines().first())
+        // Anthropic's usage has no thinking count, so that half goes rather than
+        // printing a zero that would read as a measurement.
+        assertEquals(
+            "out: 238",
+            openAi.copy(reportsReasoning = false).render(listOf(TokenField.Output)).lines().first(),
+        )
+    }
 
-        val anthropic = openAi.copy(reportsCacheWrite = true, reportsReasoning = false)
-        assertEquals("in: 63524/0", anthropic.render(listOf(TokenField.Input)).lines().first())
-        assertEquals("out: 238", anthropic.render(listOf(TokenField.Output)).lines().first())
+    @Test
+    fun `the cache pair is always two numbers`() {
+        // The second half is derived as the prompt the cache could not serve, so
+        // it exists under either provider convention and the pair never collapses
+        // to a single figure with a slash pointing at nothing.
+        assertEquals("in: 63524/277", openAi.copy(cacheWrite = 277)
+            .render(listOf(TokenField.Input)).lines().first())
     }
 
     @Test
     fun `the provider on screen drops only the half it does not count`() {
         assertEquals(
-            "in: 2112  out: 0/605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
-            openAi.copy(cacheRead = 2112, output = 605, ratePerSecond = 32.0, millis = 18_000,
-                    clock = "19:33").render(TokenField.DEFAULT),
+            "in: 2112/157  out: 0/605  32 t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
+            openAi.copy(cacheRead = 2112, cacheWrite = 157, output = 605, ratePerSecond = 32.0,
+                    millis = 18_000, clock = "19:33").render(TokenField.DEFAULT),
         )
     }
 
@@ -97,7 +102,7 @@ class TokenFormatTest {
     @Test
     fun `the order is the configured order inside one line`() {
         assertEquals(
-            "in: 63524  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
+            "in: 63524/277  12 t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
             openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
         )
     }
