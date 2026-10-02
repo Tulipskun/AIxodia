@@ -139,6 +139,10 @@ fun SettingsScreen(
     var subRoute by remember { mutableStateOf(AgentRoute()) }
     var mainGeneration by remember { mutableStateOf(GenerationSettings()) }
     var subGeneration by remember { mutableStateOf(GenerationSettings()) }
+    // Names the reader cleared, sent once with the save so the daemon removes
+    // exactly those and leaves the rest of the stored values where they are.
+    var clearedMain by remember { mutableStateOf<List<String>>(emptyList()) }
+    var clearedSub by remember { mutableStateOf<List<String>>(emptyList()) }
     var picker by remember { mutableStateOf<Picker?>(null) }
     var adding by remember { mutableStateOf(false) }
     var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
@@ -420,11 +424,15 @@ fun SettingsScreen(
                 // The capabilities are the ones the daemon reported for the model
                 // actually selected, so a knob this model would refuse is never
                 // offered rather than being offered and then dropped.
-                key(mainRoute.provider, mainRoute.model, mainGeneration) {
+                key(mainRoute.provider, mainRoute.model, mainGeneration, clearedMain) {
                     GenerationSettingsCard(
                         model = selectedModel(mainRoute, modelsByProvider),
                         settings = mainGeneration,
                         onChange = { mainGeneration = it },
+                        onClear = { knob ->
+                            clearedMain = (clearedMain + knob).distinct()
+                            mainGeneration = withoutKnob(mainGeneration, knob)
+                        },
                     )
                 }
                 if (subRoute.provider.isBlank() || subRoute.model.isBlank()) {
@@ -445,7 +453,11 @@ fun SettingsScreen(
                                     sub = AgentSettings(sub.provider, sub.model, subGeneration),
                                     subEnabled = true,
                                 ),
+                                clearMain = clearedMain,
+                                clearSub = clearedSub,
                             )
+                            clearedMain = emptyList()
+                            clearedSub = emptyList()
                             subRoute = sub
                             load(false)
                             busy = false
@@ -949,6 +961,25 @@ private fun ModelSheet(
  * The model a route points at, or null when the catalogue has not been read yet.
  * Its capabilities are what decides which knobs are worth showing.
  */
+/**
+ * What the reader sees after clearing a knob: the field goes back to saying it is
+ * unset. The daemon is told to forget the stored value by name, because "send
+ * nothing" would be read as "leave it alone".
+ */
+internal fun withoutKnob(settings: GenerationSettings, knob: String): GenerationSettings =
+    when (knob) {
+        "thinking_level" -> settings.copy(thinkingLevel = "")
+        "temperature" -> settings.copy(temperature = null)
+        "top_p" -> settings.copy(topP = null)
+        "top_k" -> settings.copy(topK = null)
+        "stop_sequences" -> settings.copy(stopSequences = null)
+        "presence_penalty" -> settings.copy(presencePenalty = null)
+        "frequency_penalty" -> settings.copy(frequencyPenalty = null)
+        "seed" -> settings.copy(seed = null)
+        "max_output_tokens" -> settings.copy(maxOutputTokens = 0)
+        else -> settings
+    }
+
 private fun selectedModel(
     route: AgentRoute,
     modelsByProvider: Map<String, List<ModelView>>,

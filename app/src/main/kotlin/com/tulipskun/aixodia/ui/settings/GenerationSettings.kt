@@ -43,6 +43,7 @@ fun GenerationSettingsCard(
     model: ModelView?,
     settings: GenerationSettings,
     onChange: (GenerationSettings) -> Unit,
+    onClear: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (model == null) {
@@ -66,6 +67,7 @@ fun GenerationSettingsCard(
                 names = mapOf("" to "ไม่บังคับ", "low" to "ต่ำ", "medium" to "กลาง", "high" to "สูง"),
                 selected = settings.thinkingLevel,
                 onSelect = { onChange(settings.copy(thinkingLevel = it)) },
+                onClear = { onClear("thinking_level") },
             )
         }
         if (model.supportsTemperature) {
@@ -77,6 +79,7 @@ fun GenerationSettingsCard(
                 steps = 19,
                 display = { "%.2f".format(it) },
                 onChange = { onChange(settings.copy(temperature = it)) },
+                onClear = { onClear("temperature") },
             )
         }
         if (model.supportsTopP) {
@@ -88,6 +91,7 @@ fun GenerationSettingsCard(
                 steps = 19,
                 display = { "%.2f".format(it) },
                 onChange = { onChange(settings.copy(topP = it)) },
+                onClear = { onClear("top_p") },
             )
         }
         if (model.supportsTopK) {
@@ -99,6 +103,7 @@ fun GenerationSettingsCard(
                 steps = 63,
                 display = { if (it < 1f) "%.2f".format(it) else it.roundToInt().toString() },
                 onChange = { onChange(settings.copy(topK = it)) },
+                onClear = { onClear("top_k") },
             )
         }
         if (model.supportsStopSequences) {
@@ -111,6 +116,7 @@ fun GenerationSettingsCard(
                     val cleaned = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
                     onChange(settings.copy(stopSequences = cleaned.ifEmpty { null }))
                 },
+                onClear = { onClear("stop_sequences") },
             )
         }
         if (model.supportsPresencePenalty) {
@@ -122,6 +128,7 @@ fun GenerationSettingsCard(
                 steps = 31,
                 display = { "%.2f".format(it) },
                 onChange = { onChange(settings.copy(presencePenalty = it)) },
+                onClear = { onClear("presence_penalty") },
             )
         }
         if (model.supportsFrequencyPenalty) {
@@ -133,6 +140,7 @@ fun GenerationSettingsCard(
                 steps = 31,
                 display = { "%.2f".format(it) },
                 onChange = { onChange(settings.copy(frequencyPenalty = it)) },
+                onClear = { onClear("frequency_penalty") },
             )
         }
         if (model.supportsSeed) {
@@ -150,6 +158,7 @@ fun GenerationSettingsCard(
             value = if (settings.maxOutputTokens == 0) "" else settings.maxOutputTokens.toString(),
             numeric = true,
             onChange = { onChange(settings.copy(maxOutputTokens = it.trim().toIntOrNull()?.takeIf { n -> n > 0 } ?: 0)) },
+            onClear = { onClear("max_output_tokens") },
         )
     }
 }
@@ -166,9 +175,27 @@ private fun ChoiceRow(
     names: Map<String, String>,
     selected: String,
     onSelect: (String) -> Unit,
+    onClear: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = MaterialTheme.typography.titleSmall)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = MaterialTheme.typography.titleSmall)
+            if (selected.isNotBlank()) {
+                TextButton(onClick = onClear) {
+                    Text("ล้าง", style = MaterialTheme.typography.labelMedium)
+                }
+            } else {
+                Text(
+                    "ค่าเริ่มต้นของโมเดล",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             options.forEach { option ->
                 FilterChip(
@@ -196,6 +223,7 @@ private fun NumberRow(
     steps: Int,
     display: (Float) -> String,
     onChange: (Double?) -> Unit,
+    onClear: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(
@@ -205,7 +233,7 @@ private fun NumberRow(
         ) {
             Text(label, style = MaterialTheme.typography.titleSmall)
             if (value != null) {
-                TextButton(onClick = { onChange(null) }) {
+                TextButton(onClick = onClear) {
                     Text("ล้าง", style = MaterialTheme.typography.labelMedium)
                 }
             } else {
@@ -247,6 +275,7 @@ private fun TextRow(
     numeric: Boolean = false,
     singleLine: Boolean = true,
     onChange: (String) -> Unit,
+    onClear: () -> Unit = {},
 ) {
     // The field keeps its own text so a half-typed value is not normalised away
     // while it is being typed; [value] seeds it when this row is first shown.

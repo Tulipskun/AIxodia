@@ -193,6 +193,7 @@ class HistoryApi(private val settings: SettingsStore) {
         sessionId: String,
         generation: GenerationSettings,
         clear: Boolean = false,
+        clearKnobs: List<String> = emptyList(),
     ): Boolean = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
@@ -200,6 +201,10 @@ class HistoryApi(private val settings: SettingsStore) {
         if (clear) {
             val body = JSONObject().put("clear_generation", true).toString()
             return@withContext patchSession(base, c.token, sessionId, body)
+        }
+        if (clearKnobs.isNotEmpty()) {
+            val body = JSONObject().put("clear_knobs", JSONArray(clearKnobs)).toString()
+            if (!patchSession(base, c.token, sessionId, body)) return@withContext false
         }
         generation.thinkingLevel.takeIf { it.isNotBlank() }?.let { g.put("thinking_level", it) }
         generation.temperature?.let { g.put("temperature", it) }
@@ -354,12 +359,16 @@ class HistoryApi(private val settings: SettingsStore) {
      * only written when the caller set one: an unset knob is left to the
      * provider's own default, and sending a zero would be an instruction.
      */
-    suspend fun saveAgentSettings(settingsBody: SettingsView): String = withContext(Dispatchers.IO) {
+    suspend fun saveAgentSettings(
+        settingsBody: SettingsView,
+        clearMain: List<String> = emptyList(),
+        clearSub: List<String> = emptyList(),
+    ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
         val body = JSONObject()
-            .put("main", agentBody(settingsBody.main))
-            .put("sub", agentBody(settingsBody.sub))
+            .put("main", agentBody(settingsBody.main, clearMain))
+            .put("sub", agentBody(settingsBody.sub, clearSub))
             .put("sub_enabled", settingsBody.subEnabled)
             .toString()
         runCatching {
@@ -374,8 +383,12 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault("บันทึกไม่สำเร็จ")
     }
 
-    /** One agent's route plus its knobs, omitting anything the caller left unset. */
-    private fun agentBody(agent: AgentSettings): JSONObject {
+    /**
+     * One agent's route plus its knobs. A knob the caller left unset is not sent,
+     * and a knob the reader cleared is named in clear_knobs: the daemon has to be
+     * able to tell "I did not touch this" from "take this away".
+     */
+    private fun agentBody(agent: AgentSettings, clearKnobs: List<String> = emptyList()): JSONObject {
         val body = JSONObject()
             .put("provider", agent.provider)
             .put("model", agent.model)
@@ -393,6 +406,7 @@ class HistoryApi(private val settings: SettingsStore) {
         g.seed?.let { generation.put("seed", it) }
         if (g.maxOutputTokens != 0) generation.put("max_output_tokens", g.maxOutputTokens)
         body.put("generation", generation)
+        if (clearKnobs.isNotEmpty()) body.put("clear_knobs", JSONArray(clearKnobs))
         return body
     }
 

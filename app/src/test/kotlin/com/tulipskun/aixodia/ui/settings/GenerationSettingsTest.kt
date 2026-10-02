@@ -4,6 +4,7 @@ import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.model.ModelView
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -74,4 +75,54 @@ class GenerationSettingsTest {
         val model = ModelView(id = "claude-3-7-sonnet", supportsThinking = true)
         assertTrue(model.supportsAnyGenerationKnob())
     }
+}
+
+/**
+ * Clearing a knob has to read back as unset, and the name is what tells the
+ * daemon to remove it. Leaving the value alone would be read as "not mentioned",
+ * which now means keep what is stored.
+ */
+class ClearKnobTest {
+
+    @Test
+    fun `clearing a knob leaves nothing behind`() {
+        val full = GenerationSettings(
+            thinkingLevel = "high",
+            temperature = 0.3,
+            topP = 0.9,
+            topK = 0.4,
+            stopSequences = listOf("END"),
+            presencePenalty = 0.5,
+            frequencyPenalty = -1.0,
+            seed = 7L,
+            maxOutputTokens = 4096,
+        )
+        for (knob in knobNames) {
+            val cleared = withoutKnob(full, knob)
+            if (cleared == full) {
+                fail("clearing $knob changed nothing")
+            }
+        }
+    }
+
+    @Test
+    fun `clearing one knob leaves the others alone`() {
+        val full = GenerationSettings(thinkingLevel = "high", temperature = 0.3, maxOutputTokens = 4096)
+        val cleared = withoutKnob(full, "temperature")
+        assertFalse(cleared.isSet.let { it && cleared.temperature == null && cleared.thinkingLevel.isBlank() })
+        assertTrue(cleared.temperature == null)
+        assertTrue(cleared.thinkingLevel == "high")
+        assertTrue(cleared.maxOutputTokens == 4096)
+    }
+
+    @Test
+    fun `an unknown knob name changes nothing rather than clearing everything`() {
+        val full = GenerationSettings(temperature = 0.3)
+        assertTrue(withoutKnob(full, "temprature") == full)
+    }
+
+    private val knobNames = listOf(
+        "thinking_level", "temperature", "top_p", "top_k", "stop_sequences",
+        "presence_penalty", "frequency_penalty", "seed", "max_output_tokens",
+    )
 }
