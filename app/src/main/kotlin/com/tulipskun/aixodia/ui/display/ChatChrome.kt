@@ -54,7 +54,7 @@ fun ConnDot(c: ConnState) {
 
 /** First-launch / unconfigured gate — before any network call. */
 @Composable
-fun SetupNeeded(endpoint: String, onOpen: () -> Unit) {
+fun SetupNeeded(onOpen: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
@@ -75,20 +75,13 @@ fun SetupNeeded(endpoint: String, onOpen: () -> Unit) {
         )
         Spacer(Modifier.size(8.dp))
         Text(
-            "ใส่ Cloudflare API token ที่หน้าตั้งค่า — account/database ค้นหาให้อัตโนมัติ\n" +
-                "ใส่ URL ของ tunnel ถ้าต้องการแชทสด (ประวัติอ่านได้แม้ daemon หยุด)",
+            "ใส่ Cloudflare API token ที่หน้าตั้งค่า — บัญชี ฐานข้อมูล และ URL ของ daemon\n" +
+                "ค้นหาให้เองหมด ไม่ต้องพิมพ์อะไรอีก (ประวัติแชทอ่านได้แม้ daemon หยุด)",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 420.dp),
         )
-        if (endpoint.isNotBlank()) {
-            Text(
-                "ที่อยู่: $endpoint",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
         Button(
             onClick = onOpen,
             modifier = Modifier

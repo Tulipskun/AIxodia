@@ -62,6 +62,11 @@ class AiDirectSocket(private val settings: SettingsStore) {
 
     private var ws: WebSocket? = null
     private var wantOpen = false
+
+    // Reconnect delay, owned by the loop but resettable from outside: a known
+    // address change should not sit behind a backoff grown by a dead daemon.
+    @Volatile
+    private var backoffMs = 1000L
     private var session: String = "default"
     private var resumeFrom: Long = 0
 
@@ -103,6 +108,24 @@ class AiDirectSocket(private val settings: SettingsStore) {
     fun close() {
         wantOpen = false
         ws?.close(1000, "ui")
+        ws = null
+        _state.value = ConnState.OFFLINE
+    }
+
+    /**
+     * Drops the current socket so [loop] dials again immediately, rather than
+     * waiting out the backoff.
+     *
+     * Needed because the daemon address changes on its own: the URL is random
+     * per kernel boot, so after a redeploy the phone is holding an address that
+     * no longer answers. The backoff can be up to 30 seconds, which is long
+     * enough that the chat looks broken right after a restart even though the
+     * new address is already known.
+     */
+    fun reconnect() {
+        if (!wantOpen) return
+        backoffMs = 1000L
+        ws?.cancel()
         ws = null
         _state.value = ConnState.OFFLINE
     }
@@ -149,7 +172,6 @@ class AiDirectSocket(private val settings: SettingsStore) {
     }
 
     private suspend fun loop() {
-        var backoff = 1000L
         while (wantOpen) {
             var opened = false
             try {
@@ -182,7 +204,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
                         )
                         w.send(hello)
                         _state.value = ConnState.ONLINE
-                        backoff = 1000L
+                        backoffMs = 1000L
                         ready.complete(Unit)
                     }
 
@@ -230,8 +252,8 @@ class AiDirectSocket(private val settings: SettingsStore) {
             }
             if (!wantOpen) break
             _state.value = ConnState.OFFLINE
-            delay(backoff + Random.nextLong(0, 400))
-            backoff = min(backoff * 2, 30_000L)
+            delay(backoffMs + Random.nextLong(0, 400))
+            backoffMs = min(backoffMs * 2, 30_000L)
         }
         _state.value = ConnState.OFFLINE
     }

@@ -94,6 +94,8 @@ import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
+import com.tulipskun.aixodia.data.remote.DaemonDiscovery
+import com.tulipskun.aixodia.data.remote.DiscoveryPhase
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import com.tulipskun.aixodia.update.UpdateManager
@@ -115,6 +117,7 @@ fun SettingsScreen(
     socket: AiDirectSocket,
     sessionId: String,
     onBack: () -> Unit,
+    discovery: DaemonDiscovery? = null,
 ) {
     val scope = rememberCoroutineScope()
     val curEndpoint by settings.endpointFlow.collectAsStateWithLifecycle(initialValue = "")
@@ -319,6 +322,7 @@ fun SettingsScreen(
                 HorizontalDivider()
                 NodeCard(
                     history = history,
+                    discovery = discovery,
                     onUse = { tunnel ->
                         scope.launch {
                             settings.saveDaemon(tunnel)
@@ -1079,6 +1083,7 @@ private fun ReplaceKeysDialog(
 @Composable
 private fun NodeCard(
     history: HistoryApi,
+    discovery: DaemonDiscovery?,
     onUse: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1086,13 +1091,44 @@ private fun NodeCard(
     var checking by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
 
+    // When discovery is running it is already polling this row on its own, so
+    // the button is a way to look now rather than the only way to look at all.
+    val auto by (discovery?.state ?: remember { mutableStateOf(DiscoveryState()) })
+        .collectAsStateWithLifecycle()
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
         Text(
-            "ค้นหา ai daemon จากแถว nodes ใน D1",
+            "ai daemon — ค้นหาอัตโนมัติจากแถว nodes ใน D1",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (discovery != null) {
+            val (label, colour) = when (auto.phase) {
+                DiscoveryPhase.NO_TOKEN ->
+                    "○ ยังไม่ได้ใส่ Cloudflare token — ใส���แล้วจะค้นหาให้เอง" to
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                DiscoveryPhase.CONNECTED ->
+                    "● ต่ออยู่ที่ ${auto.tunnelUrl} (heartbeat ${auto.ageS}s${if (auto.version.isNotBlank()) ", ${auto.version}" else ""})" to
+                        MaterialTheme.colorScheme.primary
+                DiscoveryPhase.IDLE ->
+                    "○ ยังไม่มี daemon ที่ heartbeat — สลับไปจะเจอเองถ้ามีรอบใหม่" to
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                DiscoveryPhase.UNREACHABLE ->
+                    "○ อ่าน D1 ไม่ได้${if (auto.error.isNotBlank()) ": ${auto.error}" else ""} — ใช้ URL ที่มีอยู่ต่อไป" to
+                        MaterialTheme.colorScheme.error
+            }
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = colour,
+            )
+            Text(
+                "URL เปลี่ยนทุกครั้งที่รันใหม่ แอปจะตามให้เอง ไม่ต้องกดหา",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
@@ -1108,13 +1144,14 @@ private fun NodeCard(
                     }
                 },
                 enabled = !checking,
-            ) { Text("ค้นหา") }
-            if (node?.online == true) {
-                Button(onClick = { onUse(node!!.tunnelUrl) }) { Text("ใช้ URL นี้") }
+            ) { Text(if (discovery != null) "ตรวจตอนนี้" else "ค้นหา") }
+            val usable = node?.takeIf { it.online }?.tunnelUrl
+            if (usable != null) {
+                Button(onClick = { onUse(usable) }) { Text("ใช้ URL นี้") }
             }
         }
         val n = node
-        if (n != null) {
+        if (n != null && discovery == null) {
             Text(
                 if (n.online) "● daemon online (${n.tunnelUrl}, heartbeat ${n.ageS}s, ${n.version})"
                 else "● daemon ออฟไลน์ (heartbeat ขาดเกิน 90s) — ไปรัน ai ให้เปิด tunnel ก่อน",

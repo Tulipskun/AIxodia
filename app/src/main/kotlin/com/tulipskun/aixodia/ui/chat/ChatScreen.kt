@@ -102,6 +102,7 @@ import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
+import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.display.ChatComposer
@@ -129,10 +130,20 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryApi, socket: AiDirectSocket) {
-    val endpoint by settings.endpointFlow.collectAsStateWithLifecycle(initialValue = "")
+fun ChatScreen(
+    repo: ChatRepository,
+    settings: SettingsStore,
+    history: HistoryApi,
+    socket: AiDirectSocket,
+    discovery: DaemonDiscovery? = null,
+) {
     val token by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
-    val configured = endpoint.isNotBlank() && token.isNotBlank()
+    // The token alone is enough to be configured: the daemon address now arrives
+    // by discovery, so demanding it here would lock a fresh install on the setup
+    // screen waiting for a value the app is about to fetch for itself. History
+    // reads D1 directly and works with no address at all; only the live socket
+    // waits, and it waits quietly.
+    val configured = token.isNotBlank()
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     var showSettings by remember { mutableStateOf(false) }
 
@@ -148,10 +159,11 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
             SettingsScreen(
                 settings = settings, history = history, socket = socket,
                 sessionId = sessId, onBack = { showSettings = false },
+                discovery = discovery,
             )
             return
         }
-        SetupNeeded(endpoint = endpoint, onOpen = { showSettings = true })
+        SetupNeeded(onOpen = { showSettings = true })
         return
     }
 
@@ -193,6 +205,7 @@ fun ChatScreen(repo: ChatRepository, settings: SettingsStore, history: HistoryAp
         SettingsScreen(
             settings = settings, history = history, socket = socket,
             sessionId = vm.sessionId, onBack = { showSettings = false },
+            discovery = discovery,
         )
         return
     }

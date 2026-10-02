@@ -23,7 +23,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             AIxodiaTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    ChatScreen(repo = c.repo, settings = c.settings, history = c.historyApi, socket = c.socket)
+                    ChatScreen(
+                        repo = c.repo, settings = c.settings, history = c.historyApi,
+                        socket = c.socket, discovery = c.discovery,
+                    )
                 }
             }
         }
