@@ -8,7 +8,9 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AgentSettings
+import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.model.SessionAgentConfig
+import com.tulipskun.aixodia.data.model.SettingsView
 import com.tulipskun.aixodia.data.model.ModelsPage
 import com.tulipskun.aixodia.data.model.ProvidersPage
 import com.tulipskun.aixodia.data.model.ProviderStatus
@@ -85,7 +87,6 @@ class HistoryApi(private val settings: SettingsStore) {
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
     private val providerAdapter = moshi.adapter(ProviderStatus::class.java)
     private val settingsAdapter = moshi.adapter(SettingsView::class.java)
-    private val generationAdapter = moshi.adapter(GenerationSettings::class.java)
     private val sessionAgentAdapter = moshi.adapter(SessionAgentConfig::class.java)
 
     /**
