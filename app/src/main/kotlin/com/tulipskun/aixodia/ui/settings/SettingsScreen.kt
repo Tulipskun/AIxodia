@@ -96,9 +96,11 @@ import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.DiscoveryPhase
+import com.tulipskun.aixodia.data.remote.DiscoveryState
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import com.tulipskun.aixodia.update.UpdateManager
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
@@ -1093,8 +1095,10 @@ private fun NodeCard(
 
     // When discovery is running it is already polling this row on its own, so
     // the button is a way to look now rather than the only way to look at all.
-    val auto by (discovery?.state ?: remember { mutableStateOf(DiscoveryState()) })
-        .collectAsStateWithLifecycle()
+    // Both sides of the elvis have to be StateFlow, or the expression infers
+    // Any and the delegate below has nothing to read.
+    val fallback = remember { MutableStateFlow(DiscoveryState()) }
+    val auto by (discovery?.state ?: fallback).collectAsStateWithLifecycle()
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
