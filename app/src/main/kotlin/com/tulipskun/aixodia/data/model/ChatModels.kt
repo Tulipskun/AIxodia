@@ -43,7 +43,46 @@ data class ModelView(
     @Json(name = "name") val name: String = "",
     @Json(name = "supports_streaming") val supportsStreaming: Boolean = false,
     @Json(name = "supports_tools") val supportsTools: Boolean = false,
+    // What this particular model accepts, so a setting it would refuse is never
+    // offered in the first place. The daemon discovered this and used to report
+    // only two of it.
+    @Json(name = "supports_temperature") val supportsTemperature: Boolean = false,
+    @Json(name = "supports_thinking") val supportsThinking: Boolean = false,
+    @Json(name = "supports_top_p") val supportsTopP: Boolean = false,
+    @Json(name = "supports_top_k") val supportsTopK: Boolean = false,
+    @Json(name = "supports_stop_sequences") val supportsStopSequences: Boolean = false,
+    @Json(name = "supports_presence_penalty") val supportsPresencePenalty: Boolean = false,
+    @Json(name = "supports_frequency_penalty") val supportsFrequencyPenalty: Boolean = false,
+    @Json(name = "supports_seed") val supportsSeed: Boolean = false,
 )
+
+/**
+ * One generation knob, with "not set" told apart from zero: a null value is left
+ * for the provider to decide, and a value is one the model was asked to obey.
+ */
+@JsonClass(generateAdapter = true)
+data class GenerationSettings(
+    @Json(name = "thinking_level") val thinkingLevel: String = "",
+    @Json(name = "temperature") val temperature: Double? = null,
+    @Json(name = "top_p") val topP: Double? = null,
+    @Json(name = "top_k") val topK: Double? = null,
+    @Json(name = "stop_sequences") val stopSequences: List<String>? = null,
+    @Json(name = "presence_penalty") val presencePenalty: Double? = null,
+    @Json(name = "frequency_penalty") val frequencyPenalty: Double? = null,
+    @Json(name = "seed") val seed: Long? = null,
+    @Json(name = "max_output_tokens") val maxOutputTokens: Int = 0,
+) {
+    /** True when the daemon is reporting values, rather than nothing stored. */
+    val isSet: Boolean
+        get() = thinkingLevel.isNotBlank() || temperature != null || topP != null || topK != null ||
+            !stopSequences.isNullOrEmpty() || presencePenalty != null || frequencyPenalty != null ||
+            seed != null || maxOutputTokens != 0
+
+    /** The thinking levels worth showing, which the four providers all accept. */
+    companion object {
+        val thinkingLevels = listOf("", "low", "medium", "high")
+    }
+}
 
 @JsonClass(generateAdapter = true)
 data class ModelsPage(@Json(name = "providers") val providers: List<ProviderView> = emptyList())
@@ -74,8 +113,15 @@ data class AgentRoute(
 
 @JsonClass(generateAdapter = true)
 data class AgentSettings(
-    @Json(name = "main") val main: AgentRoute = AgentRoute(),
-    @Json(name = "sub") val sub: AgentRoute = AgentRoute(),
+    @Json(name = "provider") val provider: String = "",
+    @Json(name = "model") val model: String = "",
+    @Json(name = "generation") val generation: GenerationSettings = GenerationSettings(),
+)
+
+@JsonClass(generateAdapter = true)
+data class SettingsView(
+    @Json(name = "main") val main: AgentSettings = AgentSettings(),
+    @Json(name = "sub") val sub: AgentSettings = AgentSettings(),
     @Json(name = "sub_enabled") val subEnabled: Boolean = true,
 )
 
@@ -204,4 +250,8 @@ data class SessionAgentConfig(
     @Json(name = "sub_model") val subModel: String = "",
     @Json(name = "sub_enabled") val subEnabled: Boolean = true,
     @Json(name = "sub_pinned") val subPinned: Boolean = false,
+    // What this chat actually runs on, and whether that came from the chat or
+    // from the agent defaults, so the sheet can say which it is showing.
+    @Json(name = "generation") val generation: GenerationSettings = GenerationSettings(),
+    @Json(name = "generation_source") val generationSource: String = "",
 )

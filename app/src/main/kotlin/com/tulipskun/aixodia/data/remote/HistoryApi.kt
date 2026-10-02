@@ -84,7 +84,8 @@ class HistoryApi(private val settings: SettingsStore) {
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
     private val providerAdapter = moshi.adapter(ProviderStatus::class.java)
-    private val settingsAdapter = moshi.adapter(AgentSettings::class.java)
+    private val settingsAdapter = moshi.adapter(SettingsView::class.java)
+    private val generationAdapter = moshi.adapter(GenerationSettings::class.java)
     private val sessionAgentAdapter = moshi.adapter(SessionAgentConfig::class.java)
 
     /**
@@ -176,6 +177,48 @@ class HistoryApi(private val settings: SettingsStore) {
         runCatching {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .patch(body.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Saves one chat's own knobs. A null field is left alone rather than cleared,
+     * so a sheet that only changed the temperature does not silently drop the rest.
+     */
+    suspend fun setSessionGeneration(
+        sessionId: String,
+        generation: GenerationSettings,
+        clear: Boolean = false,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
+        val g = JSONObject()
+        if (clear) {
+            val body = JSONObject().put("clear_generation", true).toString()
+            return@withContext patchSession(base, c.token, sessionId, body)
+        }
+        generation.thinkingLevel.takeIf { it.isNotBlank() }?.let { g.put("thinking_level", it) }
+        generation.temperature?.let { g.put("temperature", it) }
+        generation.topP?.let { g.put("top_p", it) }
+        generation.topK?.let { g.put("top_k", it) }
+        if (!generation.stopSequences.isNullOrEmpty()) {
+            g.put("stop_sequences", JSONArray(generation.stopSequences))
+        }
+        generation.presencePenalty?.let { g.put("presence_penalty", it) }
+        generation.frequencyPenalty?.let { g.put("frequency_penalty", it) }
+        generation.seed?.let { g.put("seed", it) }
+        if (generation.maxOutputTokens != 0) g.put("max_output_tokens", generation.maxOutputTokens)
+        val body = JSONObject().put("generation", g).toString()
+        patchSession(base, c.token, sessionId, body)
+    }
+
+    private fun patchSession(base: String, token: String, sessionId: String, body: String): Boolean {
+        return runCatching {
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
+                .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
                 .patch(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -305,13 +348,17 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault("ลบไม่สำเร็จ")
     }
 
-    /** Saves which provider and model the main and sub agent run on. */
-    suspend fun saveAgentSettings(settingsBody: AgentSettings): String = withContext(Dispatchers.IO) {
+    /**
+     * Saves where each agent runs and how it is asked to answer. The knobs are
+     * only written when the caller set one: an unset knob is left to the
+     * provider's own default, and sending a zero would be an instruction.
+     */
+    suspend fun saveAgentSettings(settingsBody: SettingsView): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
         val body = JSONObject()
-            .put("main", JSONObject().put("provider", settingsBody.main.provider).put("model", settingsBody.main.model))
-            .put("sub", JSONObject().put("provider", settingsBody.sub.provider).put("model", settingsBody.sub.model))
+            .put("main", agentBody(settingsBody.main))
+            .put("sub", agentBody(settingsBody.sub))
             .put("sub_enabled", settingsBody.subEnabled)
             .toString()
         runCatching {
@@ -326,7 +373,29 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault("บันทึกไม่สำเร็จ")
     }
 
-    suspend fun agentSettings(): AgentSettings? = withContext(Dispatchers.IO) {
+    /** One agent's route plus its knobs, omitting anything the caller left unset. */
+    private fun agentBody(agent: AgentSettings): JSONObject {
+        val body = JSONObject()
+            .put("provider", agent.provider)
+            .put("model", agent.model)
+        val g = agent.generation
+        val generation = JSONObject()
+        if (g.thinkingLevel.isNotBlank()) generation.put("thinking_level", g.thinkingLevel)
+        g.temperature?.let { generation.put("temperature", it) }
+        g.topP?.let { generation.put("top_p", it) }
+        g.topK?.let { generation.put("top_k", it) }
+        if (!g.stopSequences.isNullOrEmpty()) {
+            generation.put("stop_sequences", JSONArray(g.stopSequences))
+        }
+        g.presencePenalty?.let { generation.put("presence_penalty", it) }
+        g.frequencyPenalty?.let { generation.put("frequency_penalty", it) }
+        g.seed?.let { generation.put("seed", it) }
+        if (g.maxOutputTokens != 0) generation.put("max_output_tokens", g.maxOutputTokens)
+        body.put("generation", generation)
+        return body
+    }
+
+    suspend fun agentSettings(): SettingsView? = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {

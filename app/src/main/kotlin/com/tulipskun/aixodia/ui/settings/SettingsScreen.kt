@@ -60,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -86,7 +87,9 @@ import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.data.model.AgentRoute
 import com.tulipskun.aixodia.data.model.AgentSettings
+import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.model.ModelView
+import com.tulipskun.aixodia.data.model.SettingsView
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
@@ -134,6 +137,8 @@ fun SettingsScreen(
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
     var subRoute by remember { mutableStateOf(AgentRoute()) }
+    var mainGeneration by remember { mutableStateOf(GenerationSettings()) }
+    var subGeneration by remember { mutableStateOf(GenerationSettings()) }
     var picker by remember { mutableStateOf<Picker?>(null) }
     var adding by remember { mutableStateOf(false) }
     var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
@@ -164,8 +169,10 @@ fun SettingsScreen(
         }
         runCatching { history.models() }.getOrNull()?.let { catalogue = it }
         runCatching { history.agentSettings() }.getOrNull()?.let {
-            mainRoute = it.main
-            subRoute = it.sub
+            mainRoute = AgentRoute(it.main.provider, it.main.model)
+            subRoute = AgentRoute(it.sub.provider, it.sub.model)
+            mainGeneration = it.main.generation
+            subGeneration = it.sub.generation
         }
         loading = false
         rows != null
@@ -408,6 +415,18 @@ fun SettingsScreen(
                     onPickProvider = { picker = Picker.SubProvider },
                     onPickModel = { picker = Picker.SubModel },
                 )
+                HorizontalDivider()
+                Text("วิธีตอบของ main agent", style = MaterialTheme.typography.titleMedium)
+                // The capabilities are the ones the daemon reported for the model
+                // actually selected, so a knob this model would refuse is never
+                // offered rather than being offered and then dropped.
+                key(mainRoute.provider, mainRoute.model, mainGeneration) {
+                    GenerationSettingsCard(
+                        model = selectedModel(mainRoute, modelsByProvider),
+                        settings = mainGeneration,
+                        onChange = { mainGeneration = it },
+                    )
+                }
                 if (subRoute.provider.isBlank() || subRoute.model.isBlank()) {
                     Text(
                         "ยังไม่ได้เลือกของ sub agent — ถ้าปล่อยว่าง จะใช้ค่าเดียวกับ main",
@@ -420,7 +439,13 @@ fun SettingsScreen(
                         busy = true
                         scope.launch {
                             val sub = if (subRoute.provider.isBlank() || subRoute.model.isBlank()) mainRoute else subRoute
-                            msg = history.saveAgentSettings(AgentSettings(mainRoute, sub, true))
+                            msg = history.saveAgentSettings(
+                                SettingsView(
+                                    main = AgentSettings(mainRoute.provider, mainRoute.model, mainGeneration),
+                                    sub = AgentSettings(sub.provider, sub.model, subGeneration),
+                                    subEnabled = true,
+                                ),
+                            )
                             subRoute = sub
                             load(false)
                             busy = false
@@ -918,6 +943,18 @@ private fun ModelSheet(
             }
         }
     }
+}
+
+/**
+ * The model a route points at, or null when the catalogue has not been read yet.
+ * Its capabilities are what decides which knobs are worth showing.
+ */
+private fun selectedModel(
+    route: AgentRoute,
+    modelsByProvider: Map<String, List<ModelView>>,
+): ModelView? {
+    if (route.provider.isBlank() || route.model.isBlank()) return null
+    return modelsByProvider[route.provider]?.firstOrNull { it.id == route.model }
 }
 
 @Composable
