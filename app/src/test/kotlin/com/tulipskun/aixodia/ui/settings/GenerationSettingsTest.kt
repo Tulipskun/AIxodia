@@ -60,7 +60,7 @@ class GenerationSettingsTest {
     @Test
     fun `a reasoning model offers reasoning and no temperature`() {
         val model = ModelView(id = "gpt-5", supportsThinking = true, supportsTemperature = false)
-        assertFalse(model.supportsAnyGenerationKnob().not())
+        assertTrue(model.supportsAnyGenerationKnob())
     }
 
     @Test

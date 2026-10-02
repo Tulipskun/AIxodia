@@ -154,7 +154,7 @@ fun GenerationSettingsCard(
     }
 }
 
-private fun ModelView.supportsAnyGenerationKnob(): Boolean =
+internal fun ModelView.supportsAnyGenerationKnob(): Boolean =
     supportsThinking || supportsTemperature || supportsTopP || supportsTopK ||
         supportsStopSequences || supportsPresencePenalty || supportsFrequencyPenalty || supportsSeed
 
