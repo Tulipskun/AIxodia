@@ -72,11 +72,15 @@ data class GenerationSettings(
     @Json(name = "seed") val seed: Long? = null,
     @Json(name = "max_output_tokens") val maxOutputTokens: Int = 0,
 ) {
-    /** True when the daemon is reporting values, rather than nothing stored. */
+    /**
+     * True when the daemon is reporting values, rather than nothing stored. A
+     * stop sequence of blanks is nothing stored: the card filters them out before
+     * saving, and a list of them means the same as no list at all.
+     */
     val isSet: Boolean
         get() = thinkingLevel.isNotBlank() || temperature != null || topP != null || topK != null ||
-            !stopSequences.isNullOrEmpty() || presencePenalty != null || frequencyPenalty != null ||
-            seed != null || maxOutputTokens != 0
+            stopSequences.orEmpty().any { it.isNotBlank() } || presencePenalty != null ||
+            frequencyPenalty != null || seed != null || maxOutputTokens != 0
 
     /** The thinking levels worth showing, which the four providers all accept. */
     companion object {
