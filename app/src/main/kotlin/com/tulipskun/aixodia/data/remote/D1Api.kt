@@ -276,17 +276,22 @@ class D1Api(private val settings: SettingsStore) {
         }.reversed()
     }
 
-    /** Where the daemon is now, read straight from the `nodes` row (AX-050). */
+    /**
+     * Returns the newest Quick Tunnel URL written by ai-engine.
+     * Quick Tunnel addresses are random on every daemon start, so the newest
+     * row is the address the phone must adopt. The WebSocket remains the final
+     * liveness check because this table has no heartbeat.
+     */
     suspend fun node(): NodeInfo? {
-        val row = query("SELECT tunnel_url, version, heartbeat FROM nodes WHERE id = 'ai'")
+        val row = query("SELECT url FROM tunnel ORDER BY rowid DESC LIMIT 1")
             .rows.firstOrNull() ?: return null
-        val heartbeat = row.optLong("heartbeat")
-        val age = System.currentTimeMillis() / 1000 - heartbeat
+        val url = row.optString("url").trim().trimEnd('/')
+        if (url.isBlank()) return null
         return NodeInfo(
-            tunnelUrl = row.optString("tunnel_url"),
-            version = row.optString("version"),
-            online = heartbeat > 0L && age in 0L..90L,
-            ageS = age,
+            tunnelUrl = url,
+            version = "",
+            online = true,
+            ageS = 0L,
         )
     }
 
