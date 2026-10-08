@@ -81,9 +81,6 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Unit tests (Markdown + live answer)
-        run: gradle testDebugUnitTest --console=plain
-
       - name: Record UI snapshots (Paparazzi)
         run: gradle recordPaparazziDebug --console=plain
 
@@ -92,6 +89,9 @@ jobs:
         with:
           name: ui-snapshots
           path: app/src/test/snapshots
+
+      - name: Unit tests (Markdown + live answer)
+        run: gradle testDebugUnitTest --console=plain
 
       - name: Upload test report
         if: always()
