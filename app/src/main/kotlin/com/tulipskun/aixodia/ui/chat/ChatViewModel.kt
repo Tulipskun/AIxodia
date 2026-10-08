@@ -173,7 +173,8 @@ class ChatViewModel(
                         liveSteps.value = emptyList()
                         liveThinkingMs.value = 0L
                         busy.value = false
-                        notice.value = f.text
+                        // Raw daemon text is logged by the daemon; the user sees Thai.
+                        notice.value = friendlyError(f.text)
                         finishStats()
                     }
                     // The ack only means the message reached the daemon. The

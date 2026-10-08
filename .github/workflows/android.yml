@@ -81,6 +81,15 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Record UI snapshots (Paparazzi)
+        run: gradle recordPaparazziDebug --console=plain
+
+      - name: Upload UI snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshots
+          path: app/src/test/snapshots
+
       - name: Unit tests (Markdown + live answer)
         run: gradle testDebugUnitTest --console=plain
 
