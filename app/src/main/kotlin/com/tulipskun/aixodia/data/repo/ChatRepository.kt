@@ -1,5 +1,6 @@
 package com.tulipskun.aixodia.data.repo
 
+import com.tulipskun.aixodia.data.model.toolRowView
 import androidx.room.withTransaction
 import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.local.MessageEntity
@@ -381,11 +382,15 @@ class ChatRepository(
     }
 
 
-    private fun com.tulipskun.aixodia.data.remote.TurnRow.toEntity(sid: String) = MessageEntity(
+    private fun com.tulipskun.aixodia.data.remote.TurnRow.toEntity(sid: String): MessageEntity {
+        val view = toolRowView(role, text)
+        return MessageEntity(
         sessionId = sid,
         seq = seq,
         role = role.ifBlank { "model" },
-        text = text,
+        text = view.text,
+        toolName = view.toolName,
+        toolArgs = view.toolArgs,
         createdAt = if (createdAt > 0) createdAt * 1000 else System.currentTimeMillis(),
         agent = agent,
         jobId = jobId,
@@ -399,7 +404,8 @@ class ChatRepository(
         inputIncludesCache = inputIncludesCache,
         model = model,
         durationMs = durationMs,
-    )
+        )
+    }
 
     fun close() = socket.close()
 
