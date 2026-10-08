@@ -108,7 +108,7 @@ import kotlinx.coroutines.launch
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
 /** The Settings screen is split: the main page, and a page only for providers and keys. */
-private enum class SettingsPage { Main, Providers }
+private enum class SettingsPage { Main }
 
 /**
  * Connection settings (AX-030): the Cloudflare API token the app uses to read
@@ -147,7 +147,6 @@ fun SettingsScreen(
     var providerFilter by rememberSaveable { mutableStateOf(ProviderFilter.ALL) }
     var providerLimit by rememberSaveable { mutableStateOf(PROVIDER_PAGE) }
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
-    BackHandler(enabled = page == SettingsPage.Providers) { page = SettingsPage.Main }
     var probedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
@@ -217,9 +216,9 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (page == SettingsPage.Providers) "Provider และ key" else "ตั้งค่า") },
+                title = { Text("ตั้งค่า") },
                 navigationIcon = {
-                    IconButton(onClick = { if (page == SettingsPage.Providers) page = SettingsPage.Main else onBack() }) {
+                    IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
                     }
                 },
@@ -344,137 +343,6 @@ fun SettingsScreen(
                         }
                     },
                 )
-            }
-
-            }
-
-            if (page == SettingsPage.Main) {
-                val workingCount = remember(providers, probedIds) { countProviders(providers, probedIds).working }
-                SectionCard(
-                    "Provider และ key",
-                    if (loading) "กำลังโหลด…"
-                    else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · $workingCount ใช้ได้",
-                ) {
-                    Button(onClick = { page = SettingsPage.Providers }) { Text("จัดการ provider และ key") }
-                }
-            }
-
-            if (page == SettingsPage.Providers) {
-            SectionCard(
-                "Provider และ key (ทั้งระบบ)",
-                if (loading) "กำลังโหลด…"
-                else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · " +
-                    "${providers.count { it.reachable && (it.probed || it.id in probedIds) }} ใช้ได้ · key อ่านกลับไม่ได้ · ตัวตนของ provider สร้างแล้วเปลี่ยนไม่ได้",
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(
-                        onClick = {
-                            busy = true
-                            scope.launch {
-                                val answered = load(true)
-                                val rows = providers
-                                msg = when {
-                                    !answered -> msg
-                                    rows.isEmpty() -> "daemon ไม่ได้รายงาน provider เลย"
-                                    rows.all { it.reachable } -> "ทุก provider ใช้งานได้"
-                                    else -> "${rows.count { !it.reachable }} provider ใช้ไม่ได้"
-                                }
-                                busy = false
-                            }
-                        },
-                        enabled = !busy,
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  ทดสอบใหม่")
-                    }
-                    OutlinedButton(onClick = { adding = true }, enabled = !busy) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  เพิ่ม provider")
-                    }
-                }
-                if (!loading && providers.isEmpty()) {
-                    Text(
-                        "ยังไม่มี provider — กด “ทดสอบใหม่” เพื่อให้ daemon รายงาน หรือกด “เพิ่ม provider”",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val counts = remember(providers, probedIds) { countProviders(providers, probedIds) }
-                val visibleProviders = remember(providers, probedIds, providerQuery, providerFilter) {
-                    filterProviders(providers, probedIds, providerQuery, providerFilter)
-                }
-                if (providers.size > PROVIDER_PAGE) {
-                    LabelledField(
-                        value = providerQuery,
-                        onValueChange = { providerQuery = it; providerLimit = PROVIDER_PAGE },
-                        label = "ค้นหา provider (ชื่อ, adapter, endpoint)",
-                        leading = { Icon(Icons.Default.Search, contentDescription = null) },
-                    )
-                    Row(
-                        Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        listOf(
-                            Triple(ProviderFilter.ALL, "ทั้งหมด", counts.all),
-                            Triple(ProviderFilter.WORKING, "ใช้ได้", counts.working),
-                            Triple(ProviderFilter.UNTESTED, "ยังไม่ทดสอบ", counts.untested),
-                            Triple(ProviderFilter.BROKEN, "ใช้ไม่ได้", counts.broken),
-                        ).forEach { (filter, label, n) ->
-                            FilterChip(
-                                selected = providerFilter == filter,
-                                onClick = { providerFilter = filter; providerLimit = PROVIDER_PAGE },
-                                label = { Text("$label $n") },
-                            )
-                        }
-                    }
-                }
-                visibleProviders.take(providerLimit).forEach { p ->
-                    ProviderCard(
-                        p,
-                        tested = p.id in probedIds,
-                        onAddKey = { key ->
-                            scope.launch {
-                                msg = history.changeKeys(p.id, add = listOf(key))
-                                load(false)
-                            }
-                        },
-                        onReplaceKeys = { replacing = p },
-                        onPickKeyToRemove = { pickingKeyFor = p },
-                        onTest = {
-                            testingId = p.id
-                            scope.launch {
-                                val status = runCatching { history.refreshProvider(p.id) }.getOrNull()
-                                probedIds = probedIds + p.id
-                                msg = when {
-                                    status == null -> "ทดสอบ ${p.id} ไม่สำเร็จ ( daemon ไม่ตอบ)"
-                                    status.reachable && status.workingModel.isNotBlank() ->
-                                        "${p.id} ใช้ได้ (${status.workingModel})"
-                                    status.reachable -> "${p.id} ใช้ได้ (${status.modelCount} model)"
-                                    else -> "${p.id} ใช้ไม่ได้"
-                                }
-                                if (status != null) {
-                                    providers = providers.map { if (it.id == p.id) status else it }
-                                }
-                                testingId = null
-                            }
-                        },
-                        testing = testingId == p.id,
-                        onDelete = { deleting = p },
-                    )
-                }
-                if (providers.isNotEmpty()) {
-                    val shown = minOf(providerLimit, visibleProviders.size)
-                    Text(
-                        "แสดง $shown จาก ${visibleProviders.size} รายการที่ตรงกับตัวกรอง",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (visibleProviders.size > shown) {
-                        OutlinedButton(onClick = { providerLimit += PROVIDER_PAGE }) {
-                            Text("แสดงเพิ่ม ${minOf(PROVIDER_PAGE, visibleProviders.size - shown)} รายการ")
-                        }
-                    }
-                }
             }
 
             }
