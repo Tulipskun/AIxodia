@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -106,6 +107,9 @@ import kotlinx.coroutines.launch
 
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
+/** The Settings screen is split: the main page, and a page only for providers and keys. */
+private enum class SettingsPage { Main, Providers }
+
 /**
  * Connection settings (AX-030): the Cloudflare API token the app uses to read
  * and write D1 directly, the daemon tunnel address that carries the live socket
@@ -142,6 +146,8 @@ fun SettingsScreen(
     var providerQuery by rememberSaveable { mutableStateOf("") }
     var providerFilter by rememberSaveable { mutableStateOf(ProviderFilter.ALL) }
     var providerLimit by rememberSaveable { mutableStateOf(PROVIDER_PAGE) }
+    var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
+    BackHandler(enabled = page == SettingsPage.Providers) { page = SettingsPage.Main }
     var probedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
@@ -211,9 +217,9 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ตั้งค่า") },
+                title = { Text(if (page == SettingsPage.Providers) "Provider และ key" else "ตั้งค่า") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (page == SettingsPage.Providers) page = SettingsPage.Main else onBack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
                     }
                 },
@@ -233,6 +239,7 @@ fun SettingsScreen(
             ) {
             if (msg.isNotBlank()) StatusBanner(msg)
 
+            if (page == SettingsPage.Main) {
             SectionCard(
                 "การเชื่อมต่อ",
                 "ใส่ Cloudflare API token ตัวเดียว — account/database ถูกค้นหาให้อัตโนมัติ (ไม่มี Worker แล้ว)",
@@ -339,6 +346,20 @@ fun SettingsScreen(
                 )
             }
 
+            }
+
+            if (page == SettingsPage.Main) {
+                val workingCount = remember(providers, probedIds) { countProviders(providers, probedIds).working }
+                SectionCard(
+                    "Provider และ key",
+                    if (loading) "กำลังโหลด…"
+                    else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · $workingCount ใช้ได้",
+                ) {
+                    Button(onClick = { page = SettingsPage.Providers }) { Text("จัดการ provider และ key") }
+                }
+            }
+
+            if (page == SettingsPage.Providers) {
             SectionCard(
                 "Provider และ key (ทั้งระบบ)",
                 if (loading) "กำลังโหลด…"
@@ -456,6 +477,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            if (page == SettingsPage.Main) {
             SectionCard("โมเดลค่าเริ่มต้นของ agent (สากล)", "ค่าที่นี่ใช้กับทุกแชทที่ไม่ได้ล็อก provider/model ไว้เอง main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย") {
                 RouteCard(
                     title = "ค่าเริ่มต้นสากล — main agent",
@@ -586,6 +610,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 UpdateRow(settings)
+            }
             }
         }
         }
