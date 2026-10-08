@@ -121,6 +121,7 @@ import com.tulipskun.aixodia.ui.sessions.DeleteChatDialog
 import com.tulipskun.aixodia.ui.sessions.RenameChatDialog
 import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
 import com.tulipskun.aixodia.ui.sessions.sessionTitle
+import com.tulipskun.aixodia.ui.providers.ProvidersScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
 import com.tulipskun.aixodia.update.UpdateManager
 import java.text.SimpleDateFormat
@@ -146,10 +147,12 @@ fun ChatScreen(
     val configured = token.isNotBlank()
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     var showSettings by remember { mutableStateOf(false) }
+    var showProviders by remember { mutableStateOf(false) }
 
     // Settings is a screen branch of the chat, not a separate Android route: the
     // system back button has to return here, not leave the app.
     BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showProviders) { showProviders = false }
 
     // Unconfigured installs stop here — before the ViewModel exists — so a
     // first launch cannot reach the network layer and crash. The settings
@@ -207,6 +210,10 @@ fun ChatScreen(
             sessionId = vm.sessionId, onBack = { showSettings = false },
             discovery = discovery,
         )
+        return
+    }
+    if (showProviders) {
+        ProvidersScreen(history = history, onBack = { showProviders = false })
         return
     }
 
@@ -308,7 +315,12 @@ fun ChatScreen(
                 onNewChat = { vm.newChat(); scope.launch { drawer.close() } },
                 onOpen = { id -> vm.openChat(id); scope.launch { drawer.close() } },
                 onLongPress = { pending = it },
-                footer = { UpdateRow(settings) },
+                footer = {
+                    TextButton(onClick = { scope.launch { drawer.close() }; showProviders = true }) {
+                        Text("ผู้ให้บริการ")
+                    }
+                    UpdateRow(settings)
+                },
             )
         }
     ) {
