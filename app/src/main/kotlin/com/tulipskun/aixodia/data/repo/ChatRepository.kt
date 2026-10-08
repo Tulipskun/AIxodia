@@ -78,7 +78,9 @@ class ChatRepository(
     }
 
     fun observeMessages(sid: String): Flow<List<ChatMessage>> = db.messages().observe(sid).map { list ->
-        list.map {
+        // An answer with no text and no tool step is an empty bubble, not a reply.
+        // Tool rows and pending messages always stay visible.
+        list.filterNot { isEmptyAnswer(it.role, it.text, it.toolName, it.pending) }.map {
             ChatMessage(
                 id = "${it.sessionId}:${it.seq}",
                 sessionId = it.sessionId,
@@ -423,3 +425,7 @@ class ChatRepository(
         clearSub: Boolean,
     ): Boolean = history.saveSessionAgentConfig(sid, mainProvider, mainModel, clearMain, subProvider, subModel, subEnabled, clearSub)
 }
+
+/** True for a model reply that has no text, no tool name and was not waiting to send. */
+internal fun isEmptyAnswer(role: String, text: String, toolName: String, pending: Boolean): Boolean =
+    role != "user" && !role.startsWith("tool") && text.isBlank() && toolName.isBlank() && !pending
