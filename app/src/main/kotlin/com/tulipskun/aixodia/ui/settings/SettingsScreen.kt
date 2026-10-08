@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -138,6 +139,9 @@ fun SettingsScreen(
     var busy by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var providers by remember { mutableStateOf<List<ProviderStatus>>(emptyList()) }
+    var providerQuery by rememberSaveable { mutableStateOf("") }
+    var providerFilter by rememberSaveable { mutableStateOf(ProviderFilter.ALL) }
+    var providerLimit by rememberSaveable { mutableStateOf(PROVIDER_PAGE) }
     var probedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
@@ -374,7 +378,36 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                providers.forEach { p ->
+                val counts = remember(providers, probedIds) { countProviders(providers, probedIds) }
+                val visibleProviders = remember(providers, probedIds, providerQuery, providerFilter) {
+                    filterProviders(providers, probedIds, providerQuery, providerFilter)
+                }
+                if (providers.size > PROVIDER_PAGE) {
+                    LabelledField(
+                        value = providerQuery,
+                        onValueChange = { providerQuery = it; providerLimit = PROVIDER_PAGE },
+                        label = "ค้นหา provider (ชื่อ, adapter, endpoint)",
+                        leading = { Icon(Icons.Default.Search, contentDescription = null) },
+                    )
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        listOf(
+                            Triple(ProviderFilter.ALL, "ทั้งหมด", counts.all),
+                            Triple(ProviderFilter.WORKING, "ใช้ได้", counts.working),
+                            Triple(ProviderFilter.UNTESTED, "ยังไม่ทดสอบ", counts.untested),
+                            Triple(ProviderFilter.BROKEN, "ใช้ไม่ได้", counts.broken),
+                        ).forEach { (filter, label, n) ->
+                            FilterChip(
+                                selected = providerFilter == filter,
+                                onClick = { providerFilter = filter; providerLimit = PROVIDER_PAGE },
+                                label = { Text("$label $n") },
+                            )
+                        }
+                    }
+                }
+                visibleProviders.take(providerLimit).forEach { p ->
                     ProviderCard(
                         p,
                         tested = p.id in probedIds,
@@ -407,6 +440,19 @@ fun SettingsScreen(
                         testing = testingId == p.id,
                         onDelete = { deleting = p },
                     )
+                }
+                if (providers.isNotEmpty()) {
+                    val shown = minOf(providerLimit, visibleProviders.size)
+                    Text(
+                        "แสดง $shown จาก ${visibleProviders.size} รายการที่ตรงกับตัวกรอง",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (visibleProviders.size > shown) {
+                        OutlinedButton(onClick = { providerLimit += PROVIDER_PAGE }) {
+                            Text("แสดงเพิ่ม ${minOf(PROVIDER_PAGE, visibleProviders.size - shown)} รายการ")
+                        }
+                    }
                 }
             }
 
@@ -837,12 +883,29 @@ private fun ProviderSheet(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val list = remember(providers, probedIds, query) {
+        filterProviders(providers, probedIds, query, ProviderFilter.ALL)
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
+            if (providers.size > PROVIDER_PAGE) {
+                LabelledField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = "ค้นหา provider",
+                    leading = { Icon(Icons.Default.Search, contentDescription = null) },
+                )
+                Text(
+                    "${list.size} จาก ${providers.size} provider",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (providers.isEmpty()) {
                 Text(
                     "ยังไม่มี provider — เพิ่ม provider หรือกด “ทดสอบใหม่” ก่อน",
@@ -850,7 +913,7 @@ private fun ProviderSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            providers.forEach { p ->
+            LazyColumn(Modifier.heightIn(max = 420.dp)) { items(list) { p ->
                 val selected = p.id == current
                 Row(
                     Modifier
@@ -878,7 +941,7 @@ private fun ProviderSheet(
                     }
                     if (selected) Icon(Icons.Default.Check, contentDescription = null)
                 }
-            }
+            } }
         }
     }
 }
