@@ -107,8 +107,8 @@ import kotlinx.coroutines.launch
 
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
-/** The Settings screen is split: the main page, and a page only for providers and keys. */
-private enum class SettingsPage { Main, Providers }
+/** Settings has two pages: the app settings, and providers and keys (opened from the chat drawer). */
+enum class SettingsPage { Main, Providers }
 
 /**
  * Connection settings (AX-030): the Cloudflare API token the app uses to read
@@ -125,6 +125,7 @@ fun SettingsScreen(
     sessionId: String,
     onBack: () -> Unit,
     discovery: DaemonDiscovery? = null,
+    startOn: SettingsPage = SettingsPage.Main,
 ) {
     val scope = rememberCoroutineScope()
     val curEndpoint by settings.endpointFlow.collectAsStateWithLifecycle(initialValue = "")
@@ -146,8 +147,12 @@ fun SettingsScreen(
     var providerQuery by rememberSaveable { mutableStateOf("") }
     var providerFilter by rememberSaveable { mutableStateOf(ProviderFilter.ALL) }
     var providerLimit by rememberSaveable { mutableStateOf(PROVIDER_PAGE) }
-    var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
-    BackHandler(enabled = page == SettingsPage.Providers) { page = SettingsPage.Main }
+    var page by rememberSaveable { mutableStateOf(startOn) }
+    // Back from providers returns to the main page only when we came through it.
+    val backFromProviders: () -> Unit = {
+        if (startOn == SettingsPage.Main) page = SettingsPage.Main else onBack()
+    }
+    BackHandler(enabled = page == SettingsPage.Providers) { backFromProviders() }
     var probedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
@@ -219,7 +224,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text(if (page == SettingsPage.Providers) "Provider และ key" else "ตั้งค่า") },
                 navigationIcon = {
-                    IconButton(onClick = { if (page == SettingsPage.Providers) page = SettingsPage.Main else onBack() }) {
+                    IconButton(onClick = { if (page == SettingsPage.Providers) backFromProviders() else onBack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
                     }
                 },
@@ -346,17 +351,6 @@ fun SettingsScreen(
                 )
             }
 
-            }
-
-            if (page == SettingsPage.Main) {
-                val workingCount = remember(providers, probedIds) { countProviders(providers, probedIds).working }
-                SectionCard(
-                    "Provider และ key",
-                    if (loading) "กำลังโหลด…"
-                    else "${providers.size} provider · ${providers.sumOf { it.keyCount }} key · $workingCount ใช้ได้",
-                ) {
-                    Button(onClick = { page = SettingsPage.Providers }) { Text("จัดการ provider และ key") }
-                }
             }
 
             if (page == SettingsPage.Providers) {

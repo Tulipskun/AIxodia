@@ -121,6 +121,7 @@ import com.tulipskun.aixodia.ui.sessions.DeleteChatDialog
 import com.tulipskun.aixodia.ui.sessions.RenameChatDialog
 import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
 import com.tulipskun.aixodia.ui.sessions.sessionTitle
+import com.tulipskun.aixodia.ui.settings.SettingsPage
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
 import com.tulipskun.aixodia.update.UpdateManager
 import java.text.SimpleDateFormat
@@ -146,10 +147,12 @@ fun ChatScreen(
     val configured = token.isNotBlank()
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     var showSettings by remember { mutableStateOf(false) }
+    var showProviders by remember { mutableStateOf(false) }
 
     // Settings is a screen branch of the chat, not a separate Android route: the
     // system back button has to return here, not leave the app.
     BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showProviders) { showProviders = false }
 
     // Unconfigured installs stop here — before the ViewModel exists — so a
     // first launch cannot reach the network layer and crash. The settings
@@ -206,6 +209,14 @@ fun ChatScreen(
             settings = settings, history = history, socket = socket,
             sessionId = vm.sessionId, onBack = { showSettings = false },
             discovery = discovery,
+        )
+        return
+    }
+    if (showProviders) {
+        SettingsScreen(
+            settings = settings, history = history, socket = socket,
+            sessionId = vm.sessionId, onBack = { showProviders = false },
+            discovery = discovery, startOn = SettingsPage.Providers,
         )
         return
     }
@@ -308,7 +319,12 @@ fun ChatScreen(
                 onNewChat = { vm.newChat(); scope.launch { drawer.close() } },
                 onOpen = { id -> vm.openChat(id); scope.launch { drawer.close() } },
                 onLongPress = { pending = it },
-                footer = { UpdateRow(settings) },
+                footer = {
+                    TextButton(onClick = { scope.launch { drawer.close() }; showProviders = true }) {
+                        Text("ผู้ให้บริการและ key")
+                    }
+                    UpdateRow(settings)
+                },
             )
         }
     ) {
@@ -517,7 +533,7 @@ private fun ChatModelSheet(
             )
             if (providers.isEmpty()) {
                 Text(
-                    "ยังไม่มี provider — เพิ่มหรือทดสอบ provider ในหน้าตั้งค่าก่อน",
+                    "ยังไม่มี provider — เพิ่มหรือทดสอบ provider ที่ “ผู้ให้บริการและ key” ในเมนูข้าง",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -545,7 +561,7 @@ private fun ChatModelSheet(
                 if (pickedProvider.isNotBlank()) {
                     Text(
                         when {
-                            currentStatus == null -> "ยังไม่มีสถานะของ provider นี้ — ตรวจในหน้าตั้งค่า"
+                            currentStatus == null -> "ยังไม่มีสถานะของ provider นี้ — ตรวจที่ “ผู้ให้บริการและ key”"
                             !currentStatus.probed -> "ยังไม่ทดสอบ · key ${currentStatus.keyCount}"
                             currentStatus.reachable -> buildString {
                                 append("ใช้ได้ · key ${currentStatus.keyCount}")
