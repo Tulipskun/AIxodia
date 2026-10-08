@@ -108,7 +108,7 @@ import kotlinx.coroutines.launch
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
 /** The Settings screen is split: the main page, and a page only for providers and keys. */
-private enum class SettingsPage { Main }
+private enum class SettingsPage { Main, Connection, Agent, About }
 
 /**
  * Connection settings (AX-030): the Cloudflare API token the app uses to read
@@ -147,6 +147,8 @@ fun SettingsScreen(
     var providerFilter by rememberSaveable { mutableStateOf(ProviderFilter.ALL) }
     var providerLimit by rememberSaveable { mutableStateOf(PROVIDER_PAGE) }
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
+    // Each row of the main list opens its own page; back returns to the list first.
+    BackHandler(enabled = page != SettingsPage.Main) { page = SettingsPage.Main }
     var probedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
@@ -216,9 +218,18 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ตั้งค่า") },
+                title = {
+                    Text(
+                        when (page) {
+                            SettingsPage.Main -> "ตั้งค่า"
+                            SettingsPage.Connection -> "การเชื่อมต่อ"
+                            SettingsPage.Agent -> "ค่าเริ่มต้นของ agent"
+                            SettingsPage.About -> "เกี่ยวกับแอป"
+                        },
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (page == SettingsPage.Main) onBack() else page = SettingsPage.Main }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
                     }
                 },
@@ -239,6 +250,12 @@ fun SettingsScreen(
             if (msg.isNotBlank()) StatusBanner(msg)
 
             if (page == SettingsPage.Main) {
+                SettingsNavRow("การเชื่อมต่อ", "Cloudflare token และ daemon") { page = SettingsPage.Connection }
+                SettingsNavRow("ค่าเริ่มต้นของ agent", "model ของ main และ sub agent") { page = SettingsPage.Agent }
+                SettingsNavRow("เกี่ยวกับแอป", "สถานะ daemon และการอัปเดต") { page = SettingsPage.About }
+            }
+
+            if (page == SettingsPage.Connection) {
             SectionCard(
                 "การเชื่อมต่อ",
                 "ใส่ Cloudflare API token ตัวเดียว — account/database ถูกค้นหาให้อัตโนมัติ (ไม่มี Worker แล้ว)",
@@ -347,7 +364,7 @@ fun SettingsScreen(
 
             }
 
-            if (page == SettingsPage.Main) {
+            if (page == SettingsPage.Agent) {
             SectionCard("โมเดลค่าเริ่มต้นของ agent (สากล)", "ค่าที่นี่ใช้กับทุกแชทที่ไม่ได้ล็อก provider/model ไว้เอง main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย") {
                 RouteCard(
                     title = "ค่าเริ่มต้นสากล — main agent",
@@ -467,6 +484,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            if (page == SettingsPage.About) {
             SectionCard("แอป", "เชื่อมต่อกับ daemon: " + when (conn) {
                 ConnState.ONLINE -> "ออนไลน์ ($curWs)"
                 ConnState.CONNECTING -> "กำลังต่อ…"
@@ -1157,3 +1177,20 @@ private fun UpdateRow(settings: SettingsStore) {
     }
 }
 
+@Composable
+private fun SettingsNavRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
