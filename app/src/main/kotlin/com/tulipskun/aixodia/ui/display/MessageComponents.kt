@@ -61,6 +61,7 @@ import com.tulipskun.aixodia.data.model.totalInputTokens
 import com.tulipskun.aixodia.ui.LocalUiSpec
 import com.tulipskun.aixodia.ui.chat.MarkdownText
 import com.tulipskun.aixodia.ui.chat.SubAgentActivity
+import com.tulipskun.aixodia.ui.chat.Tick
 import com.tulipskun.aixodia.ui.chat.TurnStats
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -405,9 +406,10 @@ fun LiveAnswer(
     text: String,
     stats: TurnStats,
     routeLabel: String,
-    nowMs: Long,
+    tick: Tick,
     tokenFields: List<TokenField> = TokenField.DEFAULT,
 ) {
+    val nowMs = tick.elapsed
     val pulse by rememberInfiniteTransition(label = "live-answer").animateFloat(
         initialValue = 0.45f,
         targetValue = 1f,
@@ -430,7 +432,7 @@ fun LiveAnswer(
             modifier = Modifier.padding(top = 2.dp),
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f),
         )
-        TurnStatsLine(stats = stats, model = routeLabel, nowMs = nowMs, live = true, fields = tokenFields)
+        TurnStatsLine(stats = stats, model = routeLabel, nowMs = nowMs, wallClockMs = tick.wall, live = true, fields = tokenFields)
     }
 }
 
@@ -495,6 +497,7 @@ fun TurnStatsLine(
     model: String,
     nowMs: Long,
     live: Boolean,
+    wallClockMs: Long = System.currentTimeMillis(),
     fields: List<TokenField> = TokenField.DEFAULT,
 ) {
     if (stats.startedAtMs == 0L && model.isBlank()) return
@@ -507,10 +510,11 @@ fun TurnStatsLine(
         ratePerSecond = stats.tokensPerSecond(nowMs),
         millis = stats.elapsedMs(nowMs),
         model = stats.model.ifBlank { model },
-        // The settled footer ends with the wall clock; leaving it out while the
-        // turn was still running made the same footer read differently before
-        // and after it finished.
-        clock = formatClock(nowMs),
+        // The settled footer ends with the wall clock, so the live one does
+        // too. It has to be the wall clock and not the tick's elapsed reading:
+        // formatClock turns a timestamp into a date, and uptime handed to it
+        // printed as the time of day the machine had been up.
+        clock = formatClock(wallClockMs),
     )
     if (counts.visible(fields).isEmpty()) return
     Text(

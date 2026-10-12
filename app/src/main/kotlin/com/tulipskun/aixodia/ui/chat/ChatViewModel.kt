@@ -371,10 +371,16 @@ class ChatViewModel(
                 val name = f.toolResult?.name ?: f.toolCall?.name ?: return
                 val result = f.toolResult?.text.orEmpty()
                 liveThinkingMs.value = 0L
+                // A result frame names the tool and its output, never its
+                // arguments, so the step it replaces has to lend them over.
+                // Rebuilding it from the frame alone is how a live step lost the
+                // command it was running and showed a bare "bash · 2.6s" while
+                // the same step in the stored thread showed the whole line.
+                val known = liveSteps.value.firstOrNull { it.name == name }?.args.orEmpty()
                 liveSteps.value = liveSteps.value.filterNot { it.name == name } +
                     ToolStep(
                         name = name,
-                        args = f.toolCall?.arguments.orEmpty(),
+                        args = f.toolCall?.arguments.orEmpty().ifBlank { known },
                         result = result.take(160),
                         isError = f.toolResult?.isError ?: false,
                         done = true,

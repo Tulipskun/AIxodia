@@ -279,11 +279,18 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val clip = LocalClipboardManager.current
     // One clock for the whole screen: the footer, the rate and every sub agent
-    // row read the same millisecond, so their numbers agree with each other.
-    var nowMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
+    // row read the same instant, so their numbers agree with each other.
+    //
+    // It is sampled as a pair because the two readings are not interchangeable.
+    // `elapsedRealtime` counts from boot, which is what a duration needs and
+    // what a wall clock cannot use: formatClock turns a timestamp into a date,
+    // and handed it the uptime it printed the uptime as the time of day. The
+    // footer showed "19:42" beside a message sent at 05:13.
+    var tick by remember { mutableStateOf(Tick.now()) }
+    val nowMs = tick.elapsed
     LaunchedEffect(busy, subAgents.isNotEmpty()) {
         while (busy || subAgents.any { it.running }) {
-            nowMs = android.os.SystemClock.elapsedRealtime()
+            tick = Tick.now()
             kotlinx.coroutines.delay(200)
         }
     }
@@ -715,7 +722,7 @@ fun ChatScreen(
                 }
                 if (liveText.isNotBlank()) {
                     item(key = "live-answer") {
-                        LiveAnswer(liveText, stats, routeLabel, nowMs, tokenFields)
+                        LiveAnswer(liveText, stats, routeLabel, tick, tokenFields)
                     }
                 }
                 if (liveSteps.isNotEmpty()) {
@@ -1025,3 +1032,16 @@ fun formatUptime(
 
 /** How many files one trip to the picker may bring back. */
 private const val MAX_ATTACH_PER_PICK = 10
+
+
+/**
+ * One reading of the clock, taken once. Elapsed time counts from boot and is
+ * what every duration on the screen is measured against; the wall clock is what
+ * a timestamp has to be formatted from. Sampling them together keeps the two
+ * from drifting apart within one frame.
+ */
+internal data class Tick(val elapsed: Long, val wall: Long) {
+    companion object {
+        fun now() = Tick(android.os.SystemClock.elapsedRealtime(), System.currentTimeMillis())
+    }
+}
