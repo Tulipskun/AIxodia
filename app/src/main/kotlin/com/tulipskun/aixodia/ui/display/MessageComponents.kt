@@ -422,39 +422,35 @@ fun ThinkingLine(reasoningMs: Long, agent: String) {
     }
 }
 
+/**
+ * The tool calls of the turn in flight, as one compact row each. A long
+ * sentence per step ("— เสร็จแล้ว", "เครื่องมือ 3") is noise: the colour says
+ * whether it is running, done or failed, and the name plus its arguments say
+ * what it is doing.
+ */
 @Composable
 fun ToolSteps(steps: List<ToolStep>) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            "เครื่องมือ ${steps.size}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         steps.forEach { step ->
-            val tint = if (!step.done) {
-                MaterialTheme.colorScheme.tertiary
-            } else if (step.isError) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
+            val tint = when {
+                !step.done -> MaterialTheme.colorScheme.tertiary
+                step.isError -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
             Text(
                 text = buildString {
-                    append("● ")
+                    append(if (step.done) "▸ " else "▾ ")
                     append(step.name)
-                    if (step.args.isNotBlank()) append(" ").append(step.args.take(40))
+                    if (step.args.isNotBlank()) append(" ").append(step.args.take(60))
                     if (step.durationMs > 0L) append(" · ").append(formatSeconds(step.durationMs))
-                    append(
-                        when {
-                            !step.done -> "…"
-                            step.isError -> " — ล้มเหลว"
-                            else -> " — เสร็จแล้ว"
-                        },
-                    )
                 },
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 color = tint,
+                maxLines = 2,
             )
         }
     }

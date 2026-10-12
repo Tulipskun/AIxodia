@@ -225,8 +225,13 @@ class ChatRepository(
     /** The provider and model the daemon currently offers, for the picker. */
     suspend     fun models(): List<ProviderView> = history.models()
 
-    /** Daemon liveness + start time, for the header's uptime readout. */
-    suspend fun healthz(): Pair<Boolean, Long>? = history.healthz()
+    /**
+     * The daemon's D1 row: tunnel URL, heartbeat age and the unix second it
+     * started. The header reads the start time from here once and counts
+     * uptime locally, so no periodic healthz call is made.
+     */
+    suspend fun node(): com.tulipskun.aixodia.data.remote.NodeInfo? =
+        runCatching { history.node() }.getOrNull()
 
     /** Global provider health/key counts for the session picker caption. */
     suspend fun providerStatuses(): List<com.tulipskun.aixodia.data.model.ProviderStatus> = history.providers()

@@ -161,15 +161,12 @@ class ChatViewModel(
                 hasStoredRoute.value = true
             }
         }
-        // Poll the daemon's start time so the header can show uptime. Every
-        // 30s is enough: the number is "how long has it been up", not a stopwatch.
+        // The start time comes from the daemon's D1 row, read once (and again
+        // whenever the socket comes back). Uptime is then counted on the phone,
+        // so the header ticks without a single periodic network call.
+        viewModelScope.launch { refreshDaemonStart() }
         viewModelScope.launch {
-            while (true) {
-                runCatching { repo.healthz() }.getOrNull()?.second?.let { started ->
-                    if (started > 0L) daemonStartedAt.value = started
-                }
-                kotlinx.coroutines.delay(30_000)
-            }
+            repo.connState.collect { if (it == ConnState.ONLINE) refreshDaemonStart() }
         }
         viewModelScope.launch {
             repo.liveFrames.collect { f ->
@@ -630,8 +627,19 @@ class ChatViewModel(
 
     fun refresh() {
         viewModelScope.launch {
+            refreshDaemonStart()
             runCatching { repo.refreshLatest(sessionId) }
                 .onFailure { notice.value = "ดึงข้อมูลล่าสุดไม่สำเร็จ: ${it.message}" }
+        }
+    }
+
+    /**
+     * Reads the daemon's start time from its D1 row. Called on open and when the
+     * socket comes back; the displayed uptime then advances on its own.
+     */
+    private suspend fun refreshDaemonStart() {
+        repo.node()?.let { node ->
+            if (node.startedAt > 0L) daemonStartedAt.value = node.startedAt
         }
     }
 

@@ -1,7 +1,9 @@
 package com.tulipskun.aixodia.ui.display
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,9 +25,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -37,18 +41,26 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.remote.ConnState
 
+/**
+ * The connection state as a bare colour — green / amber / red — with no word
+ * beside it. The state is already the thing the colour encodes, and a label on
+ * every screen of every app is noise; a screen reader still gets the meaning
+ * from the content description.
+ */
 @Composable
 fun ConnDot(c: ConnState) {
     val (label, color) = when (c) {
-        ConnState.ONLINE -> "● ออนไลน์" to MaterialTheme.colorScheme.primary
-        ConnState.CONNECTING -> "● กำลังต่อ" to MaterialTheme.colorScheme.tertiary
-        ConnState.OFFLINE -> "● ออฟไลน์" to MaterialTheme.colorScheme.error
+        ConnState.ONLINE -> "ออนไลน์" to MaterialTheme.colorScheme.primary
+        ConnState.CONNECTING -> "กำลังต่อ" to MaterialTheme.colorScheme.tertiary
+        ConnState.OFFLINE -> "ออฟไลน์" to MaterialTheme.colorScheme.error
     }
-    Text(
-        label,
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-        modifier = Modifier.padding(end = 4.dp),
+    Box(
+        Modifier
+            .padding(horizontal = 6.dp)
+            .size(10.dp)
+            .clip(CircleShape)
+            .background(color)
+            .semantics { contentDescription = label },
     )
 }
 

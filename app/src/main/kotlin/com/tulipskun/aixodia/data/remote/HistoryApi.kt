@@ -57,6 +57,8 @@ data class NodeInfo(
     @Json(name = "version") val version: String = "",
     @Json(name = "online") val online: Boolean = false,
     @Json(name = "heartbeat_age_s") val ageS: Long = -1,
+    /** Unix second the daemon process started; 0 when unknown. */
+    @Json(name = "started") val startedAt: Long = 0,
 )
 
 @JsonClass(generateAdapter = true)
@@ -433,26 +435,6 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) { d1.ping() }
-
-    /**
-     * Daemon liveness plus the unix second it started, so the chat header can
-     * show how long the daemon has been up. Null when the daemon is unreachable.
-     */
-    suspend fun healthz(): Pair<Boolean, Long>? = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
-        runCatching {
-            val req = Request.Builder().url("$base/healthz").get().build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return@use null
-                val body = r.body?.string() ?: return@use null
-                val json = JSONObject(body)
-                val ok = json.optBoolean("ok", false)
-                val started = json.optLong("started", 0L)
-                ok to started
-            }
-        }.getOrNull()
-    }
 
     /**
      * Resolves the Cloudflare account and database from the token and reports

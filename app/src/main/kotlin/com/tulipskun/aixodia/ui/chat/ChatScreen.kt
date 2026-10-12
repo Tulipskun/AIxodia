@@ -236,6 +236,15 @@ fun ChatScreen(
         pickedModel.isBlank() -> pickedProvider
         else -> "$pickedProvider · $pickedModel"
     }
+    // Uptime is counted on the phone from the daemon's start time, so it has to
+    // advance on its own. A one-second tick is enough for a "2h 15m" readout.
+    var uptimeNow by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(daemonStartedAt) {
+        while (daemonStartedAt > 0L) {
+            uptimeNow = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
     LaunchedEffect(toast) {
         if (toast.isNotBlank()) {
             kotlinx.coroutines.delay(2200)
@@ -319,7 +328,20 @@ fun ChatScreen(
                 onOpen = { id -> vm.openChat(id); scope.launch { drawer.close() } },
                 onLongPress = { pending = it },
                 footer = {
-                    TextButton(onClick = { scope.launch { drawer.close() }; showProviders = true }) {
+                    // Settings lives in the drawer, like ChatGPT and Claude put
+                    // it behind the hamburger, instead of an icon crowding the
+                    // top bar next to the status dot.
+                    TextButton(
+                        onClick = { scope.launch { drawer.close() }; showSettings = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  ตั้งค่า")
+                    }
+                    TextButton(
+                        onClick = { scope.launch { drawer.close() }; showProviders = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text("ผู้ให้บริการ")
                     }
                     UpdateRow(settings)
@@ -359,16 +381,6 @@ fun ChatScreen(
                                 },
                                 modifier = Modifier.height(32.dp),
                             )
-                            if (daemonStartedAt > 0L) {
-                                val uptime = formatUptime(daemonStartedAt)
-                                if (uptime.isNotBlank()) {
-                                    Text(
-                                        "daemon รันมา $uptime",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
                         }
                     },
                     navigationIcon = {
@@ -380,9 +392,20 @@ fun ChatScreen(
                         IconButton(onClick = { vm.refresh() }) {
                             Icon(Icons.Default.Refresh, contentDescription = "ดึงข้อมูลล่าสุด")
                         }
+                        // Status at a glance: a coloured dot and how long the
+                        // daemon has been up. No words — the colour is the state.
                         ConnDot(conn)
-                        IconButton(onClick = { showSettings = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "ตั้งค่า")
+                        if (daemonStartedAt > 0L) {
+                            val uptime = formatUptime(daemonStartedAt, uptimeNow)
+                            if (uptime.isNotBlank()) {
+                                Text(
+                                    uptime,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 2.dp, end = 6.dp),
+                                )
+                            }
                         }
                     },
                 )
@@ -779,9 +802,8 @@ private fun UpdateRow(settings: SettingsStore) {
 
 
 /** Human-readable uptime: "2h 15m", "5m 30s", "45s". */
-fun formatUptime(startedUnix: Long): String {
-    val now = System.currentTimeMillis() / 1000
-    val secs = (now - startedUnix).coerceAtLeast(0)
+fun formatUptime(startedUnix: Long, nowMs: Long = System.currentTimeMillis()): String {
+    val secs = (nowMs / 1000 - startedUnix).coerceAtLeast(0)
     val h = secs / 3600
     val m = (secs % 3600) / 60
     val s = secs % 60

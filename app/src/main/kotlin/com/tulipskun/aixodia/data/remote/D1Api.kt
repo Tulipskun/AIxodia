@@ -277,22 +277,41 @@ class D1Api(private val settings: SettingsStore) {
     }
 
     /**
-     * Returns the current Quick Tunnel URL written by ai-engine.
-     * The daemon keeps exactly one tunnel row and replaces its URL on restart.
-     * The WebSocket remains the final liveness check because this table has no heartbeat.
+     * The daemon's own row: its tunnel URL, version, last heartbeat and the
+     * unix second it started. ai-engine rewrites this row every 30s, so the
+     * phone reads the start time from D1 once and counts uptime locally —
+     * no periodic healthz call is needed. Falls back to the legacy `tunnel`
+     * row when `nodes` has not been written yet.
      */
     suspend fun node(): NodeInfo? {
-        val row = query("SELECT url FROM tunnel LIMIT 1")
-            .rows.firstOrNull() ?: return null
-        val url = row.optString("url").trim().trimEnd('/')
+        val row = query(
+            "SELECT tunnel_url, version, heartbeat FROM nodes WHERE id = 'ai' LIMIT 1"
+        ).rows.firstOrNull()
+        if (row != null) {
+            val url = row.optString("tunnel_url").trim().trimEnd('/')
+            if (url.isNotBlank()) {
+                val version = row.optString("version")
+                val started = Regex("started=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                val heartbeat = row.optLong("heartbeat")
+                val ageS = if (heartbeat > 0L) nowSeconds() - heartbeat else -1L
+                return NodeInfo(
+                    tunnelUrl = url,
+                    version = version,
+                    // A beat older than two minutes means the daemon stopped
+                    // writing: the phone still has the address, but it is stale.
+                    online = ageS in 0..120,
+                    ageS = ageS,
+                    startedAt = started,
+                )
+            }
+        }
+        val legacy = query("SELECT url FROM tunnel LIMIT 1").rows.firstOrNull() ?: return null
+        val url = legacy.optString("url").trim().trimEnd('/')
         if (url.isBlank()) return null
-        return NodeInfo(
-            tunnelUrl = url,
-            version = "",
-            online = true,
-            ageS = 0L,
-        )
+        return NodeInfo(tunnelUrl = url, version = "", online = true, ageS = 0L)
     }
+
+    private fun nowSeconds(): Long = System.currentTimeMillis() / 1000
 
     /**
      * One cheap query for the settings screen: how many chats this token can
