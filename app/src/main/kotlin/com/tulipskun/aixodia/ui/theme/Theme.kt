@@ -123,12 +123,41 @@ private val AppShapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
+/**
+ * The app theme, with the parts the daemon's UI spec is allowed to move: light
+ * or dark, the corner radius and an optional accent colour. Everything else is
+ * fixed here, because a spec that could repaint every role would make the app
+ * unrecognisable rather than re-styled.
+ */
 @Composable
-fun AIxodiaTheme(dark: Boolean = true, content: @Composable () -> Unit) {
+fun AIxodiaTheme(
+    dark: Boolean = true,
+    cornerRadius: Int = 18,
+    primary: String = "",
+    content: @Composable () -> Unit,
+) {
+    val base = if (dark) DarkColors else LightColors
+    val accent = parseHexColor(primary)
+    val scheme = if (accent == null) base else base.copy(primary = accent, surfaceTint = accent)
+    val radius = cornerRadius.coerceIn(0, 32)
+    val shapes = AppShapes.copy(
+        small = RoundedCornerShape((radius * 0.55f).toInt().dp),
+        medium = RoundedCornerShape(radius.dp),
+        large = RoundedCornerShape((radius * 1.2f).toInt().dp),
+        extraLarge = RoundedCornerShape((radius * 1.5f).toInt().dp),
+    )
     MaterialTheme(
-        colorScheme = if (dark) DarkColors else LightColors,
+        colorScheme = scheme,
         typography = AppTypography,
-        shapes = AppShapes,
+        shapes = shapes,
         content = content,
     )
+}
+
+/** Parses "#RRGGBB" (or "#AARRGGBB"), returning null when it is not a colour. */
+fun parseHexColor(value: String): Color? {
+    val hex = value.trim().removePrefix("#")
+    if (hex.length != 6 && hex.length != 8) return null
+    val long = hex.toLongOrNull(16) ?: return null
+    return if (hex.length == 6) Color(0xFF000000L or long) else Color(long)
 }

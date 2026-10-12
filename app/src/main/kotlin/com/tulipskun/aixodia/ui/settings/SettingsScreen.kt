@@ -55,6 +55,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -94,6 +95,7 @@ import com.tulipskun.aixodia.data.model.ModelView
 import com.tulipskun.aixodia.data.model.SettingsView
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
+import com.tulipskun.aixodia.data.model.UiSpec
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
@@ -102,13 +104,16 @@ import com.tulipskun.aixodia.data.remote.DiscoveryState
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import com.tulipskun.aixodia.update.UpdateManager
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
 /** The Settings screen is split: the main page, and a page only for providers and keys. */
-private enum class SettingsPage { Main, Connection, Agent, About }
+private enum class SettingsPage { Main, Connection, Agent, Ui, About }
 
 /**
  * Connection settings (AX-030): the Cloudflare API token the app uses to read
@@ -224,6 +229,7 @@ fun SettingsScreen(
                             SettingsPage.Main -> "ตั้งค่า"
                             SettingsPage.Connection -> "การเชื่อมต่อ"
                             SettingsPage.Agent -> "ค่าเริ่มต้นของ agent"
+                            SettingsPage.Ui -> "หน้าจอ (จาก daemon)"
                             SettingsPage.About -> "เกี่ยวกับแอป"
                         },
                     )
@@ -252,6 +258,7 @@ fun SettingsScreen(
             if (page == SettingsPage.Main) {
                 SettingsNavRow("การเชื่อมต่อ", "Cloudflare token และ daemon") { page = SettingsPage.Connection }
                 SettingsNavRow("ค่าเริ่มต้นของ agent", "model ของ main และ sub agent") { page = SettingsPage.Agent }
+                SettingsNavRow("หน้าจอ (จาก daemon)", "แก้ข้อความ สี และพฤติกรรม โดยไม่ต้องติดตั้งใหม่") { page = SettingsPage.Ui }
                 SettingsNavRow("เกี่ยวกับแอป", "สถานะ daemon และการอัปเดต") { page = SettingsPage.About }
             }
 
@@ -486,6 +493,9 @@ fun SettingsScreen(
 
             }
 
+            if (page == SettingsPage.Ui) {
+                UiSpecEditor(history = history, settings = settings, onMessage = { msg = it })
+            }
             if (page == SettingsPage.About) {
             SectionCard("แอป", "เชื่อมต่อกับ daemon: " + when (conn) {
                 ConnState.ONLINE -> "ออนไลน์ ($curWs)"
@@ -1143,6 +1153,97 @@ private fun NodeCard(
             color = MaterialTheme.colorScheme.error)
     }
 }
+
+/**
+ * Edits the daemon's server-driven UI spec from the phone. The spec is a JSON
+ * object; only the keys that are present are changed, so a small edit does not
+ * have to repeat the whole spec. Saving writes to the daemon, which merges and
+ * returns the effective spec, and that is what the app caches.
+ */
+@Composable
+private fun UiSpecEditor(
+    history: HistoryApi,
+    settings: SettingsStore,
+    onMessage: (String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val moshi = remember { Moshi.Builder().add(KotlinJsonAdapterFactory()).build() }
+    val cached by settings.uiSpecFlow.collectAsStateWithLifecycle(initialValue = UiSpec())
+    var text by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
+    // Open with what the daemon currently serves, so the editor is never blank
+    // and the reader can see the defaults they are editing.
+    LaunchedEffect(Unit) {
+        busy = true
+        val raw = runCatching { history.uiSpecRaw() }.getOrNull()
+        if (raw != null) {
+            runCatching { settings.saveUiSpec(raw) }
+            text = prettyJson(raw)
+        } else {
+            text = prettyJson(runCatching { moshi.adapter(UiSpec::class.java).toJson(cached) }.getOrDefault("{}"))
+        }
+        busy = false
+    }
+
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("หน้าจอขับเคลื่อนจาก daemon", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "แก้ JSON ด้านล่างแล้วบันทึก — แอพจะดึงค่าใหม่ไปใช้เองโดยไม่ต้องติดตั้งเวอร์ชันใหม่\n" +
+                "ใส่เฉพาะคีย์ที่ต้องการเปลี่ยน เช่น {\"strings\":{\"retry\":\"กดซ้ำ\"}}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
+            textStyle = MaterialTheme.typography.bodySmall,
+            singleLine = false,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = !busy && text.isNotBlank(),
+                onClick = {
+                    busy = true
+                    scope.launch {
+                        val effective = runCatching { history.saveUiSpec(text) }.getOrNull()
+                        if (effective != null) {
+                            runCatching { settings.saveUiSpec(effective) }
+                            text = prettyJson(effective)
+                            onMessage("บันทึกหน้าจอแล้ว — มีผลทันที")
+                        } else {
+                            onMessage("บันทึกไม่สำเร็จ — ตรวจว่า daemon ออนไลน์และ JSON ถูกต้อง")
+                        }
+                        busy = false
+                    }
+                },
+            ) { Text("บันทึกไปที่ daemon") }
+            OutlinedButton(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    scope.launch {
+                        val reset = """{"theme":null,"strings":null,"topbar":null,"tool_block":null,"error_card":null,"composer":null}"""
+                        val effective = runCatching { history.saveUiSpec(reset) }.getOrNull()
+                        if (effective != null) {
+                            runCatching { settings.saveUiSpec(effective) }
+                            text = prettyJson(effective)
+                            onMessage("รีเซ็ตเป็นค่าเริ่มต้นแล้ว")
+                        } else {
+                            onMessage("รีเซ็ตไม่สำเร็จ")
+                        }
+                        busy = false
+                    }
+                },
+            ) { Text("ค่าเริ่มต้น") }
+        }
+    }
+}
+
+/** Re-indents a JSON string so it can be read and edited. */
+private fun prettyJson(raw: String): String =
+    runCatching { JSONObject(raw).toString(2) }.getOrDefault(raw)
 
 @Composable
 private fun UpdateRow(settings: SettingsStore) {

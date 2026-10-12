@@ -37,6 +37,30 @@ class SettingsStore(private val ctx: Context) {
     private val tokenFields = stringPreferencesKey("token_fields")
     private val tokenFieldsByProvider =
         stringPreferencesKey("token_fields_by_provider")
+    // The daemon's server-driven UI spec, cached verbatim so the app keeps its
+    // last known look when the daemon is unreachable.
+    private val uiSpec = stringPreferencesKey("ui_spec")
+    private val uiSpecAdapter = com.squareup.moshi.Moshi.Builder()
+        .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+        .build()
+        .adapter(com.tulipskun.aixodia.data.model.UiSpec::class.java)
+
+    /**
+     * The effective UI spec. Falls back to the app's built-in defaults when the
+     * daemon has never been reached, or when the cached JSON is unreadable.
+     */
+    val uiSpecFlow: Flow<com.tulipskun.aixodia.data.model.UiSpec> = ctx.ds.data.map { prefs ->
+        val raw = prefs[uiSpec].orEmpty()
+        if (raw.isBlank()) com.tulipskun.aixodia.data.model.UiSpec()
+        else runCatching { uiSpecAdapter.fromJson(raw) }.getOrNull()
+            ?: com.tulipskun.aixodia.data.model.UiSpec()
+    }
+
+    /** Caches the raw spec JSON exactly as the daemon sent it. */
+    suspend fun saveUiSpec(raw: String) {
+        if (raw.isBlank()) return
+        ctx.ds.edit { it[uiSpec] = raw }
+    }
 
     /** The footer format for a provider, falling back to the shared default. */
     fun tokenFieldsFlow(provider: String) = ctx.ds.data.map { prefs ->

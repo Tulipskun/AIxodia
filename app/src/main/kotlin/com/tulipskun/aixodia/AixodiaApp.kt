@@ -6,6 +6,7 @@ import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.repo.ChatRepository
+import com.tulipskun.aixodia.data.repo.UiSpecSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +22,9 @@ class AixodiaApp : Application() {
         // the app is in the background (a kernel ends, a new one is pushed), and
         // the chat should be current on the next open without anyone asking.
         container.discovery.start()
+        // The daemon owns the app's look and wording (server-driven UI); pull
+        // its spec on start so an edit there shows up on the next open.
+        container.uiSync.start()
     }
 }
 
@@ -33,4 +37,5 @@ class AppContainer(app: Application) {
     val socket = AiDirectSocket(settings)
     val repo = ChatRepository(db, historyApi, socket)
     val discovery = DaemonDiscovery(settings, historyApi, socket, scope)
+    val uiSync = UiSpecSync(settings, historyApi, scope)
 }

@@ -437,6 +437,43 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun ping(): Int = withContext(Dispatchers.IO) { d1.ping() }
 
     /**
+     * The daemon's server-driven UI spec as raw JSON, so the app can cache the
+     * exact bytes it received. Null when the daemon is unreachable.
+     */
+    suspend fun uiSpecRaw(): String? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/api/ui")
+                .header("Authorization", "Bearer ${c.token}").get().build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use null
+                r.body?.string()
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Saves a partial UI spec on the daemon (merged server-side) and returns the
+     * effective spec, so the screen can show what actually took effect.
+     */
+    suspend fun saveUiSpec(raw: String): String? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/api/ui")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .put(raw.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use null
+                r.body?.string()
+            }
+        }.getOrNull()
+    }
+
+    /**
      * Resolves the Cloudflare account and database from the token and reports
      * what was found, so the settings screen can show it and remember it
      * (AX-030). Throws with Cloudflare's own message when it cannot.

@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.remote.ConnState
+import com.tulipskun.aixodia.ui.LocalUiSpec
 
 /**
  * The connection state as a bare colour — green / amber / red — with no word
@@ -49,10 +50,11 @@ import com.tulipskun.aixodia.data.remote.ConnState
  */
 @Composable
 fun ConnDot(c: ConnState) {
+    val ui = LocalUiSpec.current
     val (label, color) = when (c) {
-        ConnState.ONLINE -> "ออนไลน์" to MaterialTheme.colorScheme.primary
-        ConnState.CONNECTING -> "กำลังต่อ" to MaterialTheme.colorScheme.tertiary
-        ConnState.OFFLINE -> "ออฟไลน์" to MaterialTheme.colorScheme.error
+        ConnState.ONLINE -> ui.online to MaterialTheme.colorScheme.primary
+        ConnState.CONNECTING -> ui.connecting to MaterialTheme.colorScheme.tertiary
+        ConnState.OFFLINE -> ui.offline to MaterialTheme.colorScheme.error
     }
     Box(
         Modifier
@@ -107,6 +109,7 @@ fun SetupNeeded(onOpen: () -> Unit) {
 /** Empty thread — ChatGPT-style welcome with a clear call to action. */
 @Composable
 fun EmptyChatState() {
+    val ui = LocalUiSpec.current
     Column(
         Modifier
             .fillMaxWidth()
@@ -121,11 +124,11 @@ fun EmptyChatState() {
             tint = MaterialTheme.colorScheme.primary,
         )
         Text(
-            "เริ่มสนทนากับ agent",
+            ui.emptyTitle,
             style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            "พิมพ์งานด้านล่าง แล้ว agent จะทำต่อแม้ปิดแอป — ประวัติกลับมาตอนเปิดใหม่",
+            ui.emptyHint,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -174,6 +177,7 @@ fun ChatComposer(
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val ui = LocalUiSpec.current
     Row(
         modifier
             .fillMaxWidth()
@@ -184,19 +188,19 @@ fun ChatComposer(
             value = draft,
             onValueChange = onDraftChange,
             modifier = Modifier.weight(1f),
-            placeholder = { Text("ส่งข้อความ…") },
+            placeholder = { Text(ui.composerPlaceholder) },
             shape = MaterialTheme.shapes.large,
-            maxLines = 5,
+            maxLines = ui.composer.maxLines.coerceIn(1, 12),
         )
         Spacer(Modifier.size(8.dp))
-        if (busy) {
+        if (busy && ui.composer.showStopButton) {
             FilledTonalIconButton(
                 onClick = onStop,
                 modifier = Modifier
                     .size(48.dp)
-                    .semantics { contentDescription = "หยุดการทำงาน" },
+                    .semantics { contentDescription = ui.stop },
             ) {
-                Icon(Icons.Default.Stop, contentDescription = "หยุดการทำงาน")
+                Icon(Icons.Default.Stop, contentDescription = ui.stop)
             }
         } else {
             FilledIconButton(
@@ -204,9 +208,9 @@ fun ChatComposer(
                 enabled = draft.isNotBlank(),
                 modifier = Modifier
                     .size(48.dp)
-                    .semantics { contentDescription = "ส่ง" },
+                    .semantics { contentDescription = ui.send },
             ) {
-                Icon(Icons.Default.Send, contentDescription = "ส่ง")
+                Icon(Icons.Default.Send, contentDescription = ui.send)
             }
         }
     }

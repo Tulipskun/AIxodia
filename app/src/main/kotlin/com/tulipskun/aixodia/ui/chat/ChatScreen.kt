@@ -105,6 +105,7 @@ import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.repo.ChatRepository
+import com.tulipskun.aixodia.ui.LocalUiSpec
 import com.tulipskun.aixodia.ui.display.ChatComposer
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
@@ -186,7 +187,6 @@ fun ChatScreen(
     val liveThinkingAgent by vm.liveThinkingAgent.collectAsStateWithLifecycle()
     val liveSteps by vm.liveSteps.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
     // differs: Anthropic has no reasoning count to show.
@@ -196,6 +196,7 @@ fun ChatScreen(
     val pickedProvider by vm.selectedProvider.collectAsStateWithLifecycle()
     val pickedModel by vm.selectedModel.collectAsStateWithLifecycle()
     val hasStoredRoute by vm.hasStoredRoute.collectAsStateWithLifecycle()
+    val ui = LocalUiSpec.current
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by rememberSaveable { mutableStateOf("") }
@@ -336,13 +337,13 @@ fun ChatScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  ตั้งค่า")
+                        Text("  " + ui.settings)
                     }
                     TextButton(
                         onClick = { scope.launch { drawer.close() }; showProviders = true },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("ผู้ให้บริการ")
+                        Text(ui.providers)
                     }
                     UpdateRow(settings)
                 },
@@ -364,39 +365,43 @@ fun ChatScreen(
                                 maxLines = 1,
                                 style = MaterialTheme.typography.titleMedium,
                             )
-                            AssistChip(
-                                onClick = {
-                                    vm.loadProviders()
-                                    showModelPicker = true
-                                },
-                                label = {
-                                    Text(
-                                        when {
-                                            pickedProvider.isBlank() -> "Agent default"
-                                            pickedModel.isBlank() -> "$pickedProvider · เลือก model"
-                                            else -> "$pickedProvider · $pickedModel"
-                                        },
-                                        maxLines = 1,
-                                    )
-                                },
-                                modifier = Modifier.height(32.dp),
-                            )
+                            if (ui.topbar.showModelChip) {
+                                AssistChip(
+                                    onClick = {
+                                        vm.loadProviders()
+                                        showModelPicker = true
+                                    },
+                                    label = {
+                                        Text(
+                                            when {
+                                                pickedProvider.isBlank() -> ui.agentDefault
+                                                pickedModel.isBlank() -> "$pickedProvider · ${ui.pickModel}"
+                                                else -> "$pickedProvider · $pickedModel"
+                                            },
+                                            maxLines = 1,
+                                        )
+                                    },
+                                    modifier = Modifier.height(32.dp),
+                                )
+                            }
                         }
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawer.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "เมนูเซสชัน")
+                            Icon(Icons.Default.Menu, contentDescription = ui.menu)
                         }
                     },
                     actions = {
-                        IconButton(onClick = { vm.refresh() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "ดึงข้อมูลล่าสุด")
+                        if (ui.topbar.showRefresh) {
+                            IconButton(onClick = { vm.refresh() }) {
+                                Icon(Icons.Default.Refresh, contentDescription = ui.refresh)
+                            }
                         }
                         // Status at a glance: a coloured dot and how long the
                         // daemon has been up. No words — the colour is the state.
-                        ConnDot(conn)
-                        if (daemonStartedAt > 0L) {
-                            val uptime = formatUptime(daemonStartedAt, uptimeNow)
+                        if (ui.topbar.showStatusDot) ConnDot(conn)
+                        if (ui.topbar.showUptime && daemonStartedAt > 0L) {
+                            val uptime = formatUptime(daemonStartedAt, uptimeNow, ui.topbar.uptimeFormat)
                             if (uptime.isNotBlank()) {
                                 Text(
                                     uptime,
@@ -495,10 +500,10 @@ fun ChatScreen(
                         startsAfterUser = index > 0 && messages[index - 1].role == "user",
                         onCopy = {
                             clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
-                            toast = context.getString(R.string.copied)
+                            toast = ui.copied
                         },
                         tokenFields = tokenFields,
-                        copyLabel = context.getString(R.string.copy_long_press),
+                        copyLabel = ui.copyHint,
                     )
                 }
                 // A failed turn stays visible as a retryable card until the user
@@ -805,13 +810,24 @@ private fun UpdateRow(settings: SettingsStore) {
  * Uptime as a clock-style readout, seconds included so it visibly ticks:
  * "02:15:30", "00:05:30", "00:00:45".
  */
-fun formatUptime(startedUnix: Long, nowMs: Long = System.currentTimeMillis()): String {
+fun formatUptime(
+    startedUnix: Long,
+    nowMs: Long = System.currentTimeMillis(),
+    pattern: String = "HH:mm:ss",
+): String {
     val secs = (nowMs / 1000 - startedUnix).coerceAtLeast(0)
-    return String.format(
-        Locale.US,
-        "%02d:%02d:%02d",
-        secs / 3600,
-        (secs % 3600) / 60,
-        secs % 60,
-    )
+    val h = secs / 3600
+    val m = (secs % 3600) / 60
+    val s = secs % 60
+    val sep = if (pattern.contains(":")) ":" else " "
+    val parts = pattern.split(Regex("[:\\s]+")).filter { it.isNotBlank() }.mapNotNull { token ->
+        when {
+            token.startsWith("H") -> String.format(Locale.US, "%02d", h)
+            token.startsWith("h") -> h.toString()
+            token.startsWith("m") -> String.format(Locale.US, "%02d", m)
+            token.startsWith("s") -> String.format(Locale.US, "%02d", s)
+            else -> null
+        }
+    }
+    return parts.joinToString(sep)
 }
