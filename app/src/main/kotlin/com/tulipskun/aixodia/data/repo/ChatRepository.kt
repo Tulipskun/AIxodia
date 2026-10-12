@@ -233,6 +233,15 @@ class ChatRepository(
     suspend fun node(): com.tulipskun.aixodia.data.remote.NodeInfo? =
         runCatching { history.node() }.getOrNull()
 
+    /** Uploads one attachment; null when the daemon could not take it. */
+    suspend fun uploadAttachment(
+        sid: String,
+        name: String,
+        mime: String,
+        open: () -> java.io.InputStream?,
+    ): com.tulipskun.aixodia.data.model.AttachmentRef? =
+        history.uploadAttachment(sid, name, mime, open)
+
     /** Global provider health/key counts for the session picker caption. */
     suspend fun providerStatuses(): List<com.tulipskun.aixodia.data.model.ProviderStatus> = history.providers()
 
@@ -278,9 +287,13 @@ class ChatRepository(
      * A repeat tap on the last, already-answered-or-failed question retries
      * that same row instead of stacking a twin bubble (Claude-like).
      */
-    suspend fun send(sid: String, text: String): Boolean {
+    suspend fun send(
+        sid: String,
+        text: String,
+        attachments: List<com.tulipskun.aixodia.data.model.AttachmentRef> = emptyList(),
+    ): Boolean {
         val clean = text.trim()
-        if (clean.isEmpty()) return true
+        if (clean.isEmpty() && attachments.isEmpty()) return true
         try {
             val lastSeq = db.messages().maxSeq(sid)
             if (lastSeq > 0) {
@@ -289,7 +302,7 @@ class ChatRepository(
                     if (last.pending) return false
                     val clientMsgId = "$sid:${System.currentTimeMillis()}"
                     db.messages().upsert(last.copy(pending = true, clientMsgId = clientMsgId, createdAt = System.currentTimeMillis()))
-                    if (socket.send(sid, clean, clientMsgId)) {
+                    if (socket.send(sid, clean, clientMsgId, attachments)) {
                         db.messages().markAcked(clientMsgId)
                     }
                     return true
@@ -313,7 +326,7 @@ class ChatRepository(
                 clientMsgId = clientMsgId,
             )
         )
-        val queued = socket.send(sid, clean, clientMsgId)
+        val queued = socket.send(sid, clean, clientMsgId, attachments)
         if (queued) {
             db.messages().markAcked(clientMsgId)
         }

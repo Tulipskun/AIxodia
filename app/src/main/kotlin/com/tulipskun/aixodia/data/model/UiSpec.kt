@@ -28,6 +28,7 @@ data class UiSpec(
     val appName get() = s("app_name", "AIxodia")
     val composerPlaceholder get() = s("composer_placeholder", "ส่งข้อความ…")
     val send get() = s("send", "ส่ง")
+    val attach get() = s("attach", "แนบไฟล์")
     val stop get() = s("stop", "หยุดการทำงาน")
     val retry get() = s("retry", "ลองอีกครั้ง")
     val dismiss get() = s("dismiss", "ปิด")
@@ -91,4 +92,5 @@ data class ErrorCardSpec(
 data class ComposerSpec(
     @Json(name = "max_lines") val maxLines: Int = 5,
     @Json(name = "show_stop_button") val showStopButton: Boolean = true,
+    @Json(name = "show_attach") val showAttach: Boolean = true,
 )

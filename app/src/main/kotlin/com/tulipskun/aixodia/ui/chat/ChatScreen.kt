@@ -3,6 +3,8 @@
 package com.tulipskun.aixodia.ui.chat
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -172,7 +174,9 @@ fun ChatScreen(
         return
     }
 
-    val vm: ChatViewModel = viewModel(key = sessId) { ChatViewModel(repo, settings, sessId) }
+    val vm: ChatViewModel = viewModel(key = sessId) {
+        ChatViewModel(repo, settings, sessId, context.applicationContext)
+    }
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
     val sessions by vm.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
     val conn by vm.conn.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
@@ -197,6 +201,7 @@ fun ChatScreen(
     val pickedModel by vm.selectedModel.collectAsStateWithLifecycle()
     val hasStoredRoute by vm.hasStoredRoute.collectAsStateWithLifecycle()
     val ui = LocalUiSpec.current
+    val context = LocalContext.current
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by rememberSaveable { mutableStateOf("") }
@@ -220,6 +225,14 @@ fun ChatScreen(
         ProvidersScreen(history = history, onBack = { showProviders = false })
         return
     }
+
+    // Any file type: images, video and documents all take the same path. The
+    // system picker needs no storage permission.
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.attach(uri)
+    }
+    val pendingAttachments by vm.pendingAttachments.collectAsStateWithLifecycle()
+    val uploading by vm.uploading.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
     val clip = LocalClipboardManager.current
@@ -480,6 +493,10 @@ fun ChatScreen(
                             onSend = { vm.send(draft); draft = "" },
                             onStop = { vm.stop() },
                             modifier = Modifier.align(Alignment.CenterHorizontally),
+                            attachments = pendingAttachments,
+                            uploading = uploading,
+                            onAttach = { pickFile.launch(arrayOf("*/*")) },
+                            onRemoveAttachment = { vm.removeAttachment(it) },
                         )
                     }
                 }

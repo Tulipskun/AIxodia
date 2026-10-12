@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import android.os.SystemClock
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
+import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ToolStep
@@ -80,6 +81,8 @@ class ChatViewModel(
     private val repo: ChatRepository,
     private val settings: SettingsStore,
     initialSession: String,
+    // The application context only, to open a picked file's stream for upload.
+    private val appContext: android.content.Context? = null,
 ) : ViewModel() {
     /** The chat currently on screen; set by ensureSession, like a chat app. */
     var sessionId: String = initialSession
@@ -129,8 +132,13 @@ class ChatViewModel(
     val turnStats = MutableStateFlow(TurnStats())
     /** Unix second the daemon process started; 0 = unknown/not polled yet. */
     val daemonStartedAt = MutableStateFlow(0L)
+    /** Files picked and uploaded, waiting to go out with the next message. */
+    val pendingAttachments = MutableStateFlow<List<AttachmentRef>>(emptyList())
+    /** True while an upload is in flight, so the picker can be disabled. */
+    val uploading = MutableStateFlow(false)
     /** The last text sent, kept so a failed turn can be retried verbatim. */
     private var lastSentText = ""
+    private var lastAttachments: List<AttachmentRef> = emptyList()
     /** The error to show as a retryable card, or "" when nothing failed. */
     val errorCard = MutableStateFlow("")
     private var liveSubText = ""
@@ -536,9 +544,45 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Uploads a picked file to the daemon. The daemon answers with the path it
+     * stored, which rides along with the message so the agent can read it.
+     */
+    fun attach(uri: android.net.Uri) {
+        val ctx = appContext ?: return
+        uploading.value = true
+        viewModelScope.launch {
+            val resolver = ctx.contentResolver
+            var name = "file"
+            var mime = ""
+            runCatching {
+                resolver.query(uri, null, null, null, null)?.use { c ->
+                    val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0 && c.moveToFirst()) name = c.getString(idx) ?: name
+                }
+                mime = resolver.getType(uri).orEmpty()
+            }
+            val ref = repo.uploadAttachment(sessionId, name, mime) {
+                runCatching { resolver.openInputStream(uri) }.getOrNull()
+            }
+            if (ref == null) {
+                notice.value = "อัปโหลดไฟล์ไม่สำเร็จ — ลองอีกครั้ง"
+            } else {
+                pendingAttachments.value = pendingAttachments.value + ref
+            }
+            uploading.value = false
+        }
+    }
+
+    fun removeAttachment(index: Int) {
+        pendingAttachments.value = pendingAttachments.value.filterIndexed { i, _ -> i != index }
+    }
+
     fun send(text: String) {
-        if (text.isBlank()) return
+        val attachments = pendingAttachments.value
+        if (text.isBlank() && attachments.isEmpty()) return
         lastSentText = text.trim()
+        lastAttachments = attachments
         errorCard.value = ""
         busy.value = true
         liveChars = 0
@@ -558,14 +602,16 @@ class ChatViewModel(
             running = true,
         )
         viewModelScope.launch {
-            val fresh = repo.send(sessionId, text.trim())
+            val fresh = repo.send(sessionId, text.trim(), attachments)
+            pendingAttachments.value = emptyList()
             if (!fresh) notice.value = "ส่งไปแล้ว กำลังรอการตอบกลับ"
         }
     }
 
     /** Re-sends the last message after a failure, reusing the same text. */
     fun retryLast() {
-        if (lastSentText.isBlank()) return
+        if (lastSentText.isBlank() && lastAttachments.isEmpty()) return
+        pendingAttachments.value = lastAttachments
         send(lastSentText)
     }
 

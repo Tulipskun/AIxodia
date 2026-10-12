@@ -188,6 +188,8 @@ data class AiInput(
     // cancel stops the whole turn.
     @Json(name = "job_id") val jobId: String = "",
     @Json(name = "client_msg_id") val clientMsgId: String = "",
+    // Files the phone already uploaded; the daemon hands their paths to the agent.
+    @Json(name = "attachments") val attachments: List<AttachmentRef> = emptyList(),
 )
 
 @JsonClass(generateAdapter = true)

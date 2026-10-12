@@ -18,10 +18,17 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.source
+import java.io.InputStream
+import java.net.URLEncoder
 
 /**
  * The app's two back ends in one place (D-011).
@@ -435,6 +442,55 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) { d1.ping() }
+
+    // Uploads can be large and slow; the shared client's 150s call timeout would
+    // cut a big video off halfway. This one waits, and streams the body.
+    private val uploadClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.MINUTES)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(12, TimeUnit.MINUTES)
+        .build()
+
+    /**
+     * Uploads one attachment and returns where the daemon stored it. The bytes
+     * are streamed, never held in memory whole, so a large file does not have to
+     * fit in RAM. Null means the upload failed.
+     */
+    suspend fun uploadAttachment(
+        sessionId: String,
+        name: String,
+        mime: String,
+        open: () -> InputStream?,
+    ): com.tulipskun.aixodia.data.model.AttachmentRef? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatching {
+            val query = "session_id=" + URLEncoder.encode(sessionId, "UTF-8") +
+                "&name=" + URLEncoder.encode(name, "UTF-8")
+            val body = object : RequestBody() {
+                override fun contentType(): MediaType? = mime.toMediaTypeOrNull()
+                override fun writeTo(sink: BufferedSink) {
+                    val input = open() ?: throw java.io.IOException("เปิดไฟล์ไม่ได้")
+                    input.source().use { sink.writeAll(it) }
+                }
+            }
+            val req = Request.Builder().url("$base/v1/attachments?$query")
+                .header("Authorization", "Bearer ${c.token}")
+                .post(body)
+                .build()
+            uploadClient.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use null
+                val o = JSONObject(r.body!!.string())
+                com.tulipskun.aixodia.data.model.AttachmentRef(
+                    name = o.optString("name"),
+                    path = o.optString("path"),
+                    mime = o.optString("mime"),
+                    size = o.optLong("size"),
+                )
+            }
+        }.getOrNull()
+    }
 
     /**
      * The daemon's server-driven UI spec as raw JSON, so the app can cache the

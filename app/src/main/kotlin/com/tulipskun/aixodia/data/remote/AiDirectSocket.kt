@@ -142,11 +142,17 @@ class AiDirectSocket(private val settings: SettingsStore) {
     }
 
     /** Returns true when the frame was handed to the socket. */
-    fun send(sessionId: String, text: String, clientMsgId: String): Boolean {
+    fun send(
+        sessionId: String,
+        text: String,
+        clientMsgId: String,
+        attachments: List<com.tulipskun.aixodia.data.model.AttachmentRef> = emptyList(),
+    ): Boolean {
         val frame = AiInput(
             sessionId = sessionId,
             content = listOf(ContentPart(text = text)),
             clientMsgId = clientMsgId,
+            attachments = attachments,
         )
         return ws?.send(inAdapter.toJson(frame)) == true
     }

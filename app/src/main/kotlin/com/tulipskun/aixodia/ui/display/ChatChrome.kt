@@ -2,6 +2,7 @@ package com.tulipskun.aixodia.ui.display
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,9 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -39,6 +44,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.ui.LocalUiSpec
 
@@ -176,41 +182,79 @@ fun ChatComposer(
     onSend: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
+    attachments: List<AttachmentRef> = emptyList(),
+    uploading: Boolean = false,
+    onAttach: () -> Unit = {},
+    onRemoveAttachment: (Int) -> Unit = {},
 ) {
     val ui = LocalUiSpec.current
-    Row(
-        modifier
-            .fillMaxWidth()
-            .widthIn(max = 900.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        OutlinedTextField(
-            value = draft,
-            onValueChange = onDraftChange,
-            modifier = Modifier.weight(1f),
-            placeholder = { Text(ui.composerPlaceholder) },
-            shape = MaterialTheme.shapes.large,
-            maxLines = ui.composer.maxLines.coerceIn(1, 12),
-        )
-        Spacer(Modifier.size(8.dp))
-        if (busy && ui.composer.showStopButton) {
-            FilledTonalIconButton(
-                onClick = onStop,
-                modifier = Modifier
-                    .size(48.dp)
-                    .semantics { contentDescription = ui.stop },
+    Column(modifier.fillMaxWidth().widthIn(max = 900.dp)) {
+        // Picked files wait above the field as removable chips, so it is clear
+        // what will travel with the next message before it is sent.
+        if (attachments.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(Icons.Default.Stop, contentDescription = ui.stop)
+                attachments.forEachIndexed { index, a ->
+                    AssistChip(
+                        onClick = { onRemoveAttachment(index) },
+                        label = { Text(a.label(), maxLines = 1) },
+                        trailingIcon = {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "เอา ${a.name} ออก",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                    )
+                }
             }
-        } else {
-            FilledIconButton(
-                onClick = onSend,
-                enabled = draft.isNotBlank(),
-                modifier = Modifier
-                    .size(48.dp)
-                    .semantics { contentDescription = ui.send },
-            ) {
-                Icon(Icons.Default.Send, contentDescription = ui.send)
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            if (ui.composer.showAttach) {
+                FilledTonalIconButton(
+                    onClick = onAttach,
+                    enabled = !uploading,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics { contentDescription = ui.attach },
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = ui.attach)
+                }
+                Spacer(Modifier.size(8.dp))
+            }
+            OutlinedTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text(ui.composerPlaceholder) },
+                shape = MaterialTheme.shapes.large,
+                maxLines = ui.composer.maxLines.coerceIn(1, 12),
+            )
+            Spacer(Modifier.size(8.dp))
+            if (busy && ui.composer.showStopButton) {
+                FilledTonalIconButton(
+                    onClick = onStop,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics { contentDescription = ui.stop },
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = ui.stop)
+                }
+            } else {
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = draft.isNotBlank() || attachments.isNotEmpty(),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics { contentDescription = ui.send },
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = ui.send)
+                }
             }
         }
     }
