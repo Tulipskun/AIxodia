@@ -297,9 +297,10 @@ class D1Api(private val settings: SettingsStore) {
                 return NodeInfo(
                     tunnelUrl = url,
                     version = version,
-                    // A beat older than two minutes means the daemon stopped
-                    // writing: the phone still has the address, but it is stale.
-                    online = ageS in 0..120,
+                    // The daemon rewrites this row every 30s. A beat older than
+                    // 90s means it stopped writing. A negative age (phone clock
+                    // behind the server's) still counts as alive.
+                    online = ageS < 90,
                     ageS = ageS,
                     startedAt = started,
                 )
