@@ -120,7 +120,20 @@ interface MessageDao {
     suspend fun deleteSession(sid: String)
 }
 
-@Database(entities = [SessionEntity::class, MessageEntity::class], version = 5, exportSchema = false)
+/**
+ * The schema version, declared once so a test can check it against the
+ * migrations. Room compares a hash generated from the entities against this
+ * number, so adding a field to an entity without moving it is not a compile
+ * error and not a warning: it throws the first time the database is opened, and
+ * the app closes before anything on screen. That is what shipped as v0.1.270.
+ */
+internal const val DB_VERSION = 6
+
+// The version has to move whenever an entity gains a column, and it is the one
+// number nothing else forces you to touch: adding a field to MessageEntity and
+// writing the migration is enough to compile, and the crash only arrives later,
+// on the phone, the first time the database is opened. See DatabaseVersionTest.
+@Database(entities = [SessionEntity::class, MessageEntity::class], version = DB_VERSION, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessions(): SessionDao
     abstract fun messages(): MessageDao
