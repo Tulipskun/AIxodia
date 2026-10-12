@@ -115,101 +115,110 @@ fun SessionDrawerContent(
     val groups = remember(filtered) { groupSessionsByDate(filtered) }
 
     ModalDrawerSheet {
+        // The list scrolls and takes the room it needs; the footer stays pinned
+        // to the bottom of the sheet. Sharing one scroll left the footer
+        // floating mid-sheet with dead space under it.
         Column(
             Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
                 .padding(bottom = 16.dp),
         ) {
-            Text(
-                "แชท",
-                modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 4.dp),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                "${sessions.size} เซสชัน",
-                modifier = Modifier.padding(horizontal = 20.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            OutlinedButton(
-                onClick = onNewChat,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .fillMaxWidth(),
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
             ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("  แชทใหม่")
-            }
-
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .fillMaxWidth(),
-                placeholder = { Text("ค้นหาแชท…") },
-                leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                },
-                singleLine = true,
-                shape = MaterialTheme.shapes.medium,
-            )
-
-            HorizontalDivider(Modifier.padding(vertical = 12.dp))
-
-            if (sessions.isEmpty()) {
-                Column(
-                    Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.ChatBubbleOutline,
-                        contentDescription = null,
-                        modifier = Modifier.size(36.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "ยังไม่มีแชท",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text(
-                        "กด “แชทใหม่” เพื่อเริ่มสนทนากับ agent",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else if (groups.isEmpty()) {
                 Text(
-                    "ไม่พบแชทที่ตรงกับ “$query”",
-                    Modifier.padding(20.dp),
+                    "แชท",
+                    modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 4.dp),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "${sessions.size} เซสชัน",
+                    modifier = Modifier.padding(horizontal = 20.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
-                groups.forEach { group ->
-                    Text(
-                        group.label,
-                        modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    group.sessions.forEach { s ->
-                        SessionRow(
-                            s = s,
-                            active = s.id == activeId,
-                            onOpen = { onOpen(s.id) },
-                            onLongPress = { onLongPress(s) },
+
+                OutlinedButton(
+                    onClick = onNewChat,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("  แชทใหม่")
+                }
+
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .fillMaxWidth(),
+                    placeholder = { Text("ค้นหาแชท…") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                )
+
+                HorizontalDivider(Modifier.padding(vertical = 12.dp))
+
+                if (sessions.isEmpty()) {
+                    Column(
+                        Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.ChatBubbleOutline,
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Text(
+                            "ยังไม่มีแชท",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            "กด “แชทใหม่” เพื่อเริ่มสนทนากับ agent",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (groups.isEmpty()) {
+                    Text(
+                        "ไม่พบแชทที่ตรงกับ “$query”",
+                        Modifier.padding(20.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    groups.forEach { group ->
+                        Text(
+                            group.label,
+                            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        group.sessions.forEach { s ->
+                            SessionRow(
+                                s = s,
+                                active = s.id == activeId,
+                                onOpen = { onOpen(s.id) },
+                                onLongPress = { onLongPress(s) },
+                            )
+                        }
                     }
                 }
             }
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(Modifier.padding(top = 8.dp))
             footer()
         }
     }

@@ -100,6 +100,7 @@ data class ComposerSpec(
     @Json(name = "max_lines") val maxLines: Int = 5,
     @Json(name = "show_stop_button") val showStopButton: Boolean = true,
     @Json(name = "show_attach") val showAttach: Boolean = true,
+    @Json(name = "show_attach_title") val showAttachTitle: Boolean = false,
 )
 
 

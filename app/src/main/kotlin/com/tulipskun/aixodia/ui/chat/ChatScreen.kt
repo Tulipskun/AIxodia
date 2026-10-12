@@ -431,19 +431,15 @@ fun ChatScreen(
                 footer = {
                     // Settings lives in the drawer, like ChatGPT and Claude put
                     // it behind the hamburger, instead of an icon crowding the
-                    // top bar next to the status dot.
+                    // top bar next to the status dot. The footer is anchored to
+                    // the bottom of the sheet, so this row sits low instead of
+                    // floating under a long list.
                     TextButton(
                         onClick = { scope.launch { drawer.close() }; showSettings = true },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("  " + ui.settings)
-                    }
-                    TextButton(
-                        onClick = { scope.launch { drawer.close() }; showProviders = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(ui.providers)
                     }
                     // Rows the daemon added to the drawer, each opening one of
                     // its composed screens.

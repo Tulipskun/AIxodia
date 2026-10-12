@@ -289,11 +289,15 @@ fun AttachSheet(
                 .navigationBarsPadding()
                 .padding(bottom = 12.dp),
         ) {
-            Text(
-                ui.attachTitle,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
-            )
+            // The two options say everything; a heading above them repeated it
+            // and pushed the rows down, so it is off unless a spec asks for it.
+            if (ui.composer.showAttachTitle) {
+                Text(
+                    ui.attachTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+                )
+            }
             AttachOption(Icons.Default.Image, ui.attachMedia, onMedia)
             AttachOption(Icons.Default.InsertDriveFile, ui.attachFile, onFile)
         }
