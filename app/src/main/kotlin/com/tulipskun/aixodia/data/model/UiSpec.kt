@@ -21,6 +21,10 @@ data class UiSpec(
     @Json(name = "tool_block") val toolBlock: ToolBlockSpec = ToolBlockSpec(),
     @Json(name = "error_card") val errorCard: ErrorCardSpec = ErrorCardSpec(),
     val composer: ComposerSpec = ComposerSpec(),
+    /** Whole screens the daemon composes from the app's built-in primitives. */
+    val screens: Map<String, UiScreen> = emptyMap(),
+    /** Extra rows the drawer shows, each opening a screen or running an action. */
+    @Json(name = "drawer_items") val drawerItems: List<UiItem> = emptyList(),
 ) {
     private fun s(key: String, fallback: String): String =
         strings[key]?.takeIf { it.isNotBlank() } ?: fallback
@@ -29,6 +33,9 @@ data class UiSpec(
     val composerPlaceholder get() = s("composer_placeholder", "ส่งข้อความ…")
     val send get() = s("send", "ส่ง")
     val attach get() = s("attach", "แนบไฟล์")
+    val attachTitle get() = s("attach_title", "แนบสิ่งที่ต้องการ")
+    val attachMedia get() = s("attach_media", "รูปภาพ / วิดีโอ")
+    val attachFile get() = s("attach_file", "ไฟล์แนบ")
     val stop get() = s("stop", "หยุดการทำงาน")
     val retry get() = s("retry", "ลองอีกครั้ง")
     val dismiss get() = s("dismiss", "ปิด")
@@ -93,4 +100,66 @@ data class ComposerSpec(
     @Json(name = "max_lines") val maxLines: Int = 5,
     @Json(name = "show_stop_button") val showStopButton: Boolean = true,
     @Json(name = "show_attach") val showAttach: Boolean = true,
+)
+
+
+/**
+ * A screen built from the app's component vocabulary. The app ships the
+ * primitives (text, button, toggle, field, list, chips, section); the daemon
+ * decides how they are arranged and worded. That is what lets a new screen ship
+ * without a new APK.
+ */
+@JsonClass(generateAdapter = true)
+data class UiScreen(
+    val title: String = "",
+    val subtitle: String = "",
+    val body: List<UiNode> = emptyList(),
+)
+
+/**
+ * One node in a spec screen. Only the fields the node's [type] uses are read,
+ * so one shape covers every primitive and the daemon can add a field without
+ * the app having to know it.
+ */
+@JsonClass(generateAdapter = true)
+data class UiNode(
+    val type: String = "",
+    // text
+    val value: String = "",
+    val style: String = "",
+    // button / toggle / field
+    val label: String = "",
+    val subtitle: String = "",
+    // action name plus its arguments; {key} in any string is replaced with the
+    // stored value of that key, so a screen can show live state.
+    val action: String = "",
+    val params: Map<String, String> = emptyMap(),
+    // toggle / field
+    val key: String = "",
+    val checked: Boolean = false,
+    val placeholder: String = "",
+    // container
+    val children: List<UiNode> = emptyList(),
+    val items: List<UiItem> = emptyList(),
+    val options: List<UiOption> = emptyList(),
+    val selected: String = "",
+)
+
+/** One row of a list node or of the drawer. */
+@JsonClass(generateAdapter = true)
+data class UiItem(
+    val title: String = "",
+    val subtitle: String = "",
+    val action: String = "",
+    val params: Map<String, String> = emptyMap(),
+    val trailing: String = "",
+)
+
+/** One chip of a chips node. */
+@JsonClass(generateAdapter = true)
+data class UiOption(
+    val label: String = "",
+    val value: String = "",
+    val action: String = "",
+    val params: Map<String, String> = emptyMap(),
 )

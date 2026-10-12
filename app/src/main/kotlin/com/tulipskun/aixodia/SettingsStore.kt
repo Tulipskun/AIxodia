@@ -40,6 +40,7 @@ class SettingsStore(private val ctx: Context) {
     // The daemon's server-driven UI spec, cached verbatim so the app keeps its
     // last known look when the daemon is unreachable.
     private val uiSpec = stringPreferencesKey("ui_spec")
+    private val specValuesKey = stringPreferencesKey("spec_values")
     private val uiSpecAdapter = com.squareup.moshi.Moshi.Builder()
         .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
         .build()
@@ -60,6 +61,32 @@ class SettingsStore(private val ctx: Context) {
     suspend fun saveUiSpec(raw: String) {
         if (raw.isBlank()) return
         ctx.ds.edit { it[uiSpec] = raw }
+    }
+
+    /**
+     * Values written by spec screens (a toggle, a field). Kept as an encoded
+     * key=value list; the encoding keeps a value containing ';' or '=' intact.
+     */
+    val specValuesFlow: Flow<Map<String, String>> = ctx.ds.data.map { prefs ->
+        prefs[specValuesKey].orEmpty().split(';')
+            .mapNotNull { entry ->
+                if (!entry.contains('=')) return@mapNotNull null
+                val key = entry.substringBefore('=')
+                val raw = entry.substringAfter('=')
+                if (key.isBlank()) null
+                else key to runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+            }
+            .toMap()
+    }
+
+    suspend fun setSpecValue(key: String, value: String) {
+        if (key.isBlank()) return
+        val encoded = java.net.URLEncoder.encode(value, "UTF-8")
+        ctx.ds.edit { prefs ->
+            val kept = prefs[specValuesKey].orEmpty().split(';')
+                .filter { it.isNotBlank() && it.substringBefore('=') != key }
+            prefs[specValuesKey] = (kept + "$key=$encoded").joinToString(";")
+        }
     }
 
     /** The footer format for a provider, falling back to the shared default. */

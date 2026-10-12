@@ -4,6 +4,7 @@ package com.tulipskun.aixodia.ui.chat
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -41,6 +42,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -108,6 +110,7 @@ import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.LocalUiSpec
+import com.tulipskun.aixodia.ui.display.AttachSheet
 import com.tulipskun.aixodia.ui.display.ChatComposer
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
@@ -116,6 +119,7 @@ import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SetupNeeded
+import com.tulipskun.aixodia.ui.display.SpecScreen
 import com.tulipskun.aixodia.ui.display.SubAgentPanel
 import com.tulipskun.aixodia.ui.display.ThinkingLine
 import com.tulipskun.aixodia.ui.display.TokenField
@@ -211,6 +215,9 @@ fun ChatScreen(
     var deleting by remember { mutableStateOf<ChatSession?>(null) }
     var showModelPicker by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf<ChatMessage?>(null) }
+    // Which daemon-composed screen is open, if any (AX-UI vocabulary).
+    var specScreen by remember { mutableStateOf<String?>(null) }
+    val specValues by settings.specValuesFlow.collectAsStateWithLifecycle(initialValue = emptyMap())
     var toast by remember { mutableStateOf("") }
 
     if (showSettings) {
@@ -226,9 +233,13 @@ fun ChatScreen(
         return
     }
 
-    // Any file type: images, video and documents all take the same path. The
-    // system picker needs no storage permission.
+    // Two system pickers behind one "+": the photo picker for images and video,
+    // the document picker for anything else. Neither needs a storage permission.
+    var showAttachSheet by remember { mutableStateOf(false) }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.attach(uri)
+    }
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) vm.attach(uri)
     }
     val pendingAttachments by vm.pendingAttachments.collectAsStateWithLifecycle()
@@ -313,6 +324,19 @@ fun ChatScreen(
     LaunchedEffect(showModelPicker) {
         if (showModelPicker) vm.loadSubAgentConfig()
     }
+    if (showAttachSheet) {
+        AttachSheet(
+            onMedia = {
+                showAttachSheet = false
+                pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            },
+            onFile = {
+                showAttachSheet = false
+                pickFile.launch(arrayOf("*/*"))
+            },
+            onDismiss = { showAttachSheet = false },
+        )
+    }
     if (showModelPicker) {
         ChatModelSheet(
             vm = vm,
@@ -328,6 +352,61 @@ fun ChatScreen(
             onDismiss = { showModelPicker = false },
         )
     }
+    // One dispatcher for every action a spec screen can name. An action the app
+    // does not know is ignored, so the daemon may introduce new ones safely.
+    val onSpecAction: (String, Map<String, String>) -> Unit = { action, params ->
+        when (action) {
+            "open_screen" -> params["screen"]?.takeIf { it.isNotBlank() }?.let { specScreen = it }
+            "close" -> specScreen = null
+            "open_settings" -> { specScreen = null; showSettings = true }
+            "open_providers" -> { specScreen = null; showProviders = true }
+            "new_chat" -> { specScreen = null; vm.newChat() }
+            "refresh" -> vm.refresh()
+            "send_text" -> { specScreen = null; vm.send(params["text"].orEmpty()) }
+            "open_url" -> params["url"]?.takeIf { it.isNotBlank() }?.let { url ->
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    )
+                }
+            }
+            "set_value" -> params["key"]?.takeIf { it.isNotBlank() }?.let { key ->
+                scope.launch { settings.setSpecValue(key, params["value"].orEmpty()) }
+            }
+            "put_ui" -> params["patch"]?.takeIf { it.isNotBlank() }?.let { patch ->
+                scope.launch {
+                    runCatching { history.saveUiSpec(patch)?.let { settings.saveUiSpec(it) } }
+                }
+            }
+        }
+    }
+    val openScreen = specScreen?.let { ui.screens[it] }
+    if (openScreen != null) {
+        BackHandler { specScreen = null }
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                TopAppBar(
+                    title = { Text(openScreen.title.ifBlank { "หน้าจอ" }, maxLines = 1) },
+                    navigationIcon = {
+                        IconButton(onClick = { specScreen = null }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
+                        }
+                    },
+                )
+            },
+        ) { pad ->
+            SpecScreen(
+                screen = openScreen,
+                values = specValues,
+                onAction = onSpecAction,
+                modifier = Modifier.padding(pad),
+            )
+        }
+        return
+    }
+
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
@@ -357,6 +436,19 @@ fun ChatScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(ui.providers)
+                    }
+                    // Rows the daemon added to the drawer, each opening one of
+                    // its composed screens.
+                    ui.drawerItems.forEach { item ->
+                        TextButton(
+                            onClick = {
+                                scope.launch { drawer.close() }
+                                onSpecAction(item.action, item.params)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(item.title)
+                        }
                     }
                     UpdateRow(settings)
                 },
@@ -495,7 +587,7 @@ fun ChatScreen(
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                             attachments = pendingAttachments,
                             uploading = uploading,
-                            onAttach = { pickFile.launch(arrayOf("*/*")) },
+                            onAttach = { showAttachSheet = true },
                             onRemoveAttachment = { vm.removeAttachment(it) },
                         )
                     }

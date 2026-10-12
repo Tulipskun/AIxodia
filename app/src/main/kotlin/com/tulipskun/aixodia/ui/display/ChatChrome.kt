@@ -10,18 +10,25 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AssistChip
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -257,5 +264,53 @@ fun ChatComposer(
                 }
             }
         }
+    }
+}
+
+
+/**
+ * What the "+" button opens: a sheet to choose where the file comes from. The
+ * photo picker handles images and video; the document picker handles anything
+ * else. Both feed the same upload, so the choice is only about which system
+ * picker is right for the content.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AttachSheet(
+    onMedia: () -> Unit,
+    onFile: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val ui = LocalUiSpec.current
+    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = 12.dp),
+        ) {
+            Text(
+                ui.attachTitle,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+            )
+            AttachOption(Icons.Default.Image, ui.attachMedia, onMedia)
+            AttachOption(Icons.Default.InsertDriveFile, ui.attachFile, onFile)
+        }
+    }
+}
+
+@Composable
+private fun AttachOption(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.size(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
