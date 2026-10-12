@@ -278,66 +278,66 @@ private fun tableAligns(divider: String): List<TableAlign> =
 private fun tableCells(row: String): List<String> =
     splitTableRow(row).map { it.replace("\\|", "|") }
 
-private val RE_BOLD = Regex("\\*\\*(.+?)\\*\\*", RegexOption.DOT_MATCHES_ALL)
-private val RE_STRIKE = Regex("~~(.+?)~~", RegexOption.DOT_MATCHES_ALL)
-private val RE_LINK = Regex("\\[([^\\]]+)]\\(([^)]+)\\)")
-private val RE_INLINE_CODE = Regex("`([^`]+)`")
-private val RE_ITALIC = Regex("(?<![*\\w])\\*([^*\\n]+)\\*(?!\\*)")
-private val RE_BOLD_ITALIC = Regex("\\*\\*\\*(.+?)\\*\\*\\*", RegexOption.DOT_MATCHES_ALL)
+private val BOLD = SpanStyle(fontWeight = FontWeight.Bold)
+private val BOLD_ITALIC = SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)
+private val ITALIC = SpanStyle(fontStyle = FontStyle.Italic)
+private val STRIKE = SpanStyle(textDecoration = TextDecoration.LineThrough)
 
 /**
- * Inline Markdown. Code spans are lifted out first so a `*` inside one is
- * literal, then the rest is styled in one pass over the text.
+ * Every inline construct in one alternation, so the earliest one in the text
+ * wins whatever it is. Order inside the alternation is the tie-break:
+ * `***x***` is matched by the first alternative or the outer pair would match
+ * and leave a literal `*` behind.
+ *
+ * Code used to be lifted out in a separate pass before any emphasis was styled,
+ * and that is what broke `**a `b` c**`: the code split the line in two and
+ * neither half had a `**` partner left, so the markers were printed literally
+ * while the code span still rendered. Code is just another alternative here, so
+ * the bold match spans it and the code is styled inside.
  */
-private fun inline(text: String, code: SpanStyle, link: SpanStyle): AnnotatedString = buildAnnotatedString {
-    var rest = text
-    while (true) {
-        val codeMatch = RE_INLINE_CODE.find(rest)
-        val linkMatch = RE_LINK.find(rest)
-        val next = listOfNotNull(codeMatch, linkMatch).minByOrNull { it.range.first }
-        if (next == null) break
-        appendInline(rest.substring(0, next.range.first))
-        if (next === codeMatch) {
-            pushStyle(code)
-            append(next.groupValues[1])
-            pop()
-        } else {
-            // The label is Markdown too, so `**[read](url)**` reads the way it
-            // looks instead of dropping the emphasis.
-            withStyle(link) { appendInline(next.groupValues[1]) }
-        }
-        rest = rest.substring(next.range.last + 1)
-    }
-    appendInline(rest)
-}
+private val RE_INLINE = Regex(
+    "`([^`]+)`" +
+        "|\\[([^\\]]+)]\\(([^)]+)\\)" +
+        "|\\*\\*\\*(.+?)\\*\\*\\*" +
+        "|\\*\\*(.+?)\\*\\*" +
+        "|~~(.+?)~~" +
+        // An italic pair has to close on a real character on both sides, or
+        // every `1 * 2 * 3` and every lone asterisk turns half the answer into
+        // emphasis. That is the rule every Markdown implementation follows.
+        "|(?<![*\\w])\\*([^*\\s](?:[^*\\n]*[^*\\s])?)\\*",
+    RegexOption.DOT_MATCHES_ALL,
+)
 
-private fun AnnotatedString.Builder.appendInline(text: String) {
+/**
+ * Inline Markdown over one block of text. Internal rather than private so the
+ * tests can assert on the spans: block parsing can tell you a line was read as
+ * a paragraph, and never that the `**` in it actually came out bold.
+ */
+internal fun inline(text: String, code: SpanStyle, link: SpanStyle): AnnotatedString =
+    buildAnnotatedString { renderInline(text, code, link) }
+
+private fun AnnotatedString.Builder.renderInline(text: String, code: SpanStyle, link: SpanStyle) {
     var rest = text
     while (true) {
-        // `***x***` has to be tried before `**x**`, or the outer pair matches
-        // and leaves a literal `*` at the end of the text.
-        val boldItalic = RE_BOLD_ITALIC.find(rest)
-        val bold = RE_BOLD.find(rest)
-        val strike = RE_STRIKE.find(rest)
-        val italic = RE_ITALIC.find(rest)
-        val next = listOfNotNull(boldItalic, bold, strike, italic).minByOrNull { it.range.first }
-        if (next == null) {
+        val match = RE_INLINE.find(rest)
+        if (match == null) {
             append(rest)
             return
         }
-        append(rest.substring(0, next.range.first))
-        withStyle(
-            when (next) {
-                boldItalic -> SpanStyle(
-                    fontWeight = FontWeight.Bold,
-                    fontStyle = FontStyle.Italic,
-                )
-                bold -> SpanStyle(fontWeight = FontWeight.Bold)
-                strike -> SpanStyle(textDecoration = TextDecoration.LineThrough)
-                else -> SpanStyle(fontStyle = FontStyle.Italic)
-            }
-        ) { append(next.groupValues[1]) }
-        rest = rest.substring(next.range.last + 1)
+        append(rest.substring(0, match.range.first))
+        val g = match.groups
+        when {
+            // A code span is literal: nothing inside it is Markdown.
+            g[1] != null -> withStyle(code) { append(g[1]!!.value) }
+            // A link label and an emphasised run are Markdown in their own
+            // right, so `**[read](url)**` keeps both the colour and the bold.
+            g[2] != null -> withStyle(link) { renderInline(g[2]!!.value, code, link) }
+            g[4] != null -> withStyle(BOLD_ITALIC) { renderInline(g[4]!!.value, code, link) }
+            g[5] != null -> withStyle(BOLD) { renderInline(g[5]!!.value, code, link) }
+            g[6] != null -> withStyle(STRIKE) { renderInline(g[6]!!.value, code, link) }
+            else -> withStyle(ITALIC) { renderInline(g[7]!!.value, code, link) }
+        }
+        rest = rest.substring(match.range.last + 1)
     }
 }
 
