@@ -235,14 +235,16 @@ fun ChatScreen(
     }
 
     // Two system pickers behind one "+": the photo picker for images and video,
-    // the document picker for anything else. Neither needs a storage permission.
+    // the document picker for anything else. Both take a whole selection, so a
+    // batch of screenshots is one trip rather than one per file. Neither needs a
+    // storage permission.
     var showAttachSheet by remember { mutableStateOf(false) }
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) vm.attach(uri)
-    }
-    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) vm.attach(uri)
-    }
+    val pickFiles = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> vm.attach(uris) }
+    val pickMedia = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACH_PER_PICK),
+    ) { uris -> vm.attach(uris) }
     val pendingAttachments by vm.pendingAttachments.collectAsStateWithLifecycle()
     val uploading by vm.uploading.collectAsStateWithLifecycle()
 
@@ -333,7 +335,7 @@ fun ChatScreen(
             },
             onFile = {
                 showAttachSheet = false
-                pickFile.launch(arrayOf("*/*"))
+                pickFiles.launch(arrayOf("*/*"))
             },
             onDismiss = { showAttachSheet = false },
         )
@@ -959,3 +961,7 @@ fun formatUptime(
     }
     return parts.joinToString(sep)
 }
+
+
+/** How many files one trip to the picker may bring back. */
+private const val MAX_ATTACH_PER_PICK = 10

@@ -582,30 +582,36 @@ class ChatViewModel(
     }
 
     /**
-     * Uploads a picked file to the daemon. The daemon answers with the path it
-     * stored, which rides along with the message so the agent can read it.
+     * Uploads the picked files to the daemon, one after another. The daemon
+     * answers with the path it stored for each, and every path rides along with
+     * the message so the agent can read them. Uploads are sequential on purpose:
+     * ten files picked at once would otherwise open ten connections at once on a
+     * phone that is already streaming the answer.
      */
-    fun attach(uri: android.net.Uri) {
+    fun attach(uris: List<android.net.Uri>) {
         val ctx = appContext ?: return
+        if (uris.isEmpty()) return
         uploading.value = true
         viewModelScope.launch {
             val resolver = ctx.contentResolver
-            var name = "file"
-            var mime = ""
-            runCatching {
-                resolver.query(uri, null, null, null, null)?.use { c ->
-                    val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0 && c.moveToFirst()) name = c.getString(idx) ?: name
+            var failed = 0
+            for (uri in uris) {
+                var name = "file"
+                var mime = ""
+                runCatching {
+                    resolver.query(uri, null, null, null, null)?.use { c ->
+                        val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0 && c.moveToFirst()) name = c.getString(idx) ?: name
+                    }
+                    mime = resolver.getType(uri).orEmpty()
                 }
-                mime = resolver.getType(uri).orEmpty()
+                val ref = repo.uploadAttachment(sessionId, name, mime) {
+                    runCatching { resolver.openInputStream(uri) }.getOrNull()
+                }
+                if (ref == null) failed++ else pendingAttachments.value = pendingAttachments.value + ref
             }
-            val ref = repo.uploadAttachment(sessionId, name, mime) {
-                runCatching { resolver.openInputStream(uri) }.getOrNull()
-            }
-            if (ref == null) {
-                notice.value = "อัปโหลดไฟล์ไม่สำเร็จ — ลองอีกครั้ง"
-            } else {
-                pendingAttachments.value = pendingAttachments.value + ref
+            if (failed > 0) {
+                notice.value = "อัปโหลดไม่สำเร็จ $failed จาก ${uris.size} ไฟล์"
             }
             uploading.value = false
         }
