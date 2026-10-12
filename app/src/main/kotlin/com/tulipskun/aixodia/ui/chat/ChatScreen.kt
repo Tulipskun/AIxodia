@@ -801,14 +801,17 @@ private fun UpdateRow(settings: SettingsStore) {
 }
 
 
-/** Human-readable uptime: "2h 15m", "5m 30s", "45s". */
+/**
+ * Human-readable uptime, seconds included so the readout visibly ticks:
+ * "2h 15m 30s", "5m 30s", "45s".
+ */
 fun formatUptime(startedUnix: Long, nowMs: Long = System.currentTimeMillis()): String {
     val secs = (nowMs / 1000 - startedUnix).coerceAtLeast(0)
     val h = secs / 3600
     val m = (secs % 3600) / 60
     val s = secs % 60
     return when {
-        h > 0 -> "${h}h ${m}m"
+        h > 0 -> "${h}h ${m}m ${s}s"
         m > 0 -> "${m}m ${s}s"
         else -> "${s}s"
     }
