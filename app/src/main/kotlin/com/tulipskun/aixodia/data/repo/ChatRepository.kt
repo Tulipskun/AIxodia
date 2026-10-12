@@ -225,6 +225,9 @@ class ChatRepository(
     /** The provider and model the daemon currently offers, for the picker. */
     suspend     fun models(): List<ProviderView> = history.models()
 
+    /** Daemon liveness + start time, for the header's uptime readout. */
+    suspend fun healthz(): Pair<Boolean, Long>? = history.healthz()
+
     /** Global provider health/key counts for the session picker caption. */
     suspend fun providerStatuses(): List<com.tulipskun.aixodia.data.model.ProviderStatus> = history.providers()
 

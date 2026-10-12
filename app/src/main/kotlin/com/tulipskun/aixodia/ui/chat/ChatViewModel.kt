@@ -127,6 +127,12 @@ class ChatViewModel(
 
     /** Model, tokens, elapsed time and rate for the footer. */
     val turnStats = MutableStateFlow(TurnStats())
+    /** Unix second the daemon process started; 0 = unknown/not polled yet. */
+    val daemonStartedAt = MutableStateFlow(0L)
+    /** The last text sent, kept so a failed turn can be retried verbatim. */
+    private var lastSentText = ""
+    /** The error to show as a retryable card, or "" when nothing failed. */
+    val errorCard = MutableStateFlow("")
     private var liveSubText = ""
     private var liveChars = 0
     val selectedProvider = MutableStateFlow("")
@@ -155,6 +161,16 @@ class ChatViewModel(
                 hasStoredRoute.value = true
             }
         }
+        // Poll the daemon's start time so the header can show uptime. Every
+        // 30s is enough: the number is "how long has it been up", not a stopwatch.
+        viewModelScope.launch {
+            while (true) {
+                runCatching { repo.healthz() }.getOrNull()?.second?.let { started ->
+                    if (started > 0L) daemonStartedAt.value = started
+                }
+                kotlinx.coroutines.delay(30_000)
+            }
+        }
         viewModelScope.launch {
             repo.liveFrames.collect { f ->
                 if (f.sessionId.isNotEmpty() && f.sessionId != sessionId) return@collect
@@ -174,7 +190,10 @@ class ChatViewModel(
                         liveThinkingMs.value = 0L
                         busy.value = false
                         // Raw daemon text is logged by the daemon; the user sees Thai.
-                        notice.value = friendlyError(f.text)
+                        // The error becomes a retryable card, not just a notice line.
+                        val msg = friendlyError(f.text)
+                        errorCard.value = msg
+                        notice.value = msg
                         finishStats()
                     }
                     // The ack only means the message reached the daemon. The
@@ -522,6 +541,8 @@ class ChatViewModel(
 
     fun send(text: String) {
         if (text.isBlank()) return
+        lastSentText = text.trim()
+        errorCard.value = ""
         busy.value = true
         liveChars = 0
         liveSubText = ""
@@ -543,6 +564,12 @@ class ChatViewModel(
             val fresh = repo.send(sessionId, text.trim())
             if (!fresh) notice.value = "ส่งไปแล้ว กำลังรอการตอบกลับ"
         }
+    }
+
+    /** Re-sends the last message after a failure, reusing the same text. */
+    fun retryLast() {
+        if (lastSentText.isBlank()) return
+        send(lastSentText)
     }
 
     /** "แชทใหม่" — the only session action that needs no argument. */

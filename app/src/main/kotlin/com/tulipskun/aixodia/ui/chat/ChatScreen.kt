@@ -108,6 +108,7 @@ import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.display.ChatComposer
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
+import com.tulipskun.aixodia.ui.display.ErrorCard
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
@@ -178,6 +179,8 @@ fun ChatScreen(
     val status by vm.status.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val errorCard by vm.errorCard.collectAsStateWithLifecycle()
+    val daemonStartedAt by vm.daemonStartedAt.collectAsStateWithLifecycle()
     val liveText by vm.liveText.collectAsStateWithLifecycle()
     val liveThinkingMs by vm.liveThinkingMs.collectAsStateWithLifecycle()
     val liveThinkingAgent by vm.liveThinkingAgent.collectAsStateWithLifecycle()
@@ -356,6 +359,16 @@ fun ChatScreen(
                                 },
                                 modifier = Modifier.height(32.dp),
                             )
+                            if (daemonStartedAt > 0L) {
+                                val uptime = formatUptime(daemonStartedAt)
+                                if (uptime.isNotBlank()) {
+                                    Text(
+                                        "daemon รันมา $uptime",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
                     },
                     navigationIcon = {
@@ -464,6 +477,18 @@ fun ChatScreen(
                         tokenFields = tokenFields,
                         copyLabel = context.getString(R.string.copy_long_press),
                     )
+                }
+                // A failed turn stays visible as a retryable card until the user
+                // retries or dismisses it — the question is already in D1, so
+                // losing the error would lose the only way to resume.
+                if (errorCard.isNotBlank()) {
+                    item(key = "error-card") {
+                        ErrorCard(
+                            message = errorCard,
+                            onRetry = { vm.retryLast() },
+                            onDismiss = { vm.errorCard.value = "" },
+                        )
+                    }
                 }
                 // The answer being streamed right now. It is not in the
                 // database yet; the stored row replaces it when the turn ends.
@@ -749,5 +774,20 @@ private fun UpdateRow(settings: SettingsStore) {
             enabled = !busy,
         ) { Text("ตรวจอัปเดต") }
         Text("ติดตั้งทับตัวเดิม ข้อมูลแชตไม่หาย", style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+
+/** Human-readable uptime: "2h 15m", "5m 30s", "45s". */
+fun formatUptime(startedUnix: Long): String {
+    val now = System.currentTimeMillis() / 1000
+    val secs = (now - startedUnix).coerceAtLeast(0)
+    val h = secs / 3600
+    val m = (secs % 3600) / 60
+    val s = secs % 60
+    return when {
+        h > 0 -> "${h}h ${m}m"
+        m > 0 -> "${m}m ${s}s"
+        else -> "${s}s"
     }
 }

@@ -22,7 +22,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -30,6 +36,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -113,6 +123,14 @@ fun MessageBlock(
             }
         }
         if (isTool) {
+            // Collapsed by default: the header line names the tool and its
+            // arguments, the body expands on tap. A long thread of tool calls
+            // then reads as a list of activities instead of a wall of output.
+            var expanded by remember { mutableStateOf(false) }
+            val tint = when {
+                m.role == "tool_result" && m.text.startsWith("{\"error\"") -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 shape = MaterialTheme.shapes.medium,
@@ -122,33 +140,56 @@ fun MessageBlock(
                     .widthIn(max = 760.dp)
                     .fillMaxWidth(if (mine) 1f else 0.94f)
                     .combinedClickable(
-                        // A tap that does nothing is worse than no tap: it
-                        // announces itself as a button and then does not
-                        // behave like one. Only the long press that copies is
-                        // offered, and it says so.
-                        onClick = {},
+                        onClick = { expanded = !expanded },
                         onLongClick = onCopy,
                         onLongClickLabel = copyLabel,
                     ),
             ) {
                 Column(Modifier.padding(12.dp)) {
-                    // A merged call+result keeps the command on top in dim
-                    // type, output below — one tool activity, not two bubbles.
-                    if (m.toolArgs.isNotBlank() && m.text.isNotBlank()) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            m.toolArgs.take(120),
-                            style = MaterialTheme.typography.labelSmall,
+                            buildString {
+                                append(if (expanded) "▾ " else "▸ ")
+                                append(m.toolName.ifBlank { if (m.role == "tool_result") "result" else "call" })
+                                if (m.toolArgs.isNotBlank()) append(" ").append(m.toolArgs.take(80))
+                            },
+                            style = MaterialTheme.typography.labelMedium,
                             fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(bottom = 4.dp),
+                            color = tint,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (expanded) "ยุบ" else "ขยาย",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text(
-                        body,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = expandVertically(),
+                        exit = shrinkVertically(),
+                    ) {
+                        Column {
+                            if (m.toolArgs.isNotBlank() && m.text.isNotBlank()) {
+                                Text(
+                                    m.toolArgs,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                )
+                            }
+                            Text(
+                                body,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         } else if (mine) {
@@ -525,6 +566,48 @@ fun SubAgentPanel(
                             Text("  " + stringResource(R.string.sub_agent_stop))
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+
+/**
+ * A failed turn as a card with a retry button — the error is actionable, not
+ * just a line of red text. Shown in the thread where the failure happened.
+ */
+@Composable
+fun ErrorCard(
+    message: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .widthIn(max = 760.dp)
+            .fillMaxWidth(0.94f),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) { Text("ปิด") }
+                FilledTonalButton(onClick = onRetry) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Text("  ลองอีกครั้ง")
                 }
             }
         }
