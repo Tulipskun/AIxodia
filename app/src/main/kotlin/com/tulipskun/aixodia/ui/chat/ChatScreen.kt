@@ -601,7 +601,9 @@ fun ChatScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                // A short thread sits just above the composer instead of
+                // hugging the top with a screen of dead space under it.
+                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
                 if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty()) {

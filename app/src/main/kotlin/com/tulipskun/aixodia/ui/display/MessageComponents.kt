@@ -28,6 +28,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.FilledTonalButton
@@ -35,13 +36,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,7 +52,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
+import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.model.splitAttachmentNote
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.model.freshInputTokens
 import com.tulipskun.aixodia.data.model.totalInputTokens
@@ -106,22 +110,15 @@ fun MessageBlock(
         // The strip above an answer exists only to name who spoke and which tool
         // ran. The clock is in the footer next to the time used, so a main agent
         // answer draws no strip at all rather than an empty one.
-        if (!mine && showBadge) {
+        // A tool block names its own tool in its header, so repeating it on a
+        // strip above the block printed the same word twice in a row.
+        if (!mine && showBadge && !isTool) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AgentBadge(m)
-                if (m.toolName.isNotBlank()) {
-                    Text(
-                        m.toolName,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                }
             }
         }
         if (isTool) {
@@ -167,7 +164,7 @@ fun MessageBlock(
                             style = MaterialTheme.typography.labelMedium,
                             fontFamily = FontFamily.Monospace,
                             color = tint,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).padding(end = 10.dp),
                         )
                         Icon(
                             if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -224,6 +221,7 @@ fun MessageBlock(
                         onLongClickLabel = copyLabel,
                     ),
             ) {
+                val parts = splitAttachmentNote(body)
                 Column(
                     Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp),
                     horizontalAlignment = Alignment.End,
@@ -232,10 +230,24 @@ fun MessageBlock(
                     // modifier chain: a Surface clips what it lays out to its
                     // shape, so padding the surface itself shaved the first
                     // character off the left of every line of every message.
-                    MarkdownText(
-                        text = body,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
+                    if (parts.text.isNotBlank()) {
+                        MarkdownText(
+                            text = parts.text,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                    // The file names ride along as chips; the server path and
+                    // the note aimed at the agent stay out of the bubble.
+                    if (parts.attachments.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .padding(top = 4.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            parts.attachments.forEach { AttachmentChip(it) }
+                        }
+                    }
                     Text(
                         text = clock,
                         maxLines = 1,
@@ -496,15 +508,8 @@ fun TurnStatsLine(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
     )
-    if (live && stats.running) {
-        Text(
-            stringResource(R.string.sub_agent_running),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    // The "running" line was a fourth line under a turn that already says it is
+    // streaming; the rate and the clock are what a reader actually wants.
 }
 
 /**
@@ -647,4 +652,42 @@ fun toolHeader(
         .replace("{duration}", durationText)
         .trim()
         .replace(Regex("\\s+"), " ")
+}
+
+
+/** One attached file inside a user bubble: the name and its kind, nothing else. */
+@Composable
+private fun AttachmentChip(file: AttachmentRef) {
+    val kind = when {
+        file.mime.startsWith("image/") -> "รูปภาพ"
+        file.mime.startsWith("video/") -> "วิดีโอ"
+        file.mime.startsWith("audio/") -> "เสียง"
+        file.mime.startsWith("text/") -> "ข้อความ"
+        file.mime.isBlank() -> ""
+        else -> file.mime.substringBefore('/')
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.16f),
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(
+            Modifier.padding(start = 8.dp, end = 10.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.InsertDriveFile,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                if (kind.isBlank()) file.name else "${file.name} · $kind",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                maxLines = 1,
+            )
+        }
+    }
 }

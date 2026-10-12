@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -58,7 +59,16 @@ class AiDirectSocket(private val settings: SettingsStore) {
     /** A string resource id, so the wording stays in strings.xml. */
     val lastError: StateFlow<Int> = _lastError
 
-    private val _frames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 256)
+    // Frames are handed over in arrival order, on the socket's own callback
+    // thread. Emitting each one from its own coroutine let two messages reach
+    // the collector out of order, which scrambled the streamed text. A drop
+    // under pressure is better than a reorder: the closing frame carries the
+    // whole answer anyway.
+    private val _frames = MutableSharedFlow<AiOutput>(
+        replay = 0,
+        extraBufferCapacity = 512,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     val frames: SharedFlow<AiOutput> = _frames
 
     /**
@@ -68,7 +78,11 @@ class AiDirectSocket(private val settings: SettingsStore) {
      */
     // replay = 1 so a collector that subscribes just after the connect push
     // still receives it rather than waiting for the next change.
-    private val _uiSpecs = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 8)
+    private val _uiSpecs = MutableSharedFlow<String>(
+        replay = 1,
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     val uiSpecs: SharedFlow<String> = _uiSpecs
 
     private var ws: WebSocket? = null
@@ -232,22 +246,20 @@ class AiDirectSocket(private val settings: SettingsStore) {
                         if (text.contains("\"kind\":\"ui\"")) {
                             val spec = runCatching { JSONObject(text).optJSONObject("ui") }.getOrNull()
                             if (spec != null) {
-                                scope.launch { _uiSpecs.emit(spec.toString()) }
+                                _uiSpecs.tryEmit(spec.toString())
                                 return
                             }
                         }
                         try {
                             val f = outAdapter.fromJson(text) ?: return
-                            scope.launch { _frames.emit(f) }
+                            _frames.tryEmit(f)
                         } catch (_: Exception) {
-                            scope.launch {
-                                _frames.emit(
-                                    AiOutput(
-                                        kind = "error",
-                                        text = "frame ที่อ่านไม่ได้: ${text.take(120)}",
-                                    )
+                            _frames.tryEmit(
+                                AiOutput(
+                                    kind = "error",
+                                    text = "frame ที่อ่านไม่ได้: ${text.take(120)}",
                                 )
-                            }
+                            )
                         }
                     }
 

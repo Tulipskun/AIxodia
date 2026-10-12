@@ -42,13 +42,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.AttachmentRef
@@ -64,10 +64,12 @@ import com.tulipskun.aixodia.ui.LocalUiSpec
 @Composable
 fun ConnDot(c: ConnState) {
     val ui = LocalUiSpec.current
+    // Green / amber / red, the colours a status dot is expected to wear. The
+    // scheme's primary was blue, which reads as "selected", not "connected".
     val (label, color) = when (c) {
-        ConnState.ONLINE -> ui.online to MaterialTheme.colorScheme.primary
-        ConnState.CONNECTING -> ui.connecting to MaterialTheme.colorScheme.tertiary
-        ConnState.OFFLINE -> ui.offline to MaterialTheme.colorScheme.error
+        ConnState.ONLINE -> ui.online to Color(0xFF3DDC84)
+        ConnState.CONNECTING -> ui.connecting to Color(0xFFFFB020)
+        ConnState.OFFLINE -> ui.offline to Color(0xFFE5484D)
     }
     Box(
         Modifier

@@ -29,3 +29,36 @@ data class AttachmentRef(
         }
     }
 }
+
+/** A user message split into what they typed and the files they attached. */
+data class UserMessageParts(val text: String, val attachments: List<AttachmentRef>)
+
+/**
+ * Splits a stored user turn into its text and its attachments.
+ *
+ * The daemon appends a short note naming each file so the agent can open it;
+ * showing that note verbatim in the bubble put a server path, a MIME type and an
+ * instruction in the middle of the user's own words. The note stays in the
+ * stored turn (the agent needs it) and is lifted out here for display.
+ */
+fun splitAttachmentNote(raw: String): UserMessageParts {
+    val marker = "[ไฟล์แนบ]"
+    val at = raw.indexOf(marker)
+    if (at < 0) return UserMessageParts(raw, emptyList())
+    val head = raw.take(at).trimEnd()
+    val files = raw.substring(at + marker.length)
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.startsWith("- ") }
+        .mapNotNull { line ->
+            val body = line.removePrefix("- ").trim()
+            if (body.isBlank()) return@mapNotNull null
+            val name = body.substringBefore(" → ").trim()
+            val rest = body.substringAfter(" → ", "")
+            val path = rest.substringBefore(" (").trim()
+            val mime = rest.substringAfter(" (", "").substringBeforeLast(')').trim()
+            if (name.isBlank()) null else AttachmentRef(name = name, path = path, mime = mime)
+        }
+        .toList()
+    return UserMessageParts(head, files)
+}

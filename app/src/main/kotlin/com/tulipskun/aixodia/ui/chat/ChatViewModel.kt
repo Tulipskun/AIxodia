@@ -141,6 +141,12 @@ class ChatViewModel(
     private var lastAttachments: List<AttachmentRef> = emptyList()
     /** The error to show as a retryable card, or "" when nothing failed. */
     val errorCard = MutableStateFlow("")
+    /**
+     * True once the daemon's closing message has replaced the streamed text.
+     * A delta arriving after that would be appended to the finished answer and
+     * read as a repetition, so it is dropped.
+     */
+    private var answerSettled = false
     private var liveSubText = ""
     private var liveChars = 0
     val selectedProvider = MutableStateFlow("")
@@ -211,7 +217,7 @@ class ChatViewModel(
     }
 
     private fun onDelta(agent: String, chunk: String, frame: AiOutput? = null) {
-        if (chunk.isEmpty()) return
+        if (chunk.isEmpty() || answerSettled) return
         liveThinkingMs.value = 0L
         if (agent.isNotEmpty() && agent != "main") {
             status.value = "${if (agent == "sub") "sub" else agent}: " + (liveSubText + chunk).take(80)
@@ -248,6 +254,7 @@ class ChatViewModel(
         }
         // Replace whatever streamed in with the daemon's own copy: it is the one
         // that also lands in D1.
+        answerSettled = true
         liveText.value = text
         liveThinkingMs.value = 0L
         recordUsage(frame)
@@ -366,6 +373,7 @@ class ChatViewModel(
         liveSubText = ""
         liveThinkingMs.value = 0L
         busy.value = false
+        answerSettled = false
         subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
         // The daemon mirrored the turn into D1; pull it so live bubbles are
@@ -581,6 +589,7 @@ class ChatViewModel(
     fun send(text: String) {
         val attachments = pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
+        answerSettled = false
         lastSentText = text.trim()
         lastAttachments = attachments
         errorCard.value = ""
