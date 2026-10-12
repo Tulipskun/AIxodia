@@ -115,6 +115,7 @@ import com.tulipskun.aixodia.ui.display.ChatComposer
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
+import com.tulipskun.aixodia.ui.display.formatClock
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
@@ -179,6 +180,32 @@ fun ChatScreen(
     }
 
     val context = LocalContext.current
+    var installing by remember { mutableStateOf(false) }
+    var installNote by remember { mutableStateOf("") }
+    val installScope = rememberCoroutineScope()
+    // One-tap update: the phone checks GitHub on start, so a new build is found
+    // without asking anyone whether one exists.
+    fun installUpdate(tag: String) {
+        installing = true
+        installScope.launch {
+            try {
+                val latest = UpdateManager.check()
+                if (latest == null) {
+                    installNote = "เป็นเวอร์ชันล่าสุดแล้ว"
+                    vm.updateAvailable.value = ""
+                } else {
+                    installNote = "กำลังโหลด ${latest.tag}…"
+                    val apk = UpdateManager.download(context, latest) { p -> installNote = "โหลด $p%" }
+                    UpdateManager.install(context, apk)
+                    installNote = "พร้อมติดตั้ง ${latest.tag}"
+                }
+            } catch (e: Exception) {
+                installNote = "อัปเดตไม่สำเร็จ: ${e.message}"
+            } finally {
+                installing = false
+            }
+        }
+    }
     val vm: ChatViewModel = viewModel(key = sessId) {
         ChatViewModel(repo, settings, sessId, context.applicationContext)
     }
@@ -196,6 +223,7 @@ fun ChatScreen(
     val liveThinkingAgent by vm.liveThinkingAgent.collectAsStateWithLifecycle()
     val liveSteps by vm.liveSteps.collectAsStateWithLifecycle()
     val liveNarrations by vm.liveNarrations.collectAsStateWithLifecycle()
+    val updateTag by vm.updateAvailable.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
@@ -572,6 +600,29 @@ fun ChatScreen(
                                 color = MaterialTheme.colorScheme.error,
                             )
                         }
+                        if (updateTag.isNotBlank()) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                                    .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    installNote.ifBlank { "มีเวอร์ชันใหม่ $updateTag" },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    onClick = { installUpdate(updateTag) },
+                                    enabled = !installing,
+                                ) { Text(if (installing) "…" else "ติดตั้ง") }
+                                TextButton(onClick = { vm.updateAvailable.value = "" }) { Text("×") }
+                            }
+                        }
                         if (conn != ConnState.ONLINE) {
                             OfflineBanner(
                                 messageRes = socketErr.takeIf { it != 0 } ?: R.string.offline_title,
@@ -641,11 +692,20 @@ fun ChatScreen(
                 // turn ends, so nothing jumps or merges when it does.
                 liveNarrations.forEachIndexed { index, said ->
                     item(key = "live-narration-$index") {
-                        MarkdownText(
-                            text = said,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        Column(Modifier.fillMaxWidth()) {
+                            MarkdownText(
+                                text = said.text,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            // The clock a stored answer carries under its own
+                            // text, so the block looks the same either way.
+                            Text(
+                                formatClock(said.atMs),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 5.dp),
+                            )
+                        }
                     }
                 }
                 // The answer being streamed right now. It is not in the

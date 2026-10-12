@@ -499,6 +499,10 @@ fun TurnStatsLine(
         ratePerSecond = stats.tokensPerSecond(nowMs),
         millis = stats.elapsedMs(nowMs),
         model = stats.model.ifBlank { model },
+        // The settled footer ends with the wall clock; leaving it out while the
+        // turn was still running made the same footer read differently before
+        // and after it finished.
+        clock = formatClock(nowMs),
     )
     if (counts.visible(fields).isEmpty()) return
     Text(

@@ -3,6 +3,7 @@ package com.tulipskun.aixodia.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.os.SystemClock
+import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.AttachmentRef
@@ -18,6 +19,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+/** A live answer block: its words and when they were said. */
+data class LiveText(val text: String, val atMs: Long)
 
 /** One sub agent the daemon is running (or just finished) for this chat. */
 data class SubAgentActivity(
@@ -133,7 +137,7 @@ class ChatViewModel(
      * them as separate turns, so the same conversation looked different the
      * moment it ended. Closing the bubble when a tool runs keeps the two the same.
      */
-    val liveNarrations = MutableStateFlow<List<String>>(emptyList())
+    val liveNarrations = MutableStateFlow<List<LiveText>>(emptyList())
     /** Recorded thinking time for the current reasoning event, if the daemon sent one. */
     val liveThinkingMs = MutableStateFlow(0L)
     /** Which agent that thinking event belongs to; raw reasoning never leaves the daemon. */
@@ -170,6 +174,11 @@ class ChatViewModel(
     val selectedModel = MutableStateFlow("")
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
     val hasStoredRoute = MutableStateFlow(false)
+    /**
+     * The newest release on GitHub when it is newer than what is installed, so
+     * the phone says so on its own instead of waiting to be asked.
+     */
+    val updateAvailable = MutableStateFlow("")
 
     init {
         // A fresh install has no settings yet, and every call here is network
@@ -195,6 +204,14 @@ class ChatViewModel(
         // The start time comes from the daemon's D1 row, read once (and again
         // whenever the socket comes back). Uptime is then counted on the phone,
         // so the header ticks without a single periodic network call.
+        viewModelScope.launch {
+            runCatching {
+                val latest = com.tulipskun.aixodia.update.UpdateManager.check() ?: return@launch
+                if (latest.tag.removePrefix("v") != BuildConfig.VERSION_NAME) {
+                    updateAvailable.value = latest.tag
+                }
+            }
+        }
         viewModelScope.launch { refreshDaemonStart() }
         viewModelScope.launch {
             repo.connState.collect { if (it == ConnState.ONLINE) refreshDaemonStart() }
@@ -346,7 +363,8 @@ class ChatViewModel(
                 // What came before this tool is its own turn, now and after.
                 val said = liveText.value.trim()
                 if (said.isNotEmpty()) {
-                    liveNarrations.value = liveNarrations.value + said
+                    liveNarrations.value = liveNarrations.value +
+                        LiveText(said, System.currentTimeMillis())
                     liveText.value = ""
                 }
                 liveSteps.value = liveSteps.value.filterNot { it.name == name } +
@@ -637,12 +655,15 @@ class ChatViewModel(
         // nothing else yet. A chat that follows the agent's default says so —
         // printing whatever route happens to be current later would put another
         // turn's model next to this turn's tokens.
-        val route = listOf(selectedProvider.value, selectedModel.value)
-            .filter { it.isNotBlank() }
-            .joinToString(" · ")
-            .ifBlank { "ตามค่าของ agent" }
+        // The live footer has to read like the settled one, so it names the
+        // model rather than "ตามค่าของ agent" and carries a clock. A pinned chat
+        // knows its model; otherwise the daemon's default is the one that will
+        // answer, and it is already in the catalogue.
+        val modelLabel = selectedModel.value.ifBlank {
+            providers.value.firstOrNull()?.defaultModel.orEmpty()
+        }.ifBlank { "ตามค่าของ agent" }
         turnStats.value = TurnStats(
-            model = route,
+            model = modelLabel,
             startedAtMs = SystemClock.elapsedRealtime(),
             running = true,
         )

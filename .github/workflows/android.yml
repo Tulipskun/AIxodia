@@ -81,17 +81,35 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Record UI snapshots (Paparazzi)
-        run: gradle recordPaparazziDebug --console=plain
+      # Re-recording the Paparazzi snapshots renders every composable on screen
+      # and is the slowest task in the build. It only has to happen when the UI
+      # itself changed, so a change to the data layer or the engine skips it.
+      - name: Did the UI change?
+        id: ui
+        run: |
+          if git diff --quiet "${{ github.event.before }}" HEAD -- \
+            app/src/main/kotlin/com/tulipskun/aixodia/ui \
+            app/src/main/res; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # One Gradle invocation, not three: each separate invocation re-starts the
+      # daemon, re-configures every project and re-reads the task graph.
+      - name: Build, test and record snapshots
+        run: |
+          if [ "${{ steps.ui.outputs.changed }}" = "true" ]; then
+            gradle recordPaparazziDebug testDebugUnitTest assembleDebug --console=plain
+          else
+            gradle testDebugUnitTest assembleDebug --console=plain
+          fi
 
       - name: Upload UI snapshots
         uses: actions/upload-artifact@v4
         with:
           name: ui-snapshots
           path: app/src/test/snapshots
-
-      - name: Unit tests (Markdown + live answer)
-        run: gradle testDebugUnitTest --console=plain
 
       - name: Upload test report
         if: always()
@@ -100,11 +118,16 @@ jobs:
           name: unit-test-report
           path: app/build/reports/tests/testDebugUnitTest
 
-      - name: Build
-        run: gradle assembleDebug
-
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk AIxodia.apk
+
+      # Available as soon as the build finishes, without waiting for the release
+      # bookkeeping below.
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIxodia-${{ steps.version.outputs.tag }}
+          path: AIxodia.apk
 
       - name: Verify APK signature (must be stable key)
         run: |
