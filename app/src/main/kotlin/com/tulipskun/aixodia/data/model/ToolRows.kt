@@ -49,21 +49,37 @@ fun humanToolArgs(rawArgs: String): String {
  */
 fun mergeToolPairs(messages: List<ChatMessage>): List<ChatMessage> {
     if (messages.isEmpty()) return messages
+    // Rows arrive parsed (raw call ids are gone), so pairing is positional:
+    // each result answers the earliest call still waiting. That keeps
+    // parallel calls paired correctly, while a result with no waiting call
+    // (its call sits outside the page) passes through untouched.
     val out = ArrayList<ChatMessage>(messages.size)
-    var i = 0
-    while (i < messages.size) {
-        val m = messages[i]
-        val n = messages.getOrNull(i + 1)
-        if (m.role == "tool_call" && n != null && n.role == "tool_result") {
-            out += n.copy(
-                toolName = m.toolName.ifBlank { n.toolName },
-                toolArgs = m.toolArgs,
-                model = n.model.ifBlank { m.model },
-            )
-            i += 2
-        } else {
-            out += m
-            i += 1
+    val waiting = ArrayList<Int>()
+    for (m in messages) {
+        when {
+            m.role == "tool_call" -> {
+                out += m
+                waiting += out.lastIndex
+            }
+            m.role == "tool_result" -> {
+                val idx = waiting.removeFirstOrNull()
+                if (idx != null) {
+                    val call = out[idx]
+                    // Mid-round prose travels on the first call row; keep it
+                    // above the output instead of dropping either side.
+                    val body = listOf(call.text.trim(), m.text.trim())
+                        .filter { it.isNotEmpty() }.joinToString("\n\n")
+                    out[idx] = m.copy(
+                        toolName = call.toolName.ifBlank { m.toolName },
+                        toolArgs = call.toolArgs,
+                        text = body,
+                        model = m.model.ifBlank { call.model },
+                    )
+                } else {
+                    out += m
+                }
+            }
+            else -> out += m
         }
     }
     return out

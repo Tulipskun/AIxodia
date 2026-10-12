@@ -339,24 +339,21 @@ class ChatViewModel(
             notice.value = "งานนั้นจบไปแล้ว"
         }
         status.value = ""
-        val streamed = liveText.value
         liveSubText = ""
-        liveSteps.value = emptyList()
         liveThinkingMs.value = 0L
         busy.value = false
         subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
-        // The daemon mirrored the turn into D1; pull it so the bubble is
-        // replaced by the stored row instead of a second copy. The streamed
-        // text stays on screen until the stored row is ready — clearing it
-        // first makes the answer flicker out and back (AXCH-026).
-        if (streamed.isNotBlank()) {
-            viewModelScope.launch {
-                runCatching { repo.refreshLatest(sessionId) }
-                liveText.value = ""
-            }
-        } else {
+        // The daemon mirrored the turn into D1; pull it so live bubbles are
+        // replaced by the stored rows instead of a second copy. The streamed
+        // text and tool steps stay on screen until the stored rows are ready —
+        // clearing them first makes the answer flicker out and back (AXCH-026).
+        // Refresh runs even for tool-only turns (no streamed text): otherwise
+        // their rows never arrive until the next open.
+        viewModelScope.launch {
+            runCatching { repo.refreshLatest(sessionId) }
             liveText.value = ""
+            liveSteps.value = emptyList()
         }
     }
 

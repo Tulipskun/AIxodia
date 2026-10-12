@@ -65,3 +65,32 @@ class ToolDisplayTest {
         assertEquals("tool_call", out[1].role)
     }
 }
+
+class ToolMergeTest {
+    private fun msg(seq: Long, role: String, text: String = "", toolName: String = "", toolArgs: String = "") =
+        ChatMessage(id = "s:$seq", sessionId = "s", seq = seq, role = role, text = text,
+            createdAt = seq * 1000, toolName = toolName, toolArgs = toolArgs)
+
+    @Test fun parallelCallsPairInOrder() {
+        val merged = mergeToolPairs(listOf(
+            msg(1, "tool_call", toolName = "bash", toolArgs = "pwd"),
+            msg(2, "tool_call", toolName = "read", toolArgs = "/x"),
+            msg(3, "tool_result", "w1", toolName = "bash"),
+            msg(4, "tool_result", "f1", toolName = "read"),
+        ))
+        assertEquals(2, merged.size)
+        assertEquals("pwd", merged[0].toolArgs)
+        assertEquals("w1", merged[0].text)
+        assertEquals("read", merged[1].toolName)
+        assertEquals("f1", merged[1].text)
+    }
+
+    @Test fun midRoundProseIsKeptAboveOutput() {
+        val merged = mergeToolPairs(listOf(
+            msg(1, "tool_call", "Running it now.", toolName = "bash", toolArgs = "pwd"),
+            msg(2, "tool_result", "w1", toolName = "bash"),
+        ))
+        assertEquals(1, merged.size)
+        assertEquals("Running it now.\n\nw1", merged[0].text)
+    }
+}
