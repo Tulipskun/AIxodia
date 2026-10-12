@@ -440,6 +440,28 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrNull()
     }
 
+    /**
+     * A generic authenticated POST to one daemon path. Spec screens use it to
+     * reach endpoints the app has no dedicated call for (an engine update, a
+     * provider refresh), so a new server-side action does not need a new app
+     * build. Returns the body, or null when the call failed.
+     */
+    suspend fun postJson(path: String): String? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        val clean = if (path.startsWith("/")) path else "/$path"
+        runCatching {
+            val req = Request.Builder().url(base + clean)
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) null else r.body?.string()
+            }
+        }.getOrNull()
+    }
+
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) { d1.ping() }
 

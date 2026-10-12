@@ -373,6 +373,14 @@ fun ChatScreen(
             "set_value" -> params["key"]?.takeIf { it.isNotBlank() }?.let { key ->
                 scope.launch { settings.setSpecValue(key, params["value"].orEmpty()) }
             }
+            // A spec screen can reach any daemon endpoint, so a new server-side
+            // action (an engine update, a provider refresh) needs no new build.
+            "api_post" -> params["path"]?.takeIf { it.isNotBlank() }?.let { path ->
+                scope.launch {
+                    val ok = runCatching { repo.postJson(path) }.getOrNull() != null
+                    toast = if (ok) (params["ok"] ?: "เรียก $path แล้ว") else "เรียก $path ไม่สำเร็จ"
+                }
+            }
             "put_ui" -> params["patch"]?.takeIf { it.isNotBlank() }?.let { patch ->
                 scope.launch {
                     runCatching { history.saveUiSpec(patch)?.let { settings.saveUiSpec(it) } }
