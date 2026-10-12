@@ -542,7 +542,10 @@ class ChatViewModel(
             startedAtMs = SystemClock.elapsedRealtime(),
             running = true,
         )
-        viewModelScope.launch { repo.send(sessionId, text.trim()) }
+        viewModelScope.launch {
+            val fresh = repo.send(sessionId, text.trim())
+            if (!fresh) notice.value = "ส่งไปแล้ว กำลังรอการตอบกลับ"
+        }
     }
 
     /** "แชทใหม่" — the only session action that needs no argument. */

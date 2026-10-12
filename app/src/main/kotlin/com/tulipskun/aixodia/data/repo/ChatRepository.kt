@@ -1,5 +1,6 @@
 package com.tulipskun.aixodia.data.repo
 
+import com.tulipskun.aixodia.data.model.mergeToolPairs
 import com.tulipskun.aixodia.data.model.toolRowView
 import androidx.room.withTransaction
 import com.tulipskun.aixodia.data.local.AppDatabase
@@ -103,7 +104,7 @@ class ChatRepository(
                 model = it.model,
                 durationMs = it.durationMs,
             )
-        }
+        }.let(::mergeToolPairs)
     }
 
     /**
@@ -265,8 +266,16 @@ class ChatRepository(
     /**
      * Sends a message. Offline (or before the socket is ready) it is stored
      * with pending=true and flushed on the next successful connection.
+     * Returns false when an identical question is already queued unsent —
+     * a repeat tap is a no-op, never a second bubble.
      */
-    suspend fun send(sid: String, text: String) {
+    suspend fun send(sid: String, text: String): Boolean {
+        val clean = text.trim()
+        if (clean.isEmpty()) return true
+        val dup = try {
+            db.messages().allPending().any { it.sessionId == sid && it.role == "user" && it.text.trim() == clean }
+        } catch (_: Exception) { false }
+        if (dup) return false
         val clientMsgId = "$sid:${System.currentTimeMillis()}"
         val seq = db.messages().maxSeq(sid) + 1
         db.messages().upsert(
@@ -274,17 +283,18 @@ class ChatRepository(
                 sessionId = sid,
                 seq = seq,
                 role = "user",
-                text = text,
+                text = clean,
                 createdAt = System.currentTimeMillis(),
                 pending = true,
                 clientMsgId = clientMsgId,
             )
         )
-        val queued = socket.send(sid, text, clientMsgId)
+        val queued = socket.send(sid, clean, clientMsgId)
         if (queued) {
             db.messages().markAcked(clientMsgId)
         }
         // queued == false → stays pending, the state collector retries it.
+        return true
     }
 
     suspend fun flushPending() {
@@ -330,6 +340,14 @@ class ChatRepository(
      */
     private suspend fun reconcile(sid: String, rows: List<com.tulipskun.aixodia.data.remote.TurnRow>) {
         if (rows.isEmpty()) return
+        // Collapse stacked repeat taps first: identical queued questions keep
+        // only the earliest row, so a retry can never double the bubble.
+        val queued = try { db.messages().allNow(sid) } catch (_: Exception) { emptyList() }
+        for (group in queued.filter { it.pending && it.role == "user" }.groupBy { it.text.trim() }.values) {
+            for (extra in group.sortedBy { it.seq }.drop(1)) {
+                try { db.messages().deleteOne(sid, extra.seq) } catch (_: Exception) { }
+            }
+        }
         val entities = rows.map { it.toEntity(sid) }
         db.withTransaction {
             val localBySeq = db.messages().allNow(sid).associateBy { it.seq }

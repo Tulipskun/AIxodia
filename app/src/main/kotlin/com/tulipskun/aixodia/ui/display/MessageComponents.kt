@@ -131,13 +131,25 @@ fun MessageBlock(
                         onLongClickLabel = copyLabel,
                     ),
             ) {
-                Text(
-                    body,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(12.dp),
-                )
+                Column(Modifier.padding(12.dp)) {
+                    // A merged call+result keeps the command on top in dim
+                    // type, output below — one tool activity, not two bubbles.
+                    if (m.toolArgs.isNotBlank() && m.text.isNotBlank()) {
+                        Text(
+                            m.toolArgs.take(120),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
+                    }
+                    Text(
+                        body,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         } else if (mine) {
             Surface(
