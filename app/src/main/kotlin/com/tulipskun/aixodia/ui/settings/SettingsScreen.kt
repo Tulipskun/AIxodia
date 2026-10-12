@@ -114,7 +114,7 @@ private enum class SettingsPage { Main, Connection, Agent, About }
  * Connection settings (AX-030): the Cloudflare API token the app uses to read
  * and write D1 directly, the daemon tunnel address that carries the live socket
  * and the provider/model API, and one-tap tests so a wrong token or a missing
- * nodes row shows up here instead of as a silent empty chat.
+ * tunnel row shows up here instead of as a silent empty chat.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1079,7 +1079,7 @@ private fun NodeCard(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
         Text(
-            "ai daemon — ค้นหาอัตโนมัติจากแถว nodes ใน D1",
+            "ai daemon — ค้นหาอัตโนมัติจากแถว tunnel ใน D1",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1117,7 +1117,7 @@ private fun NodeCard(
                         runCatching { history.node() }
                             .onSuccess { found ->
                                 node = found
-                                if (found == null) err = "ยังไม่มีแถว nodes — daemon ยังไม่ heartbeat"
+                                if (found == null) err = "ยังไม่มีแถว tunnel — daemon ยังไม่ heartbeat"
                             }
                             .onFailure { err = it.message ?: "error" }
                         checking = false

@@ -38,7 +38,7 @@ sealed interface Discovery {
  * The daemon announces a random quick-tunnel URL every 30 seconds, so the
  * address changes on every redeploy and after every 6-hour kernel cap. Reading
  * it by hand is what this removes: the app already holds the one credential
- * needed to read the `nodes` row, and the socket already re-reads the stored
+ * needed to read the `tunnel` row, and the socket already re-reads the stored
  * address on every reconnect, so learning the address and using it is the same
  * step.
  *

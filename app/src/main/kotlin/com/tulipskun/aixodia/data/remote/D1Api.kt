@@ -277,39 +277,31 @@ class D1Api(private val settings: SettingsStore) {
     }
 
     /**
-     * The daemon's own row: its tunnel URL, version, last heartbeat and the
-     * unix second it started. ai-engine rewrites this row every 30s, so the
-     * phone reads the start time from D1 once and counts uptime locally —
-     * no periodic healthz call is needed. Falls back to the legacy `tunnel`
-     * row when `nodes` has not been written yet.
+     * The daemon's single `tunnel` row: its public URL, its version (which
+     * carries the start time) and its last heartbeat. ai-engine rewrites this
+     * row every 30s, so the phone reads it once and counts uptime locally —
+     * no periodic call is needed. This is the only daemon row; there is no
+     * separate nodes table.
      */
     suspend fun node(): NodeInfo? {
-        val row = query(
-            "SELECT tunnel_url, version, heartbeat FROM nodes WHERE id = 'ai' LIMIT 1"
-        ).rows.firstOrNull()
-        if (row != null) {
-            val url = row.optString("tunnel_url").trim().trimEnd('/')
-            if (url.isNotBlank()) {
-                val version = row.optString("version")
-                val started = Regex("started=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-                val heartbeat = row.optLong("heartbeat")
-                val ageS = if (heartbeat > 0L) nowSeconds() - heartbeat else -1L
-                return NodeInfo(
-                    tunnelUrl = url,
-                    version = version,
-                    // The daemon rewrites this row every 30s. A beat older than
-                    // 90s means it stopped writing. A negative age (phone clock
-                    // behind the server's) still counts as alive.
-                    online = ageS < 90,
-                    ageS = ageS,
-                    startedAt = started,
-                )
-            }
-        }
-        val legacy = query("SELECT url FROM tunnel LIMIT 1").rows.firstOrNull() ?: return null
-        val url = legacy.optString("url").trim().trimEnd('/')
+        val row = query("SELECT url, version, heartbeat FROM tunnel LIMIT 1")
+            .rows.firstOrNull() ?: return null
+        val url = row.optString("url").trim().trimEnd('/')
         if (url.isBlank()) return null
-        return NodeInfo(tunnelUrl = url, version = "", online = true, ageS = 0L)
+        val version = row.optString("version")
+        val started = Regex("started=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val heartbeat = row.optLong("heartbeat")
+        val ageS = if (heartbeat > 0L) nowSeconds() - heartbeat else -1L
+        return NodeInfo(
+            tunnelUrl = url,
+            version = version,
+            // The daemon rewrites this row every 30s. A beat older than 90s
+            // means it stopped writing. A negative age (phone clock behind the
+            // server's) still counts as alive.
+            online = ageS < 90,
+            ageS = ageS,
+            startedAt = started,
+        )
     }
 
     private fun nowSeconds(): Long = System.currentTimeMillis() / 1000

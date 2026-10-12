@@ -444,7 +444,7 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun discover(): D1Api.Target = withContext(Dispatchers.IO) { d1.discover() }
 
     /**
-     * Tunnel discovery: where the ai daemon is, read from the D1 `nodes` row
+     * Tunnel discovery: where the ai daemon is, read from the D1 `tunnel` row
      * (AX-050). A failure is reported rather than hidden, so the settings screen
      * can tell "D1 unreachable" from "the daemon has not beaten yet".
      */
