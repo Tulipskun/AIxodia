@@ -266,12 +266,28 @@ class ChatRepository(
     /**
      * Sends a message. Offline (or before the socket is ready) it is stored
      * with pending=true and flushed on the next successful connection.
-     * Returns false when an identical question is already queued unsent —
-     * a repeat tap is a no-op, never a second bubble.
+     * Returns false only when an identical question is already queued unsent.
+     * A repeat tap on the last, already-answered-or-failed question retries
+     * that same row instead of stacking a twin bubble (Claude-like).
      */
     suspend fun send(sid: String, text: String): Boolean {
         val clean = text.trim()
         if (clean.isEmpty()) return true
+        try {
+            val lastSeq = db.messages().maxSeq(sid)
+            if (lastSeq > 0) {
+                val last = db.messages().get(sid, lastSeq)
+                if (last != null && last.role == "user" && last.text.trim() == clean) {
+                    if (last.pending) return false
+                    val clientMsgId = "$sid:${System.currentTimeMillis()}"
+                    db.messages().upsert(last.copy(pending = true, clientMsgId = clientMsgId, createdAt = System.currentTimeMillis()))
+                    if (socket.send(sid, clean, clientMsgId)) {
+                        db.messages().markAcked(clientMsgId)
+                    }
+                    return true
+                }
+            }
+        } catch (_: Exception) { }
         val dup = try {
             db.messages().allPending().any { it.sessionId == sid && it.role == "user" && it.text.trim() == clean }
         } catch (_: Exception) { false }
