@@ -174,6 +174,7 @@ fun ChatScreen(
         return
     }
 
+    val context = LocalContext.current
     val vm: ChatViewModel = viewModel(key = sessId) {
         ChatViewModel(repo, settings, sessId, context.applicationContext)
     }
@@ -201,7 +202,6 @@ fun ChatScreen(
     val pickedModel by vm.selectedModel.collectAsStateWithLifecycle()
     val hasStoredRoute by vm.hasStoredRoute.collectAsStateWithLifecycle()
     val ui = LocalUiSpec.current
-    val context = LocalContext.current
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by rememberSaveable { mutableStateOf("") }
