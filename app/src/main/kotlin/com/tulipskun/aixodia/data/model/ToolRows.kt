@@ -66,9 +66,10 @@ fun mergeToolPairs(messages: List<ChatMessage>): List<ChatMessage> {
                 if (idx != null) {
                     val call = out[idx]
                     // Mid-round prose travels on the first call row; keep it
-                    // above the output instead of dropping either side.
-                    val body = listOf(call.text.trim(), m.text.trim())
-                        .filter { it.isNotEmpty() }.joinToString("\n\n")
+                    // above the output instead of dropping either side. The
+                    // result text itself is never touched.
+                    val prose = call.text.trim()
+                    val body = if (prose.isNotEmpty()) prose + "\n\n" + m.text else m.text
                     out[idx] = m.copy(
                         toolName = call.toolName.ifBlank { m.toolName },
                         toolArgs = call.toolArgs,
