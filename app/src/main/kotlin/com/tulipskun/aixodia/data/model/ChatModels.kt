@@ -225,6 +225,8 @@ data class ChatMessage(
     val inputIncludesCache: Boolean = false,
     val model: String = "",
     val durationMs: Long = 0,
+    /** Time inside the provider only. Zero when the turn predates this split. */
+    val generationMs: Long = 0,
 )
 
 /**

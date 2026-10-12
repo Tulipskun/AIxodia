@@ -47,7 +47,11 @@ data class MessageEntity(
     val reasoningTokens: Int = 0,
     val inputIncludesCache: Boolean = false,
     val model: String = "",
+    // durationMs is the whole turn from send to stored — the number shown as
+    // the elapsed time. generationMs is only the time the model spent writing,
+    // which is what the rate is computed from.
     val durationMs: Long = 0,
+    val generationMs: Long = 0,
 )
 
 @Dao
@@ -166,10 +170,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v6 splits the footer clock in two. Old rows keep a generationMs of 0
+        // and fall back to the turn duration, which is the number they already
+        // stored, so no history changes its meaning.
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN generationMs INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 .also { inst = it }
         }

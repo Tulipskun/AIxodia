@@ -183,9 +183,12 @@ fun ChatScreen(
     var installing by remember { mutableStateOf(false) }
     var installNote by remember { mutableStateOf("") }
     val installScope = rememberCoroutineScope()
+    val vm: ChatViewModel = viewModel(key = sessId) {
+        ChatViewModel(repo, settings, sessId, context.applicationContext)
+    }
     // One-tap update: the phone checks GitHub on start, so a new build is found
     // without asking anyone whether one exists.
-    fun installUpdate(tag: String) {
+    fun installUpdate() {
         installing = true
         installScope.launch {
             try {
@@ -205,9 +208,6 @@ fun ChatScreen(
                 installing = false
             }
         }
-    }
-    val vm: ChatViewModel = viewModel(key = sessId) {
-        ChatViewModel(repo, settings, sessId, context.applicationContext)
     }
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
     val sessions by vm.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -617,7 +617,7 @@ fun ChatScreen(
                                     modifier = Modifier.weight(1f),
                                 )
                                 TextButton(
-                                    onClick = { installUpdate(updateTag) },
+                                    onClick = { installUpdate() },
                                     enabled = !installing,
                                 ) { Text(if (installing) "…" else "ติดตั้ง") }
                                 TextButton(onClick = { vm.updateAvailable.value = "" }) { Text("×") }

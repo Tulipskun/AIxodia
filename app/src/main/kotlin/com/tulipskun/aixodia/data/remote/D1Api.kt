@@ -272,6 +272,7 @@ class D1Api(private val settings: SettingsStore) {
                 // D1 stores the flag as an INTEGER, so it comes back as 0/1.
                 inputIncludesCache = row.optInt("input_includes_cache") != 0,
                 durationMs = row.optLong("duration_ms"),
+                generationMs = row.optLong("generation_ms"),
             )
         }.reversed()
     }
@@ -323,6 +324,6 @@ class D1Api(private val settings: SettingsStore) {
         private const val TURN_COLUMNS =
             "SELECT seq, role, agent, job_id, text, created_at, model, " +
                 "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, " +
-                "duration_ms FROM turns"
+                "duration_ms, generation_ms FROM turns"
     }
 }

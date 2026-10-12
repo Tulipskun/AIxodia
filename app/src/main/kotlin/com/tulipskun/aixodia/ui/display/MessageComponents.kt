@@ -332,7 +332,15 @@ fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
     reportsReasoning = inputIncludesCache,
     reasoning = reasoningTokens,
     output = (tokensOut - reasoningTokens).coerceAtLeast(0),
-    ratePerSecond = if (durationMs > 0 && tokensOut > 0) tokensOut * 1000.0 / durationMs else 0.0,
+    // The rate is measured over the time the model spent writing and the
+    // elapsed figure over the whole turn, because they answer different
+    // questions: how fast does it type, and how long did I wait. Dividing by
+    // the turn would fold the queue and every tool into "writing", which made a
+    // fast answer read as 1t/s. Rows stored before the split carry no
+    // generation time, so they fall back to the turn duration.
+    ratePerSecond = if ((generationMs > 0 || durationMs > 0) && tokensOut > 0) {
+        tokensOut * 1000.0 / (if (generationMs > 0) generationMs else durationMs).toDouble()
+    } else 0.0,
     millis = durationMs,
     model = model,
     clock = if (createdAt > 0L) formatClock(createdAt) else "",

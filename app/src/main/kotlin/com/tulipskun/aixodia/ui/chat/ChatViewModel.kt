@@ -320,14 +320,10 @@ class ChatViewModel(
             if (model != stats.model) turnStats.value = stats.copy(model = model)
             return
         }
-        val started = if (frame.durationMs > 0L && stats.startedAtMs > 0L) {
-            // The daemon measured the provider call, so the wall clock of the
-            // turn (which also covers the phone's own round trip) is replaced by
-            // it rather than being shown next to the counts.
-            SystemClock.elapsedRealtime() - frame.durationMs
-        } else {
-            stats.startedAtMs
-        }
+        // The clock deliberately still starts when the user pressed send: the
+        // figure next to the tokens is how long they waited, not how long the
+        // provider wrote.
+        val started = stats.startedAtMs
         turnStats.value = stats.copy(
             model = model,
             inputTokens = input,

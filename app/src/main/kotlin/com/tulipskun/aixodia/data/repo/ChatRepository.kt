@@ -103,6 +103,7 @@ class ChatRepository(
                 inputIncludesCache = it.inputIncludesCache,
                 model = it.model,
                 durationMs = it.durationMs,
+                generationMs = it.generationMs,
             )
         }.let(::mergeToolPairs)
     }
@@ -475,6 +476,7 @@ class ChatRepository(
         inputIncludesCache = inputIncludesCache,
         model = model,
         durationMs = durationMs,
+        generationMs = generationMs,
         )
     }
 
