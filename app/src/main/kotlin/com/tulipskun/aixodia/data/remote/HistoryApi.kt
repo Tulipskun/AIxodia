@@ -110,6 +110,15 @@ class HistoryApi(private val settings: SettingsStore) {
         runCatching { d1.sessions() }.getOrDefault(emptyList())
     }
 
+    /**
+     * Null when D1 cannot be reached (or is not configured); an empty list
+     * only when D1 truly has no chats. Sync uses this so a failed fetch
+     * keeps local data while a real wipe prunes it.
+     */
+    suspend fun sessionsOrNull(): List<SessionRow>? = withContext(Dispatchers.IO) {
+        runCatching { d1.sessions() }.getOrNull()
+    }
+
     /** Creates the chat in D1 too, so the daemon and phone agree. */
     suspend fun createSession(id: String, title: String): Boolean = withContext(Dispatchers.IO) {
         runCatching { d1.createSession(id, title) }.getOrDefault(false)

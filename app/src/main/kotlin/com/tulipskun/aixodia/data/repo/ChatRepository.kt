@@ -106,12 +106,23 @@ class ChatRepository(
         }
     }
 
-    /** Session list from the DB (cloud/mock), merged into Room. */
+    /**
+     * Session list from D1, merged into Room. D1 is authoritative when it
+     * answers: local chats missing server-side are pruned (with their
+     * messages), so a server-side wipe also clears the app. A failed fetch
+     * (null) keeps everything; sessions with unsent pending messages are
+     * never pruned.
+     */
     suspend fun syncSessions() {
-        // HistoryApi already degrades to "empty" when the app is not
-        // configured; the guard here keeps a transport error from escaping into
-        // the ViewModel scope, where it would crash the process.
-        val rows = try { history.sessions() } catch (_: Exception) { emptyList() }
+        val rows = try { history.sessionsOrNull() } catch (_: Exception) { null } ?: return
+        val ids = rows.map { it.id }.toSet()
+        val pending = try { db.messages().allPending().map { it.sessionId }.toSet() } catch (_: Exception) { emptySet() }
+        for (local in try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }) {
+            if (local.id !in ids && local.id !in pending) {
+                try { db.messages().deleteSession(local.id) } catch (_: Exception) { }
+                try { db.sessions().delete(local.id) } catch (_: Exception) { }
+            }
+        }
         if (rows.isEmpty()) return
         db.sessions().upsertAll(
             rows.map {
