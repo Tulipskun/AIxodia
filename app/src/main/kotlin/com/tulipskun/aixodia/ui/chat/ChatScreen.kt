@@ -195,6 +195,7 @@ fun ChatScreen(
     val liveThinkingMs by vm.liveThinkingMs.collectAsStateWithLifecycle()
     val liveThinkingAgent by vm.liveThinkingAgent.collectAsStateWithLifecycle()
     val liveSteps by vm.liveSteps.collectAsStateWithLifecycle()
+    val liveNarrations by vm.liveNarrations.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
@@ -606,7 +607,7 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
-                if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty()) {
+                if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty() && liveNarrations.isEmpty()) {
                     item { EmptyChatState() }
                 }
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
@@ -630,6 +631,18 @@ fun ChatScreen(
                             message = errorCard,
                             onRetry = { vm.retryLast() },
                             onDismiss = { vm.errorCard.value = "" },
+                        )
+                    }
+                }
+                // What the model said before each tool round, drawn as its own
+                // answer block — the same shape the stored thread has once the
+                // turn ends, so nothing jumps or merges when it does.
+                liveNarrations.forEachIndexed { index, said ->
+                    item(key = "live-narration-$index") {
+                        MarkdownText(
+                            text = said,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }

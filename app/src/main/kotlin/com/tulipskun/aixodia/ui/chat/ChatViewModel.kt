@@ -51,6 +51,8 @@ data class TurnStats(
     val inputIncludesCache: Boolean = false,
     val exact: Boolean = false,
     val startedAtMs: Long = 0L,
+    /** When the first token actually arrived, which is where the rate starts. */
+    val firstTokenAtMs: Long = 0L,
     val endedAtMs: Long = 0L,
     val estimatedTokens: Int = 0,
     val running: Boolean = false,
@@ -70,8 +72,16 @@ data class TurnStats(
     fun totalInputTokens(): Int =
         if (inputIncludesCache) inputTokens else inputTokens + cacheRead + cacheWrite
 
+    /**
+     * Tokens per second, measured from the first token rather than from the
+     * moment the question was sent. Time spent waiting for the provider and
+     * between tool rounds is not generation time; counting it made every answer
+     * read as "1t/s" no matter how fast the model actually wrote.
+     */
     fun tokensPerSecond(nowMs: Long): Double {
-        val millis = elapsedMs(nowMs)
+        val start = if (firstTokenAtMs > 0L) firstTokenAtMs else startedAtMs
+        val end = if (endedAtMs > 0L) endedAtMs else nowMs
+        val millis = (end - start).coerceAtLeast(0L)
         if (millis <= 0L) return 0.0
         return outputTokensNow().toDouble() * 1000.0 / millis.toDouble()
     }
@@ -117,6 +127,13 @@ class ChatViewModel(
     val liveText = MutableStateFlow("")
     val liveAgent = MutableStateFlow("main")
     val liveSteps = MutableStateFlow<List<ToolStep>>(emptyList())
+    /**
+     * What the model said before each tool round. A live turn used to pile every
+     * round's words into one growing bubble; the stored thread afterwards shows
+     * them as separate turns, so the same conversation looked different the
+     * moment it ended. Closing the bubble when a tool runs keeps the two the same.
+     */
+    val liveNarrations = MutableStateFlow<List<String>>(emptyList())
     /** Recorded thinking time for the current reasoning event, if the daemon sent one. */
     val liveThinkingMs = MutableStateFlow(0L)
     /** Which agent that thinking event belongs to; raw reasoning never leaves the daemon. */
@@ -228,6 +245,11 @@ class ChatViewModel(
         liveAgent.value = agent.ifEmpty { "main" }
         liveText.value += chunk
         liveChars += chunk.length
+        // The clock for the rate starts here, not when the question was sent.
+        val stats = turnStats.value
+        if (stats.firstTokenAtMs == 0L) {
+            turnStats.value = stats.copy(firstTokenAtMs = SystemClock.elapsedRealtime())
+        }
         estimateTokens()
         busy.value = true
     }
@@ -321,6 +343,12 @@ class ChatViewModel(
             "tool_call", "tool_running" -> {
                 val name = f.toolCall?.name ?: return
                 liveThinkingMs.value = 0L
+                // What came before this tool is its own turn, now and after.
+                val said = liveText.value.trim()
+                if (said.isNotEmpty()) {
+                    liveNarrations.value = liveNarrations.value + said
+                    liveText.value = ""
+                }
                 liveSteps.value = liveSteps.value.filterNot { it.name == name } +
                     ToolStep(name = name, args = f.toolCall?.arguments.orEmpty(), durationMs = f.toolDurationMs)
                 status.value = "$name…"
@@ -371,6 +399,7 @@ class ChatViewModel(
         }
         status.value = ""
         liveSubText = ""
+        liveNarrations.value = emptyList()
         liveThinkingMs.value = 0L
         busy.value = false
         answerSettled = false
@@ -596,6 +625,7 @@ class ChatViewModel(
         busy.value = true
         liveChars = 0
         liveSubText = ""
+        liveNarrations.value = emptyList()
         subAgents.value = emptyList()
         // The footer opens with this turn: which model answers, from when, and
         // nothing else yet. A chat that follows the agent's default says so —
