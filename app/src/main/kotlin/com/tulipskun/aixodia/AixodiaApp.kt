@@ -37,5 +37,5 @@ class AppContainer(app: Application) {
     val socket = AiDirectSocket(settings)
     val repo = ChatRepository(db, historyApi, socket)
     val discovery = DaemonDiscovery(settings, historyApi, socket, scope)
-    val uiSync = UiSpecSync(settings, historyApi, scope)
+    val uiSync = UiSpecSync(settings, historyApi, socket, scope)
 }

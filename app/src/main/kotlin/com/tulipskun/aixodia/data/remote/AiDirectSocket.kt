@@ -24,6 +24,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONObject
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -59,6 +60,16 @@ class AiDirectSocket(private val settings: SettingsStore) {
 
     private val _frames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 256)
     val frames: SharedFlow<AiOutput> = _frames
+
+    /**
+     * The server-driven UI spec, pushed by the daemon as raw JSON: once when the
+     * socket connects and again whenever it changes. Pushing over the socket the
+     * app already holds means there is no polling and no second connection.
+     */
+    // replay = 1 so a collector that subscribes just after the connect push
+    // still receives it rather than waiting for the next change.
+    private val _uiSpecs = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 8)
+    val uiSpecs: SharedFlow<String> = _uiSpecs
 
     private var ws: WebSocket? = null
     private var wantOpen = false
@@ -209,6 +220,16 @@ class AiDirectSocket(private val settings: SettingsStore) {
                     }
 
                     override fun onMessage(w: WebSocket, text: String) {
+                        // A pushed UI spec is cached verbatim, not run through the
+                        // chat model: it is a whole JSON object, and re-encoding
+                        // it through a typed model could change its numbers.
+                        if (text.contains("\"kind\":\"ui\"")) {
+                            val spec = runCatching { JSONObject(text).optJSONObject("ui") }.getOrNull()
+                            if (spec != null) {
+                                scope.launch { _uiSpecs.emit(spec.toString()) }
+                                return
+                            }
+                        }
                         try {
                             val f = outAdapter.fromJson(text) ?: return
                             scope.launch { _frames.emit(f) }
