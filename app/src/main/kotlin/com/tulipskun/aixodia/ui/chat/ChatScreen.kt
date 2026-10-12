@@ -1040,7 +1040,7 @@ private const val MAX_ATTACH_PER_PICK = 10
  * a timestamp has to be formatted from. Sampling them together keeps the two
  * from drifting apart within one frame.
  */
-internal data class Tick(val elapsed: Long, val wall: Long) {
+data class Tick(val elapsed: Long, val wall: Long) {
     companion object {
         fun now() = Tick(android.os.SystemClock.elapsedRealtime(), System.currentTimeMillis())
     }
