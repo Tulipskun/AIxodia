@@ -223,7 +223,7 @@ fun MessageBlock(
             ) {
                 val parts = splitAttachmentNote(body)
                 Column(
-                    Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp),
+                    Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
                     horizontalAlignment = Alignment.End,
                 ) {
                     // Padding goes on the content, not on the Surface's own
