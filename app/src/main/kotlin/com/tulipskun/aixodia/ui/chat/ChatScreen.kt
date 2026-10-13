@@ -149,6 +149,8 @@ fun ChatScreen(
     discovery: DaemonDiscovery? = null,
 ) {
     val token by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
+    val discoveryState by if (discovery != null) discovery.state.collectAsStateWithLifecycle(initialValue = com.tulipskun.aixodia.data.remote.DiscoveryState()) else remember { mutableStateOf(com.tulipskun.aixodia.data.remote.DiscoveryState()) }
+
     // The token alone is enough to be configured: the daemon address now arrives
     // by discovery, so demanding it here would lock a fresh install on the setup
     // screen waiting for a value the app is about to fetch for itself. History
@@ -624,7 +626,7 @@ fun ChatScreen(
                                 TextButton(onClick = { vm.updateAvailable.value = "" }) { Text("×") }
                             }
                         }
-                        if (conn == ConnState.OFFLINE) {
+                        if (conn == ConnState.OFFLINE && (discovery == null || discoveryState.phase != com.tulipskun.aixodia.data.remote.DiscoveryPhase.CONNECTED)) {
                             OfflineBanner(
                                 messageRes = socketErr.takeIf { it != 0 } ?: R.string.offline_title,
                                 onRetry = { vm.refresh() },
@@ -654,7 +656,7 @@ fun ChatScreen(
             }
         ) { pad ->
             var allowEmptyState by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { delay(250); allowEmptyState = true }
+            LaunchedEffect(Unit) { delay(500); allowEmptyState = true }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 12.dp),
