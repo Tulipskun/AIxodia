@@ -138,6 +138,8 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.snapshotFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -626,7 +628,7 @@ fun ChatScreen(
                                 TextButton(onClick = { vm.updateAvailable.value = "" }) { Text("×") }
                             }
                         }
-                        if (conn == ConnState.OFFLINE && (discovery == null || discoveryState.phase != com.tulipskun.aixodia.data.remote.DiscoveryPhase.CONNECTED)) {
+                        if (showOfflineCard) {
                             OfflineBanner(
                                 messageRes = socketErr.takeIf { it != 0 } ?: R.string.offline_title,
                                 onRetry = { vm.refresh() },
@@ -655,8 +657,17 @@ fun ChatScreen(
                 }
             }
         ) { pad ->
-            var allowEmptyState by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { delay(500); allowEmptyState = true }
+            var threadLoaded by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { kotlinx.coroutines.flow.snapshotFlow { messages }.first { true }; threadLoaded = true }
+            var showOfflineCard by remember { mutableStateOf(false) }
+            LaunchedEffect(conn, discoveryState.phase) {
+                if (conn == ConnState.OFFLINE && (discovery == null || discoveryState.phase != com.tulipskun.aixodia.data.remote.DiscoveryPhase.CONNECTED)) {
+                    kotlinx.coroutines.delay(1500L)
+                    showOfflineCard = true
+                } else {
+                    showOfflineCard = false
+                }
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 12.dp),
@@ -665,7 +676,7 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
-                if (allowEmptyState && messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty() && liveNarrations.isEmpty()) {
+                if (threadLoaded && messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty() && liveNarrations.isEmpty()) {
                     item { EmptyChatState() }
                 }
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
