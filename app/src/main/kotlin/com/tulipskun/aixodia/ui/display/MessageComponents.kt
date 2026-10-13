@@ -234,6 +234,7 @@ fun MessageBlock(
                         MarkdownText(
                             text = parts.text,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fillWidth = false,
                         )
                     }
                     // The file names ride along as chips; the server path and

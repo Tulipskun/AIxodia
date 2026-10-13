@@ -360,6 +360,7 @@ fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.onSurface,
+    fillWidth: Boolean = true,
 ) {
     val parsed = remember(text) { blocks(text) }
     // Inline code reads as a quiet pill, not a black box: a name the user is
@@ -381,28 +382,28 @@ fun MarkdownText(
             text = inline((parsed.first() as Block.Paragraph).text, codeStyle, linkStyle),
             style = MaterialTheme.typography.bodyMedium,
             color = color,
-            modifier = modifier.fillMaxWidth(),
+            modifier = if (fillWidth) modifier.fillMaxWidth() else modifier,
         )
         return
     }
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(if (fillWidth) modifier.fillMaxWidth() else modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         parsed.forEach { block ->
             when (block) {
                 is Block.Heading -> Text(
                     text = inline(block.text, codeStyle, linkStyle),
                     style = headingStyle(block.level),
                     color = color,
-                    modifier = Modifier.fillMaxWidth().padding(top = if (block.level <= 2) 6.dp else 2.dp),
+                    modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier).padding(top = if (block.level <= 2) 6.dp else 2.dp),
                 )
 
                 is Block.Paragraph -> Text(
                     text = inline(block.text, codeStyle, linkStyle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = color,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
                 )
 
-                is Block.Quote -> Row(Modifier.fillMaxWidth().padding(start = 4.dp)) {
+                is Block.Quote -> Row((if (fillWidth) Modifier.fillMaxWidth() else Modifier).padding(start = 4.dp)) {
                     Spacer(
                         Modifier
                             .width(2.dp)
@@ -415,13 +416,13 @@ fun MarkdownText(
                         text = inline(block.text, codeStyle, linkStyle),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
                     )
                 }
 
-                is Block.ItemList -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                is Block.ItemList -> Column(if (fillWidth) Modifier.fillMaxWidth() else Modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     block.items.forEachIndexed { index, item ->
-                        Row(Modifier.fillMaxWidth()) {
+                        Row(if (fillWidth) Modifier.fillMaxWidth() else Modifier) {
                             Text(
                                 text = if (block.ordered) "${index + 1}." else "•",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -432,7 +433,7 @@ fun MarkdownText(
                                 text = inline(item, codeStyle, linkStyle),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = color,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
                             )
                         }
                     }
@@ -505,7 +506,7 @@ private fun TableBlock(
     }
     // Dp is a value class over Float with no Sum, so the total is folded by hand.
     val natural = widths.fold(cellGap) { acc, w -> acc + w }
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    BoxWithConstraints(if (fillWidth) Modifier.fillMaxWidth() else Modifier) {
         val available = maxWidth
         val scroll = natural > available
         Column(
