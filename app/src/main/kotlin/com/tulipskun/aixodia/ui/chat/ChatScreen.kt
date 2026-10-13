@@ -981,6 +981,7 @@ private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
             Icon(Icons.Default.Settings, contentDescription = ui.settings)
         }
     }
+    }
 }
 
 
