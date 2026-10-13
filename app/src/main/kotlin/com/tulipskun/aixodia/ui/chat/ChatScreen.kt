@@ -623,7 +623,7 @@ fun ChatScreen(
                                 TextButton(onClick = { vm.updateAvailable.value = "" }) { Text("×") }
                             }
                         }
-                        if (conn != ConnState.ONLINE) {
+                        if (conn == ConnState.OFFLINE) {
                             OfflineBanner(
                                 messageRes = socketErr.takeIf { it != 0 } ?: R.string.offline_title,
                                 onRetry = { vm.refresh() },
@@ -652,6 +652,8 @@ fun ChatScreen(
                 }
             }
         ) { pad ->
+            var allowEmptyState by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { delay(250); allowEmptyState = true }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(pad).padding(horizontal = 12.dp),
@@ -660,7 +662,7 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
-                if (messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty() && liveNarrations.isEmpty()) {
+                if (allowEmptyState && messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty() && liveNarrations.isEmpty()) {
                     item { EmptyChatState() }
                 }
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
