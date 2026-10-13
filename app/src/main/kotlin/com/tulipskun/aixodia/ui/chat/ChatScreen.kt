@@ -138,6 +138,7 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,6 +157,23 @@ fun ChatScreen(
     // screen waiting for a value the app is about to fetch for itself. History
     // reads D1 directly and works with no address at all; only the live socket
     // waits, and it waits quietly.
+    // Resolve the stored token before deciding the first screen. Reading it as
+    // "empty" for one frame used to flash SetupNeeded even on a configured
+    // device and then jump into the chat, which looks like a crash.
+    val configuredScope = rememberCoroutineScope()
+    var hasResolvedToken by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        configuredScope.launch {
+            runCatching { settings.tokenFlow.first() }.getOrNull()?.isNotBlank()
+            hasResolvedToken = true
+        }
+    }
+    if (!hasResolvedToken) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     val configured = token.isNotBlank()
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     var showSettings by remember { mutableStateOf(false) }
