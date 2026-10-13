@@ -170,9 +170,7 @@ fun ChatScreen(
         }
     }
     if (!hasResolvedToken) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
+        Box(Modifier.fillMaxSize()) {}
         return
     }
     val configured = token.isNotBlank()
