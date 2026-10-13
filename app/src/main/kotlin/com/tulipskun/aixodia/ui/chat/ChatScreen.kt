@@ -215,6 +215,7 @@ fun ChatScreen(
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
     val sessions by vm.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
     val conn by vm.conn.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
+    var showOfflineCard by remember { mutableStateOf(false) }
     val socketErr by vm.socketError.collectAsStateWithLifecycle(initialValue = 0)
     val status by vm.status.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
@@ -656,7 +657,6 @@ fun ChatScreen(
             }
         ) { pad ->
             var threadLoaded by remember { mutableStateOf(false) }
-            var showOfflineCard by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { delay(400); threadLoaded = true }
             LaunchedEffect(conn, discoveryState.phase) {
                 if (conn == ConnState.OFFLINE && (discovery == null || discoveryState.phase != com.tulipskun.aixodia.data.remote.DiscoveryPhase.CONNECTED)) {
