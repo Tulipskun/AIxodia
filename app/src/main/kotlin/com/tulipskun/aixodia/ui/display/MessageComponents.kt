@@ -207,10 +207,9 @@ fun MessageBlock(
                 modifier = Modifier
                     .padding(top = 4.dp)
                     .widthIn(max = 760.dp)
-                    // The bubble takes the width of the text and stops there. A
-                    // fixed 88% meant "ok" and a three-line question drew exactly
-                    // the same slab, which is not how a bubble reads.
-                    .fillMaxWidth(0.88f)
+                    // The bubble may only stretch to a maximum of eight-eights
+                    // of the row on its own empty broad surface and then it wraps
+                    // to the text width; this keeps empty space out of short text.
                     .wrapContentWidth(align = Alignment.End)
                     .combinedClickable(
                         // A tap that does nothing is worse than no tap: it
