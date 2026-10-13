@@ -1103,9 +1103,6 @@ private fun NodeCard(
                 color = colour,
             )
             Text(
-                "URL เปลี่ยนทุกครั้งที่รันใหม่ แอปจะตามให้เอง ไม่ต้องกดหา",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1148,91 +1145,6 @@ private fun NodeCard(
  * object; only the keys that are present are changed, so a small edit does not
  * have to repeat the whole spec. Saving writes to the daemon, which merges and
  * returns the effective spec, and that is what the app caches.
- */
-@Composable
-private fun UiSpecEditor(
-    history: HistoryApi,
-    settings: SettingsStore,
-    onMessage: (String) -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    val moshi = remember { Moshi.Builder().add(KotlinJsonAdapterFactory()).build() }
-    val cached by settings.uiSpecFlow.collectAsStateWithLifecycle(initialValue = UiSpec())
-    var text by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-
-    // Open with what the daemon currently serves, so the editor is never blank
-    // and the reader can see the defaults they are editing.
-    LaunchedEffect(Unit) {
-        busy = true
-        val raw = runCatching { history.uiSpecRaw() }.getOrNull()
-        if (raw != null) {
-            runCatching { settings.saveUiSpec(raw) }
-            text = prettyJson(raw)
-        } else {
-            text = prettyJson(runCatching { moshi.adapter(UiSpec::class.java).toJson(cached) }.getOrDefault("{}"))
-        }
-        busy = false
-    }
-
-    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("หน้าจอขับเคลื่อนจาก daemon", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "แก้ JSON ด้านล่างแล้วบันทึก — แอพจะดึงค่าใหม่ไปใช้เองโดยไม่ต้องติดตั้งเวอร์ชันใหม่\n" +
-                "ใส่เฉพาะคีย์ที่ต้องการเปลี่ยน เช่น {\"strings\":{\"retry\":\"กดซ้ำ\"}}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
-            textStyle = MaterialTheme.typography.bodySmall,
-            singleLine = false,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                enabled = !busy && text.isNotBlank(),
-                onClick = {
-                    busy = true
-                    scope.launch {
-                        val effective = runCatching { history.saveUiSpec(text) }.getOrNull()
-                        if (effective != null) {
-                            runCatching { settings.saveUiSpec(effective) }
-                            text = prettyJson(effective)
-                            onMessage("บันทึกหน้าจอแล้ว — มีผลทันที")
-                        } else {
-                            onMessage("บันทึกไม่สำเร็จ — ตรวจว่า daemon ออนไลน์และ JSON ถูกต้อง")
-                        }
-                        busy = false
-                    }
-                },
-            ) { Text("บันทึกไปที่ daemon") }
-            OutlinedButton(
-                enabled = !busy,
-                onClick = {
-                    busy = true
-                    scope.launch {
-                        val reset = """{"theme":null,"strings":null,"topbar":null,"tool_block":null,"error_card":null,"composer":null}"""
-                        val effective = runCatching { history.saveUiSpec(reset) }.getOrNull()
-                        if (effective != null) {
-                            runCatching { settings.saveUiSpec(effective) }
-                            text = prettyJson(effective)
-                            onMessage("รีเซ็ตเป็นค่าเริ่มต้นแล้ว")
-                        } else {
-                            onMessage("รีเซ็ตไม่สำเร็จ")
-                        }
-                        busy = false
-                    }
-                },
-            ) { Text("ค่าเริ่มต้น") }
-        }
-    }
-}
-
-/** Re-indents a JSON string so it can be read and edited. */
-private fun prettyJson(raw: String): String =
-    runCatching { JSONObject(raw).toString(2) }.getOrDefault(raw)
 
 @Composable
 private fun UpdateRow(settings: SettingsStore) {

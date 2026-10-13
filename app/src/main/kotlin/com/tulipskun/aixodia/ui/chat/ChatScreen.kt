@@ -764,12 +764,7 @@ private fun ChatModelSheet(
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("โมเดลของแชทนี้ (เฉพาะแชทนี้ ไม่ใช่ค่าเริ่มต้นสากล)", style = MaterialTheme.typography.titleMedium)
-            Text(
-                if (hasStoredRoute) "แชทนี้ล็อก provider/model ไว้แล้ว" else "แชทนี้ยังไม่ล็อก — ใช้ค่าของ agent",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("Sub agent (เฉพาะแชทนี้)", style = MaterialTheme.typography.titleMedium)
             if (providers.isEmpty()) {
                 Text(
                     "ยังไม่มี provider — เพิ่มหรือทดสอบ provider ในหน้าตั้งค่าก่อน",
@@ -777,13 +772,6 @@ private fun ChatModelSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                if (pickedProvider.isBlank()) {
-                    Text(
-                        "แชทนี้ยังใช้ค่าของ agent อยู่ — เลือก provider เพื่อล็อกไว้กับแชทนี้",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -800,7 +788,7 @@ private fun ChatModelSheet(
                 if (pickedProvider.isNotBlank()) {
                     Text(
                         when {
-                            currentStatus == null -> "ยังไม่มีสถานะของ provider นี้ — ตรวจในหน้าตั้งค่า"
+                            currentStatus == null -> "ยังไม่มีสถานะ"
                             !currentStatus.probed -> "ยังไม่ทดสอบ · key ${currentStatus.keyCount}"
                             currentStatus.reachable -> buildString {
                                 append("ใช้ได้ · key ${currentStatus.keyCount}")
