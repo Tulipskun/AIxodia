@@ -472,13 +472,6 @@ fun ChatScreen(
                     // top bar next to the status dot. The footer is anchored to
                     // the bottom of the sheet, so this row sits low instead of
                     // floating under a long list.
-                    TextButton(
-                        onClick = { scope.launch { drawer.close() }; showSettings = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  " + ui.settings)
-                    }
                     // Rows the daemon added to the drawer, each opening one of
                     // its composed screens.
                     ui.drawerItems.filterNot { it.params["screen"] == "example" || it.title.contains("ตัวอย่าง", ignoreCase = true) }.forEach { item ->
@@ -539,6 +532,9 @@ fun ChatScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { showSettings = true }, content = {
+                            Icon(Icons.Default.Settings, contentDescription = ui.settings)
+                        })
                         if (ui.topbar.showRefresh) {
                             IconButton(onClick = { vm.refresh() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = ui.refresh)
