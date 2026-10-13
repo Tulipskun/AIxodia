@@ -263,7 +263,7 @@ fun SettingsScreen(
             if (page == SettingsPage.Connection) {
             SectionCard(
                 "การเชื่อมต่อ",
-                "ใส่ Cloudflare API token ตัวเดียว — account/database ถูกค้นหาให้อัตโนมัติ (ไม่มี Worker แล้ว)",
+                "",
             ) {
                 val clip = LocalClipboardManager.current
                 LabelledField(
@@ -370,7 +370,7 @@ fun SettingsScreen(
             }
 
             if (page == SettingsPage.Agent) {
-            SectionCard("โมเดลค่าเริ่มต้นของ agent (สากล)", "ค่าที่นี่ใช้กับทุกแชทที่ไม่ได้ล็อก provider/model ไว้เอง main agent คือคนที่คุณคุยด้วย, sub agent คือคนงานที่ถูกเรียกมาช่วย") {
+            SectionCard("โมเดลค่าเริ่มต้นของ agent (สากล)", "") {
                 RouteCard(
                     title = "ค่าเริ่มต้นสากล — main agent",
                     route = mainRoute,
@@ -492,10 +492,10 @@ fun SettingsScreen(
             }
 
             if (page == SettingsPage.About) {
-            SectionCard("แอป", "เชื่อมต่อกับ daemon: " + when (conn) {
+            SectionCard("แอป", when (conn) {
                 ConnState.ONLINE -> "ออนไลน์ ($curWs)"
                 ConnState.CONNECTING -> "กำลังต่อ…"
-                ConnState.OFFLINE -> "ออฟไลน์ — ยังไม่ได้ตั้งค่า หรือ daemon ไม่ออนไลน์"
+                ConnState.OFFLINE -> "ออฟไลน์"
             }) {
                 Text(
                     "session: $curSession · แอป v${BuildConfig.VERSION_NAME}",

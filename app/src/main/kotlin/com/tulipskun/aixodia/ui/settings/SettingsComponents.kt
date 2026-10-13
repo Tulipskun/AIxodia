@@ -58,7 +58,7 @@ fun StatusBanner(text: String) {
 @Composable
 fun SectionCard(
     title: String,
-    subtitle: String,
+    subtitle: String = "",
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
@@ -70,11 +70,13 @@ fun SectionCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             content()
         }
     }
