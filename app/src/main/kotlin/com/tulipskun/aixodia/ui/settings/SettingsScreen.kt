@@ -113,7 +113,7 @@ import kotlinx.coroutines.launch
 private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 
 /** The Settings screen is split: the main page, and a page only for providers and keys. */
-private enum class SettingsPage { Main, Connection, Agent, Ui, About }
+private enum class SettingsPage { Main, Connection, Agent, About }
 
 /**
  * Connection settings (AX-030): the Cloudflare API token the app uses to read
@@ -229,7 +229,6 @@ fun SettingsScreen(
                             SettingsPage.Main -> "ตั้งค่า"
                             SettingsPage.Connection -> "การเชื่อมต่อ"
                             SettingsPage.Agent -> "ค่าเริ่มต้นของ agent"
-                            SettingsPage.Ui -> "หน้าจอ (จาก daemon)"
                             SettingsPage.About -> "เกี่ยวกับแอป"
                         },
                     )
@@ -258,7 +257,6 @@ fun SettingsScreen(
             if (page == SettingsPage.Main) {
                 SettingsNavRow("การเชื่อมต่อ", "Cloudflare token และ daemon") { page = SettingsPage.Connection }
                 SettingsNavRow("ค่าเริ่มต้นของ agent", "model ของ main และ sub agent") { page = SettingsPage.Agent }
-                SettingsNavRow("หน้าจอ (จาก daemon)", "แก้ข้อความ สี และพฤติกรรม โดยไม่ต้องติดตั้งใหม่") { page = SettingsPage.Ui }
                 SettingsNavRow("เกี่ยวกับแอป", "สถานะ daemon และการอัปเดต") { page = SettingsPage.About }
             }
 
@@ -493,9 +491,6 @@ fun SettingsScreen(
 
             }
 
-            if (page == SettingsPage.Ui) {
-                UiSpecEditor(history = history, settings = settings, onMessage = { msg = it })
-            }
             if (page == SettingsPage.About) {
             SectionCard("แอป", "เชื่อมต่อกับ daemon: " + when (conn) {
                 ConnState.ONLINE -> "ออนไลน์ ($curWs)"
@@ -1274,7 +1269,6 @@ private fun UpdateRow(settings: SettingsStore) {
             },
             enabled = !busy,
         ) { Text("ตรวจอัปเดต") }
-        Text("ติดตั้งทับตัวเดิม ข้อมูลแชทไม่หาย", style = MaterialTheme.typography.labelSmall)
     }
 }
 

@@ -481,7 +481,7 @@ fun ChatScreen(
                     }
                     // Rows the daemon added to the drawer, each opening one of
                     // its composed screens.
-                    ui.drawerItems.forEach { item ->
+                    ui.drawerItems.filterNot { it.params["screen"] == "example" || it.title.contains("ตัวอย่าง", ignoreCase = true) }.forEach { item ->
                         TextButton(
                             onClick = {
                                 scope.launch { drawer.close() }
@@ -998,7 +998,6 @@ private fun UpdateRow(settings: SettingsStore) {
             },
             enabled = !busy,
         ) { Text("ตรวจอัปเดต") }
-        Text("ติดตั้งทับตัวเดิม ข้อมูลแชตไม่หาย", style = MaterialTheme.typography.labelSmall)
     }
 }
 

@@ -47,11 +47,6 @@ CREATE TABLE IF NOT EXISTS state (
   value TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
--- Future per-device tokens (v1 uses the single AIXODIA_TOKEN; register here
--- to prepare revocation per phone without rotating the shared secret).
-CREATE TABLE IF NOT EXISTS devices (
-  id TEXT PRIMARY KEY,
-  label TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  revoked INTEGER NOT NULL DEFAULT 0
-);
+-- Indexes for the read pattern: list sessions by recency, turns in order.
+CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at);
+CREATE INDEX IF NOT EXISTS idx_turns_session_seq ON turns(session_id, seq);
