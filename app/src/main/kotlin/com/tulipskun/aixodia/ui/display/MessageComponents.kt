@@ -248,16 +248,16 @@ fun MessageBlock(
                             parts.attachments.forEach { AttachmentChip(it) }
                         }
                     }
-                    Text(
-                        text = clock,
-                        maxLines = 1,
-                        softWrap = false,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
                 }
             }
+            Text(
+                text = clock,
+                maxLines = 1,
+                softWrap = false,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                modifier = Modifier.padding(top = 2.dp, end = 2.dp),
+            )
         } else {
             // An answer is the page, not a bubble: the words sit straight on the
             // background and the turn is read from the gap above it. Only code
