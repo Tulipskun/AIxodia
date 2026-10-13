@@ -955,7 +955,7 @@ private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         FilledTonalButton(
             onClick = {
                 busy = true; msg = "กำลังตรวจ…"
