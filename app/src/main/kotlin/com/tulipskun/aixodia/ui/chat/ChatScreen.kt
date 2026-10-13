@@ -978,7 +978,7 @@ private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
             enabled = !busy,
         ) { Text("ตรวจอัปเดต") }
         IconButton(onClick = onSettings) {
-            Icon(Icons.Default.Settings, contentDescription = ui.settings)
+            Icon(Icons.Default.Settings, contentDescription = "Settings")
         }
     }
     }

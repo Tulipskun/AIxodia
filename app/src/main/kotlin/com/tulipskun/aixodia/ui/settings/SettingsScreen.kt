@@ -1102,8 +1102,6 @@ private fun NodeCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = colour,
             )
-            Text(
-            )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
