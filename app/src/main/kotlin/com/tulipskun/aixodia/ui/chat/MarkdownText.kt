@@ -469,7 +469,7 @@ fun MarkdownText(
                         .background(MaterialTheme.colorScheme.outlineVariant),
                 )
 
-                is Block.Table -> TableBlock(block, codeStyle, linkStyle, color)
+                is Block.Table -> TableBlock(block, codeStyle, linkStyle, color, fillWidth)
             }
         }
     }
@@ -492,6 +492,7 @@ private fun TableBlock(
     codeStyle: SpanStyle,
     linkStyle: SpanStyle,
     color: Color,
+    fillWidth: Boolean = true,
 ) {
     val columns = table.headerRow.size
     if (columns == 0) return
