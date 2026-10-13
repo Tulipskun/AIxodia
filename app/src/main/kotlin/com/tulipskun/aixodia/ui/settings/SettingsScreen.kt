@@ -1140,11 +1140,6 @@ private fun NodeCard(
     }
 }
 
-/**
- * Edits the daemon's server-driven UI spec from the phone. The spec is a JSON
- * object; only the keys that are present are changed, so a small edit does not
- * have to repeat the whole spec. Saving writes to the daemon, which merges and
- * returns the effective spec, and that is what the app caches.
 
 @Composable
 private fun UpdateRow(settings: SettingsStore) {
