@@ -485,7 +485,7 @@ fun ChatScreen(
                             Text(item.title)
                         }
                     }
-                    UpdateRow(settings)
+                    UpdateRow(settings) { showSettings = true }
                 },
             )
         }
@@ -532,9 +532,6 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { showSettings = true }, content = {
-                            Icon(Icons.Default.Settings, contentDescription = ui.settings)
-                        })
                         if (ui.topbar.showRefresh) {
                             IconButton(onClick = { vm.refresh() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = ui.refresh)
@@ -963,13 +960,14 @@ private fun ChatModelSheet(
 }
 
 @Composable
-private fun UpdateRow(settings: SettingsStore) {
+private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var msg by remember { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         FilledTonalButton(
             onClick = {
                 busy = true; msg = "กำลังตรวจ…"
@@ -991,6 +989,9 @@ private fun UpdateRow(settings: SettingsStore) {
             },
             enabled = !busy,
         ) { Text("ตรวจอัปเดต") }
+        IconButton(onClick = onSettings) {
+            Icon(Icons.Default.Settings, contentDescription = ui.settings)
+        }
     }
 }
 
