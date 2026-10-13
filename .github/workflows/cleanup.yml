@@ -1,8 +1,8 @@
 name: Cleanup artifacts
 
 on:
-  schedule:
-    - cron: "0 3 * * *"
+  push:
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,6 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const cutoff = Date.now() - 24 * 60 * 60 * 1000;
             let page = 1;
             let deleted = 0;
             while (true) {
@@ -27,16 +26,14 @@ jobs:
               });
               if (!data.artifacts || data.artifacts.length === 0) break;
               for (const artifact of data.artifacts) {
-                if (new Date(artifact.created_at).getTime() < cutoff) {
-                  await github.rest.actions.deleteArtifact({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    artifact_id: artifact.id,
-                  });
-                  deleted += 1;
-                }
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id,
+                });
+                deleted += 1;
               }
               if (data.artifacts.length < 100) break;
               page += 1;
             }
-            core.info(`Deleted ${deleted} artifacts older than 24 hours.`);
+            core.info(`Deleted ${deleted} artifacts from previous versions.`);
