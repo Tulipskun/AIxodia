@@ -255,9 +255,9 @@ fun SettingsScreen(
             if (msg.isNotBlank()) StatusBanner(msg)
 
             if (page == SettingsPage.Main) {
-                SettingsNavRow("การเชื่อมต่อ", "Cloudflare token และ daemon") { page = SettingsPage.Connection }
-                SettingsNavRow("ค่าเริ่มต้นของ agent", "model ของ main และ sub agent") { page = SettingsPage.Agent }
-                SettingsNavRow("เกี่ยวกับแอป", "สถานะ daemon และการอัปเดต") { page = SettingsPage.About }
+                SettingsNavRow("การเชื่อมต่อ", "") { page = SettingsPage.Connection }
+                SettingsNavRow("ค่าเริ่มต้นของ agent", "") { page = SettingsPage.Agent }
+                SettingsNavRow("เกี่ยวกับแอป", "") { page = SettingsPage.About }
             }
 
             if (page == SettingsPage.Connection) {
@@ -585,11 +585,6 @@ fun SettingsScreen(
             title = { Text("ลบ key ตัวไหนของ ${p.id}?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "key ไม่เคยถูกส่งกลับมาจาก daemon จึงเลือกได้แค่ลำดับ — ลองทีละตัวถ้าตัวสุดท้ายใช้ไม่ได้",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     repeat(p.keyCount) { index ->
                         val position = p.keyCount - index
                         TextButton(
@@ -1046,7 +1041,6 @@ private fun ReplaceKeysDialog(
         title = { Text("แทนที่ key ของ ${provider.id}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("ใส่ key ทีละบรรทัด — pool เดิมจะถูกแทนที่ทั้งหมด", style = MaterialTheme.typography.bodySmall)
                 LabelledField(
                     value = text, onValueChange = { text = it },
                     label = "key",
@@ -1284,7 +1278,7 @@ private fun SettingsNavRow(title: String, subtitle: String, onClick: () -> Unit)
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }

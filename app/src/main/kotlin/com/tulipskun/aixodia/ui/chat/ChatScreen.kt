@@ -942,9 +942,6 @@ private fun ChatModelSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(m.id, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                                if (m.id == subWorking) {
-                                    Text("ตอบได้จริง", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                }
                             }
                         }
                     }
