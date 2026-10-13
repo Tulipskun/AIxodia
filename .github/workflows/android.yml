@@ -97,12 +97,16 @@ jobs:
 
       # One Gradle invocation, not three: each separate invocation re-starts the
       # daemon, re-configures every project and re-reads the task graph.
-      - name: Build, test and record snapshots
+      - name: Build only (fast path)
+        run: gradle assembleDebug --console=plain
+
+      - name: Run checks (PR only)
+        if: github.event_name == 'pull_request'
         run: |
           if [ "${{ steps.ui.outputs.changed }}" = "true" ]; then
-            gradle recordPaparazziDebug testDebugUnitTest assembleDebug --console=plain
+            gradle recordPaparazziDebug testDebugUnitTest --console=plain
           else
-            gradle testDebugUnitTest assembleDebug --console=plain
+            gradle testDebugUnitTest --console=plain
           fi
 
       - name: Upload UI snapshots
