@@ -138,8 +138,6 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.snapshotFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -658,8 +656,8 @@ fun ChatScreen(
             }
         ) { pad ->
             var threadLoaded by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { kotlinx.coroutines.flow.snapshotFlow { messages }.first { true }; threadLoaded = true }
             var showOfflineCard by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { delay(400); threadLoaded = true }
             LaunchedEffect(conn, discoveryState.phase) {
                 if (conn == ConnState.OFFLINE && (discovery == null || discoveryState.phase != com.tulipskun.aixodia.data.remote.DiscoveryPhase.CONNECTED)) {
                     kotlinx.coroutines.delay(1500L)
