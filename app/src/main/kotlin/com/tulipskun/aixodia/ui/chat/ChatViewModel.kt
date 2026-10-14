@@ -14,6 +14,7 @@ import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.display.TokenField
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
