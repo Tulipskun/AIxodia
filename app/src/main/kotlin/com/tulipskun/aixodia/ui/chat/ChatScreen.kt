@@ -752,7 +752,10 @@ private fun ChatModelSheet(
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Sub agent (เฉพาะแชทนี้)", style = MaterialTheme.typography.titleMedium)
+            // This chat's own model: the main agent it answers with. Titled for the main
+            // agent because the section below is the sub agent's, and calling both
+            // "Sub agent" left the main one looking like it had gone missing.
+            Text("โมเดลของแชตนี้", style = MaterialTheme.typography.titleMedium)
             if (providers.isEmpty()) {
                 Text(
                     "ยังไม่มี provider — เพิ่มหรือทดสอบ provider ในหน้าตั้งค่าก่อน",
