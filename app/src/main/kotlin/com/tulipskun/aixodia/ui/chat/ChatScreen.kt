@@ -533,8 +533,11 @@ fun ChatScreen(
                         }
                         // Status at a glance: a coloured dot and how long the
                         // daemon has been up. No words — the colour is the state.
+                        // The counter is on screen from the first frame, at zero
+                        // until a start time is known, so the header is never
+                        // blank while the app waits for the daemon.
                         if (ui.topbar.showStatusDot) ConnDot(conn)
-                        if (ui.topbar.showUptime && daemonStartedAt > 0L) {
+                        if (ui.topbar.showUptime) {
                             val uptime = formatUptime(daemonStartedAt, uptimeNow, ui.topbar.uptimeFormat)
                             if (uptime.isNotBlank()) {
                                 Text(
@@ -979,7 +982,9 @@ fun formatUptime(
     nowMs: Long = System.currentTimeMillis(),
     pattern: String = "HH:mm:ss",
 ): String {
-    val secs = (nowMs / 1000 - startedUnix).coerceAtLeast(0)
+    // No start time known yet (first open, nothing cached): a zero readout
+    // rather than the epoch turned into hours.
+    val secs = if (startedUnix <= 0L) 0L else (nowMs / 1000 - startedUnix).coerceAtLeast(0)
     val h = secs / 3600
     val m = (secs % 3600) / 60
     val s = secs % 60
