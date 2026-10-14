@@ -19,27 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-/**
- * Puts [step] in the live timeline, replacing the card of the same call when one
- * is already there: a call that reports again while it runs must not grow a
- * second card, and a turn that runs the same tool four times must keep four.
- */
-    private fun upsertStep(blocks: List<LiveBlock>, step: ToolStep): List<LiveBlock> {
-        val at = blocks.indexOfFirst { it is LiveBlock.Act && it.step.key == step.key }
-        if (at < 0) return blocks + LiveBlock.Act(step)
-        val out = blocks.toMutableList()
-        out[at] = LiveBlock.Act(step)
-        return out
-    }
-
-    /** One thing a live turn said or did, in the order it happened. */
-    sealed interface LiveBlock {
-        /** The model's words before a tool round, as its own block. */
-        data class Say(val text: String, val atMs: Long) : LiveBlock
-        /** A tool step: the call, then its result when it lands. */
-        data class Act(val step: ToolStep) : LiveBlock
-    }
-
 /** One sub agent the daemon is running (or just finished) for this chat. */
 data class SubAgentActivity(
     val jobId: String,
@@ -115,6 +94,28 @@ class ChatViewModel(
     // The application context only, to open a picked file's stream for upload.
     private val appContext: android.content.Context? = null,
 ) : ViewModel() {
+    /** One thing a live turn said or did, in the order it happened. */
+    sealed interface LiveBlock {
+        /** The model's words before a tool round, as its own block. */
+        data class Say(val text: String, val atMs: Long) : LiveBlock
+        /** A tool step: the call, then its result when it lands. */
+        data class Act(val step: ToolStep) : LiveBlock
+    }
+
+    /**
+     * Puts [step] in the live timeline, replacing the card of the same call when
+     * one is already there: a call that reports again while it runs must not grow
+     * a second card, and a turn that runs the same tool four times must keep
+     * four.
+     */
+    private fun upsertStep(blocks: List<LiveBlock>, step: ToolStep): List<LiveBlock> {
+        val at = blocks.indexOfFirst { it is LiveBlock.Act && it.step.key == step.key }
+        if (at < 0) return blocks + LiveBlock.Act(step)
+        val out = blocks.toMutableList()
+        out[at] = LiveBlock.Act(step)
+        return out
+    }
+
     /** The chat currently on screen; set by ensureSession, like a chat app. */
     var sessionId: String = initialSession
         private set
