@@ -19,8 +19,26 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-/** A live answer block: its words and when they were said. */
-data class LiveText(val text: String, val atMs: Long)
+/**
+ * Puts [step] in the live timeline, replacing the card of the same call when one
+ * is already there: a call that reports again while it runs must not grow a
+ * second card, and a turn that runs the same tool four times must keep four.
+ */
+    private fun upsertStep(blocks: List<LiveBlock>, step: ToolStep): List<LiveBlock> {
+        val at = blocks.indexOfFirst { it is LiveBlock.Act && it.step.key == step.key }
+        if (at < 0) return blocks + LiveBlock.Act(step)
+        val out = blocks.toMutableList()
+        out[at] = LiveBlock.Act(step)
+        return out
+    }
+
+    /** One thing a live turn said or did, in the order it happened. */
+    sealed interface LiveBlock {
+        /** The model's words before a tool round, as its own block. */
+        data class Say(val text: String, val atMs: Long) : LiveBlock
+        /** A tool step: the call, then its result when it lands. */
+        data class Act(val step: ToolStep) : LiveBlock
+    }
 
 /** One sub agent the daemon is running (or just finished) for this chat. */
 data class SubAgentActivity(
@@ -129,14 +147,16 @@ class ChatViewModel(
      */
     val liveText = MutableStateFlow("")
     val liveAgent = MutableStateFlow("main")
-    val liveSteps = MutableStateFlow<List<ToolStep>>(emptyList())
     /**
-     * What the model said before each tool round. A live turn used to pile every
-     * round's words into one growing bubble; the stored thread afterwards shows
-     * them as separate turns, so the same conversation looked different the
-     * moment it ended. Closing the bubble when a tool runs keeps the two the same.
+     * What the live turn has said and done, in the order it happened: a piece of
+     * narration, then the tool it ran, then the next piece. One list, keyed by
+     * call id, is what makes the live thread look like the stored thread it
+     * becomes — keyed by the tool's name instead, a turn that ran the same tool
+     * four times kept only the last card, and the cards all sat under the words
+     * instead of beside them, so the screen reshuffled the moment the rows came
+     * back from the daemon.
      */
-    val liveNarrations = MutableStateFlow<List<LiveText>>(emptyList())
+    val liveBlocks = MutableStateFlow<List<LiveBlock>>(emptyList())
     /** Recorded thinking time for the current reasoning event, if the daemon sent one. */
     val liveThinkingMs = MutableStateFlow(0L)
     /** Which agent that thinking event belongs to; raw reasoning never leaves the daemon. */
@@ -217,7 +237,7 @@ class ChatViewModel(
                     "error" -> {
                         status.value = ""
                         liveText.value = ""
-                        liveSteps.value = emptyList()
+                        liveBlocks.value = emptyList()
                         liveThinkingMs.value = 0L
                         busy.value = false
                         // Raw daemon text is logged by the daemon; the user sees Thai.
@@ -345,33 +365,51 @@ class ChatViewModel(
                 // What came before this tool is its own turn, now and after.
                 val said = liveText.value.trim()
                 if (said.isNotEmpty()) {
-                    liveNarrations.value = liveNarrations.value +
-                        LiveText(said, System.currentTimeMillis())
+                    liveBlocks.value = liveBlocks.value +
+                        LiveBlock.Say(said, System.currentTimeMillis())
                     liveText.value = ""
                 }
-                liveSteps.value = liveSteps.value.filterNot { it.name == name } +
-                    ToolStep(name = name, args = f.toolCall?.arguments.orEmpty(), durationMs = f.toolDurationMs)
+                liveBlocks.value = upsertStep(liveBlocks.value, ToolStep(
+                        id = f.toolCall?.id.orEmpty(),
+                        name = name,
+                        args = f.toolCall?.arguments.orEmpty(),
+                        durationMs = f.toolDurationMs,
+                    ))
                 status.value = "$name…"
             }
             "tool_result" -> {
                 val name = f.toolResult?.name ?: f.toolCall?.name ?: return
                 val result = f.toolResult?.text.orEmpty()
                 liveThinkingMs.value = 0L
+                // The result names the call it answers. Steps are keyed by that
+                // call id, not by the tool's name: a turn that runs the same tool
+                // four times has four steps, and replacing the previous one by name
+                // left the first three with no card at all.
+                val resultID = f.toolResult?.id.orEmpty()
+                val callID = f.toolCall?.id.orEmpty()
+                val key = resultID.ifBlank { callID.ifBlank { name } }
                 // A result frame names the tool and its output, never its
-                // arguments, so the step it replaces has to lend them over.
+                // arguments, so the step it completes has to lend them over.
                 // Rebuilding it from the frame alone is how a live step lost the
                 // command it was running and showed a bare "bash · 2.6s" while
                 // the same step in the stored thread showed the whole line.
-                val known = liveSteps.value.firstOrNull { it.name == name }?.args.orEmpty()
-                liveSteps.value = liveSteps.value.filterNot { it.name == name } +
-                    ToolStep(
-                        name = name,
-                        args = f.toolCall?.arguments.orEmpty().ifBlank { known },
-                        result = result.take(160),
-                        isError = f.toolResult?.isError ?: false,
-                        done = true,
-                        durationMs = f.toolDurationMs,
-                    )
+                val known = liveBlocks.value.filterIsInstance<LiveBlock.Act>()
+                    .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
+                liveBlocks.value = liveBlocks.value.map { block ->
+                    if (block is LiveBlock.Act && block.step.key == key) {
+                        block.copy(
+                            step = block.step.copy(
+                                args = f.toolCall?.arguments.orEmpty().ifBlank { known },
+                                result = result.take(160),
+                                isError = f.toolResult?.isError ?: false,
+                                done = true,
+                                durationMs = f.toolDurationMs,
+                            )
+                        )
+                    } else {
+                        block
+                    }
+                }
                 status.value = if (f.toolResult?.isError == true) "$name ล้มเหลว" else "$name เสร็จแล้ว"
             }
             "response_text" -> {
@@ -405,7 +443,7 @@ class ChatViewModel(
         }
         status.value = ""
         liveSubText = ""
-        liveNarrations.value = emptyList()
+        liveBlocks.value = emptyList()
         liveThinkingMs.value = 0L
         busy.value = false
         answerSettled = false
@@ -420,7 +458,7 @@ class ChatViewModel(
         viewModelScope.launch {
             runCatching { repo.refreshLatest(sessionId) }
             liveText.value = ""
-            liveSteps.value = emptyList()
+            liveBlocks.value = emptyList()
         }
     }
 
@@ -637,7 +675,7 @@ class ChatViewModel(
         busy.value = true
         liveChars = 0
         liveSubText = ""
-        liveNarrations.value = emptyList()
+        liveBlocks.value = emptyList()
         subAgents.value = emptyList()
         // The footer opens with this turn: which model answers, from when, and
         // nothing else yet. A chat that follows the agent's default says so —

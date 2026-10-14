@@ -131,13 +131,21 @@ data class SettingsView(
 
 /** One tool step of the turn being streamed: call, then its result. */
 data class ToolStep(
+    /**
+     * The call id the daemon named. One turn runs the same tool several times,
+     * so the name alone cannot tell two steps apart and must not be the key.
+     */
+    val id: String = "",
     val name: String,
     val args: String = "",
     val result: String = "",
     val isError: Boolean = false,
     val done: Boolean = false,
     val durationMs: Long = 0,
-)
+) {
+    /** What makes one step of a tool distinct from the next run of that tool. */
+    val key: String get() = id.ifBlank { name }
+}
 
 // Canonical inbound display frame (ai Output + agent attribution).
 @JsonClass(generateAdapter = true)

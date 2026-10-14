@@ -465,26 +465,30 @@ fun ToolSteps(steps: List<ToolStep>) {
         Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        steps.forEach { step ->
-            val tint = when {
-                !step.done -> MaterialTheme.colorScheme.tertiary
-                step.isError -> MaterialTheme.colorScheme.error
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-            Text(
-                text = buildString {
-                    append(if (step.done) "▸ " else "▾ ")
-                    append(step.name)
-                    if (step.args.isNotBlank()) append(" ").append(step.args.take(60))
-                    if (step.durationMs > 0L) append(" · ").append(formatSeconds(step.durationMs))
-                },
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = tint,
-                maxLines = 2,
-            )
-        }
+        steps.forEach { ToolStepCard(it) }
     }
+}
+
+/** One tool step of the live turn, on its own line. */
+@Composable
+fun ToolStepCard(step: ToolStep) {
+    val tint = when {
+        !step.done -> MaterialTheme.colorScheme.tertiary
+        step.isError -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        text = buildString {
+            append(if (step.done) "▸ " else "▾ ")
+            append(step.name)
+            if (step.args.isNotBlank()) append(" ").append(step.args.take(60))
+            if (step.durationMs > 0L) append(" · ").append(formatSeconds(step.durationMs))
+        },
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        color = tint,
+        maxLines = 2,
+    )
 }
 
 /**

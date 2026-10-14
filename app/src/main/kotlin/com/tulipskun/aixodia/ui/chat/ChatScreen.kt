@@ -111,6 +111,7 @@ import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.LocalUiSpec
+import com.tulipskun.aixodia.ui.chat.ChatViewModel.LiveBlock
 import com.tulipskun.aixodia.ui.display.AttachSheet
 import com.tulipskun.aixodia.ui.display.ChatComposer
 import com.tulipskun.aixodia.ui.display.ConnDot
@@ -125,7 +126,7 @@ import com.tulipskun.aixodia.ui.display.SpecScreen
 import com.tulipskun.aixodia.ui.display.SubAgentPanel
 import com.tulipskun.aixodia.ui.display.ThinkingLine
 import com.tulipskun.aixodia.ui.display.TokenField
-import com.tulipskun.aixodia.ui.display.ToolSteps
+import com.tulipskun.aixodia.ui.display.ToolStepCard
 import com.tulipskun.aixodia.ui.sessions.ChatActionsSheet
 import com.tulipskun.aixodia.ui.sessions.DeleteChatDialog
 import com.tulipskun.aixodia.ui.sessions.RenameChatDialog
@@ -216,8 +217,7 @@ fun ChatScreen(
     val liveText by vm.liveText.collectAsStateWithLifecycle()
     val liveThinkingMs by vm.liveThinkingMs.collectAsStateWithLifecycle()
     val liveThinkingAgent by vm.liveThinkingAgent.collectAsStateWithLifecycle()
-    val liveSteps by vm.liveSteps.collectAsStateWithLifecycle()
-    val liveNarrations by vm.liveNarrations.collectAsStateWithLifecycle()
+    val liveBlocks by vm.liveBlocks.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
@@ -313,8 +313,8 @@ fun ChatScreen(
     }
     // A streamed answer grows without adding a row, so the thread follows the
     // live text too instead of leaving it half under the input bar.
-    LaunchedEffect(liveText.length, liveSteps.size) {
-        if (liveText.isNotBlank() || liveSteps.isNotEmpty()) {
+    LaunchedEffect(liveText.length, liveBlocks.size) {
+        if (liveText.isNotBlank() || liveBlocks.isNotEmpty()) {
             listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
         }
     }
@@ -641,7 +641,7 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
-                if (threadLoaded && messages.isEmpty() && liveText.isBlank() && liveSteps.isEmpty() && liveNarrations.isEmpty()) {
+                if (threadLoaded && messages.isEmpty() && liveText.isBlank() && liveBlocks.isEmpty()) {
                     item { EmptyChatState() }
                 }
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
@@ -668,24 +668,31 @@ fun ChatScreen(
                         )
                     }
                 }
-                // What the model said before each tool round, drawn as its own
-                // answer block — the same shape the stored thread has once the
-                // turn ends, so nothing jumps or merges when it does.
-                liveNarrations.forEachIndexed { index, said ->
-                    item(key = "live-narration-$index") {
-                        Column(Modifier.fillMaxWidth()) {
-                            MarkdownText(
-                                text = said.text,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            // The clock a stored answer carries under its own
-                            // text, so the block looks the same either way.
-                            Text(
-                                formatClock(said.atMs),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 5.dp),
-                            )
+                // The live turn's words and tool calls, in the order they happened: a piece of
+                // narration, then the tool it ran, then the next piece. Drawn in one
+                // pass like this is what keeps the live thread from reshuffling when
+                // the stored rows replace it — every call keeps its card, in the
+                // same place, instead of piling at the bottom.
+                liveBlocks.forEachIndexed { index, block ->
+                    when (block) {
+                        is LiveBlock.Say -> item(key = "live-say-$index") {
+                            Column(Modifier.fillMaxWidth()) {
+                                MarkdownText(
+                                    text = block.text,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                // The clock a stored answer carries under its own
+                                // text, so the block looks the same either way.
+                                Text(
+                                    formatClock(block.atMs),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 5.dp),
+                                )
+                            }
+                        }
+                        is LiveBlock.Act -> item(key = "live-act-$index") {
+                            ToolStepCard(block.step)
                         }
                     }
                 }
@@ -698,9 +705,6 @@ fun ChatScreen(
                     item(key = "live-answer") {
                         LiveAnswer(liveText, stats, routeLabel, tick, tokenFields)
                     }
-                }
-                if (liveSteps.isNotEmpty()) {
-                    item(key = "live-steps") { ToolSteps(liveSteps) }
                 }
             }
         }
