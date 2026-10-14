@@ -3,7 +3,6 @@ package com.tulipskun.aixodia.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.os.SystemClock
-import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.AttachmentRef
@@ -174,11 +173,6 @@ class ChatViewModel(
     val selectedModel = MutableStateFlow("")
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
     val hasStoredRoute = MutableStateFlow(false)
-    /**
-     * The newest release on GitHub when it is newer than what is installed, so
-     * the phone says so on its own instead of waiting to be asked.
-     */
-    val updateAvailable = MutableStateFlow("")
 
     init {
         // A fresh install has no settings yet, and every call here is network
@@ -204,14 +198,6 @@ class ChatViewModel(
         // The start time comes from the daemon's D1 row, read once (and again
         // whenever the socket comes back). Uptime is then counted on the phone,
         // so the header ticks without a single periodic network call.
-        viewModelScope.launch {
-            runCatching {
-                val latest = com.tulipskun.aixodia.update.UpdateManager.check() ?: return@launch
-                if (latest.tag.removePrefix("v") != BuildConfig.VERSION_NAME) {
-                    updateAvailable.value = latest.tag
-                }
-            }
-        }
         viewModelScope.launch { refreshDaemonStart() }
         viewModelScope.launch {
             repo.connState.collect { if (it == ConnState.ONLINE) refreshDaemonStart() }
