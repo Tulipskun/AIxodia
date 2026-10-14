@@ -211,6 +211,7 @@ fun MessageBlock(
                     // of the row on its own empty broad surface and then it wraps
                     // to the text width; this keeps empty space out of short text.
                     .wrapContentWidth(align = Alignment.End)
+                    .clip(UserBubbleShape)
                     .combinedClickable(
                         // A tap that does nothing is worse than no tap: it
                         // announces itself as a button and then does not
@@ -268,6 +269,7 @@ fun MessageBlock(
                 MarkdownText(
                     text = body,
                     color = MaterialTheme.colorScheme.onSurface,
+                    fillWidth = false,
                     modifier = Modifier
                         .padding(top = if (startsAfterUser) 14.dp else 4.dp)
                         .padding(start = if (m.agent != "main" && m.agent.isNotBlank()) 10.dp else 0.dp)
