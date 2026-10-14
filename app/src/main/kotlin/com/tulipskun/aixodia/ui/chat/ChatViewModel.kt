@@ -218,8 +218,15 @@ class ChatViewModel(
         }
         // The start time comes from the daemon's D1 row, read once (and again
         // whenever the socket comes back). Uptime is then counted on the phone,
-        // so the header ticks without a single periodic network call.
-        viewModelScope.launch { refreshDaemonStart() }
+        // so the header ticks without a single periodic network call. The last
+        // one is kept, so a header that starts blank for the length of one query
+        // still shows a number the moment the app opens; the query corrects it.
+        viewModelScope.launch {
+            settings.daemonStartedAtFlow.first().let { cached ->
+                if (cached > 0L) daemonStartedAt.value = cached
+            }
+            refreshDaemonStart()
+        }
         viewModelScope.launch {
             repo.connState.collect { if (it == ConnState.ONLINE) refreshDaemonStart() }
         }
@@ -777,9 +784,15 @@ class ChatViewModel(
      * socket comes back; the displayed uptime then advances on its own.
      */
     private suspend fun refreshDaemonStart() {
-        repo.node()?.let { node ->
-            if (node.startedAt > 0L) daemonStartedAt.value = node.startedAt
-        }
+        val node = repo.node() ?: return
+        val started = node.startedAt
+        if (started <= 0L) return
+        // Same daemon as the last answer: the number on screen is already right,
+        // and rewriting it would only cost a re-render and a write to make no
+        // change.
+        if (started == daemonStartedAt.value) return
+        daemonStartedAt.value = started
+        settings.saveDaemonStartedAt(started)
     }
 
     fun loadOlder() {

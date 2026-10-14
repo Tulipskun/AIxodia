@@ -30,6 +30,9 @@ class SettingsStore(private val ctx: Context) {
     private val accountId = stringPreferencesKey("account_id")
     private val databaseId = stringPreferencesKey("database_id")
     private val sessionId = stringPreferencesKey("session_id")
+    // The daemon's start time, kept so the header's uptime counter has a number
+    // the moment the app opens — the D1 query that confirms it has not landed yet.
+    private val daemonStartedAt = stringPreferencesKey("daemon_started_at")
     // Which counts the footer shows, in order. A stored comma-separated list of
     // TokenField names, because providers differ: Anthropic reports no
     // reasoning count, so a reasoning field there would print a zero that means
@@ -122,6 +125,10 @@ class SettingsStore(private val ctx: Context) {
     val databaseIdFlow: Flow<String> = ctx.ds.data.map { it[databaseId] ?: "" }
     val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "" }
 
+    /** The cached daemon start time (unix second), 0 when never seen. */
+    val daemonStartedAtFlow: Flow<Long> =
+        ctx.ds.data.map { it[daemonStartedAt]?.toLongOrNull() ?: 0L }
+
     suspend fun current(): ConnConfig = ConnConfig(
         endpoint = endpointFlow.first(),
         wsUrl = wsUrlFlow.first(),
@@ -169,6 +176,15 @@ class SettingsStore(private val ctx: Context) {
     /** Switch session only — never touches connection settings. */
     suspend fun saveSession(sess: String) {
         ctx.ds.edit { it[sessionId] = sess.trim() }
+    }
+
+    /**
+     * Remembers when the daemon started, for the next open to count from. A
+     * non-positive time is the daemon not saying, and is not worth a write.
+     */
+    suspend fun saveDaemonStartedAt(startedAt: Long) {
+        if (startedAt <= 0L) return
+        ctx.ds.edit { it[daemonStartedAt] = startedAt.toString() }
     }
 
     /**
