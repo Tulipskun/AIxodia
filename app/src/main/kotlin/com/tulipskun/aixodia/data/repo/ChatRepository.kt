@@ -234,9 +234,6 @@ class ChatRepository(
     suspend fun node(): com.tulipskun.aixodia.data.remote.NodeInfo? =
         runCatching { history.node() }.getOrNull()
 
-    /** A generic authenticated POST to one daemon path (spec action `api_post`). */
-    suspend fun postJson(path: String): String? = history.postJson(path)
-
     /** Uploads one attachment; null when the daemon could not take it. */
     suspend fun uploadAttachment(
         sid: String,

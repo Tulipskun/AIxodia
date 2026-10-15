@@ -95,7 +95,6 @@ import com.tulipskun.aixodia.data.model.ModelView
 import com.tulipskun.aixodia.data.model.SettingsView
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
-import com.tulipskun.aixodia.data.model.UiSpec
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery

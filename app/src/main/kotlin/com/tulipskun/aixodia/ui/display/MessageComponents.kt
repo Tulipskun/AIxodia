@@ -58,7 +58,6 @@ import com.tulipskun.aixodia.data.model.splitAttachmentNote
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.model.freshInputTokens
 import com.tulipskun.aixodia.data.model.totalInputTokens
-import com.tulipskun.aixodia.ui.LocalUiSpec
 import com.tulipskun.aixodia.ui.chat.MarkdownText
 import com.tulipskun.aixodia.ui.chat.SubAgentActivity
 import com.tulipskun.aixodia.ui.chat.Tick
@@ -124,11 +123,9 @@ fun MessageBlock(
         }
         if (isTool) {
             // The header line names the tool and its arguments, the body expands
-            // on tap. Whether it starts open, how the header is worded and how
-            // much of the arguments it shows all come from the daemon's UI spec.
-            val ui = LocalUiSpec.current
-            val tools = ui.toolBlock
-            var expanded by remember { mutableStateOf(!tools.collapsedByDefault) }
+            // on tap. A tool block starts collapsed: a long result is the one
+            // thing in a thread that is noise until it is asked for.
+            var expanded by remember { mutableStateOf(false) }
             val tint = when {
                 m.role == "tool_result" && m.text.startsWith("{\"error\"") -> MaterialTheme.colorScheme.error
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -154,13 +151,15 @@ fun MessageBlock(
                     ) {
                         Text(
                             toolHeader(
-                                template = tools.headerTemplate,
+                                template = TOOL_HEADER_TEMPLATE,
                                 name = m.toolName.ifBlank { if (m.role == "tool_result") "result" else "call" },
                                 args = m.toolArgs,
                                 expanded = expanded,
-                                showIcon = tools.showIcon,
-                                maxArgs = tools.maxArgsChars,
-                                duration = if (tools.showDuration) m.durationMs else 0L,
+                                showIcon = true,
+                                // Long arguments are cut: the header is a label,
+                                // and the whole thing is in the body underneath.
+                                maxArgs = 80,
+                                duration = m.durationMs,
                             ),
                             style = MaterialTheme.typography.labelMedium,
                             fontFamily = FontFamily.Monospace,
@@ -169,7 +168,9 @@ fun MessageBlock(
                         )
                         Icon(
                             if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = if (expanded) ui.collapse else ui.expand,
+                            contentDescription = stringResource(
+                                if (expanded) R.string.collapse else R.string.expand
+                            ),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -446,7 +447,7 @@ fun ThinkingLine(reasoningMs: Long, agent: String) {
     ) {
         AgentBadge(ChatMessage(id = "thinking", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = agent))
         Text(
-            LocalUiSpec.current.thinking + " · " + formatSeconds(reasoningMs),
+            stringResource(R.string.live_thinking, formatSeconds(reasoningMs)),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -614,8 +615,6 @@ fun ErrorCard(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val ui = LocalUiSpec.current
-    val card = ui.errorCard
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -637,12 +636,10 @@ fun ErrorCard(
                     .padding(top = 8.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                if (card.showDismiss) TextButton(onClick = onDismiss) { Text(ui.dismiss) }
-                if (card.showRetry) {
-                    FilledTonalButton(onClick = onRetry) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text("  " + ui.retry)
-                    }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) }
+                FilledTonalButton(onClick = onRetry) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Text("  " + stringResource(R.string.retry))
                 }
             }
         }
@@ -651,10 +648,12 @@ fun ErrorCard(
 
 
 /**
- * The one-line header of a tool block, built from the daemon's template. The
- * placeholders are {icon}, {name}, {args} and {duration}; any of them missing
- * from the template simply does not appear.
+ * The one-line header of a tool block. The placeholders are {icon}, {name},
+ * {args} and {duration}; any of them missing from the template simply does not
+ * appear.
  */
+private const val TOOL_HEADER_TEMPLATE = "{icon} {name} {args}"
+
 fun toolHeader(
     template: String,
     name: String,

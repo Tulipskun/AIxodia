@@ -22,6 +22,38 @@
     <string name="offline_closed">ปิดการเชื่อมต่อ (%1$d)</string>
 
     <string name="composer_hint">ส่งข้อความ…</string>
+    <string name="send">ส่ง</string>
+    <string name="attach">แนบไฟล์</string>
+    <string name="attach_media">รูปภาพ / วิดีโอ</string>
+    <string name="attach_file">ไฟล์แนบ</string>
+    <string name="stop">หยุดการทำงาน</string>
+    <string name="retry">ลองอีกครั้ง</string>
+    <string name="dismiss">ปิด</string>
+
+    <!-- The row under the composer. CMD is upper case and set large: it is the
+         one control in the app nobody finds by accident, so it is the one that
+         has to be seen. -->
+    <string name="cmd">CMD</string>
+    <string name="clear_draft">ล้างข้อความ</string>
+    <string name="new_chat">แชทใหม่</string>
+    <string name="settings">ตั้งค่า</string>
+    <string name="refresh">ดึงข้อมูลล่าสุด</string>
+    <string name="menu">เมนูแชท</string>
+    <string name="agent_default">Agent default</string>
+
+    <!-- The empty thread. -->
+    <string name="empty_title">เริ่มสนทนากับ agent</string>
+    <string name="empty_hint">พิมพ์งานด้านล่าง แล้ว agent จะทำต่อแม้ปิดแอป</string>
+
+    <!-- Tool cards. -->
+    <string name="collapse">ยุบ</string>
+    <string name="expand">ขยาย</string>
+
+    <!-- The connection dot, read out rather than shown. -->
+    <string name="online">ออนไลน์</string>
+    <string name="connecting">กำลังต่อ</string>
+    <string name="offline">ออฟไลน์</string>
+
     <string name="sub_agent_running">กำลังทำงาน</string>
     <string name="sub_agent_stop">หยุด</string>
     <string name="sub_agent_title">SUB AGENT %1$d</string>
@@ -31,8 +63,8 @@
     <string name="agent_user">คุณ</string>
     <string name="live_answering">กำลังตอบ</string>
     <string name="live_thinking">กำลังคิด · %1$s</string>
-    <string name="copied">คัดลอกข้อความแล้ว</string>
-    <string name="copy_long_press">คัดลอกข้อความ</string>
+    <string name="copied">คัดลอกแล้ว</string>
+    <string name="copy_long_press">แตะค้างเพื่อคัดลอก</string>
     <string name="token_fields_label">แสดงตัวเลข token</string>
     <string name="token_fields_subtitle">จัดลำดับว่าตัวเลขไหนขึ้นก่อน และจะแสดงบรรทัดไหนบ้าง</string>
     <string name="token_fields_help">คั่นด้วยจุลภาค เรียงตามลำดับที่อยากเห็น\nใส่ได้: in out rate model time\nค่าเริ่มต้น: in,out,rate,model,time</string>

@@ -124,10 +124,8 @@ private val AppShapes = Shapes(
 )
 
 /**
- * The app theme, with the parts the daemon's UI spec is allowed to move: light
- * or dark, the corner radius and an optional accent colour. Everything else is
- * fixed here, because a spec that could repaint every role would make the app
- * unrecognisable rather than re-styled.
+ * The app theme. Dark, with the corner radius that the app's own shapes are
+ * built from. Nothing here is remote: the look is part of the app.
  */
 @Composable
 fun AIxodiaTheme(

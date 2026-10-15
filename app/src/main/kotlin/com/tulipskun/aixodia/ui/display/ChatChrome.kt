@@ -66,7 +66,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
-import com.tulipskun.aixodia.ui.LocalUiSpec
 
 /**
  * The connection state as a bare colour — green / amber / red — with no word
@@ -76,13 +75,12 @@ import com.tulipskun.aixodia.ui.LocalUiSpec
  */
 @Composable
 fun ConnDot(c: ConnState) {
-    val ui = LocalUiSpec.current
     // Green / amber / red, the colours a status dot is expected to wear. The
     // scheme's primary was blue, which reads as "selected", not "connected".
     val (label, color) = when (c) {
-        ConnState.ONLINE -> ui.online to Color(0xFF3DDC84)
-        ConnState.CONNECTING -> ui.connecting to Color(0xFFFFB020)
-        ConnState.OFFLINE -> ui.offline to Color(0xFFE5484D)
+        ConnState.ONLINE -> stringResource(R.string.online) to Color(0xFF3DDC84)
+        ConnState.CONNECTING -> stringResource(R.string.connecting) to Color(0xFFFFB020)
+        ConnState.OFFLINE -> stringResource(R.string.offline) to Color(0xFFE5484D)
     }
     Box(
         Modifier
@@ -137,7 +135,6 @@ fun SetupNeeded(onOpen: () -> Unit) {
 /** Empty thread — ChatGPT-style welcome with a clear call to action. */
 @Composable
 fun EmptyChatState() {
-    val ui = LocalUiSpec.current
     Column(
         Modifier
             .fillMaxWidth()
@@ -152,11 +149,11 @@ fun EmptyChatState() {
             tint = MaterialTheme.colorScheme.primary,
         )
         Text(
-            ui.emptyTitle,
+            stringResource(R.string.empty_title),
             style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            ui.emptyHint,
+            stringResource(R.string.empty_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -209,7 +206,9 @@ fun ChatComposer(
     onAttach: () -> Unit = {},
     onRemoveAttachment: (Int) -> Unit = {},
 ) {
-    val ui = LocalUiSpec.current
+    val attachLabel = stringResource(R.string.attach)
+    val stopLabel = stringResource(R.string.stop)
+    val sendLabel = stringResource(R.string.send)
     Column(modifier.fillMaxWidth().widthIn(max = 900.dp)) {
         // Picked files wait above the field as removable chips, so it is clear
         // what will travel with the next message before it is sent.
@@ -237,35 +236,33 @@ fun ChatComposer(
             }
         }
         Row(verticalAlignment = Alignment.Bottom) {
-            if (ui.composer.showAttach) {
-                FilledTonalIconButton(
-                    onClick = onAttach,
-                    enabled = !uploading,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .semantics { contentDescription = ui.attach },
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = ui.attach)
-                }
-                Spacer(Modifier.size(8.dp))
+            FilledTonalIconButton(
+                onClick = onAttach,
+                enabled = !uploading,
+                modifier = Modifier
+                    .size(48.dp)
+                    .semantics { contentDescription = attachLabel },
+            ) {
+                Icon(Icons.Default.Add, contentDescription = attachLabel)
             }
+            Spacer(Modifier.size(8.dp))
             OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text(ui.composerPlaceholder) },
+                placeholder = { Text(stringResource(R.string.composer_hint)) },
                 shape = MaterialTheme.shapes.large,
-                maxLines = ui.composer.maxLines.coerceIn(1, 12),
+                maxLines = 5,
             )
             Spacer(Modifier.size(8.dp))
-            if (busy && ui.composer.showStopButton) {
+            if (busy) {
                 FilledTonalIconButton(
                     onClick = onStop,
                     modifier = Modifier
                         .size(48.dp)
-                        .semantics { contentDescription = ui.stop },
+                        .semantics { contentDescription = stopLabel },
                 ) {
-                    Icon(Icons.Default.Stop, contentDescription = ui.stop)
+                    Icon(Icons.Default.Stop, contentDescription = stopLabel)
                 }
             } else {
                 FilledIconButton(
@@ -273,9 +270,9 @@ fun ChatComposer(
                     enabled = draft.isNotBlank() || attachments.isNotEmpty(),
                     modifier = Modifier
                         .size(48.dp)
-                        .semantics { contentDescription = ui.send },
+                        .semantics { contentDescription = sendLabel },
                 ) {
-                    Icon(Icons.Default.Send, contentDescription = ui.send)
+                    Icon(Icons.Default.Send, contentDescription = sendLabel)
                 }
             }
         }
@@ -315,14 +312,12 @@ data class ComposerCommand(
  */
 @Composable
 fun ComposerActionsRow(
-    commandLabel: String,
     commands: List<ComposerCommand>,
     modelLabel: String,
     onModel: () -> Unit,
     modifier: Modifier = Modifier,
-    showCommands: Boolean = true,
-    showModel: Boolean = true,
 ) {
+    val commandLabel = stringResource(R.string.cmd)
     var menuOpen by remember { mutableStateOf(false) }
     // Same width rule as ChatComposer above, so the buttons line up with the
     // field's own edges on a tablet instead of drifting to the screen's edge.
@@ -333,68 +328,64 @@ fun ComposerActionsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (showCommands) {
-            // Anchored to the button, not a sheet: the list is short and the
-            // answer to "what can I do here" belongs next to the thing asked.
-            Box {
-                FilledTonalButton(
-                    onClick = { menuOpen = true },
-                    // The theme's own radius, so a spec that changes the corner
-                    // radius restyles this button with everything else.
-                    shape = MaterialTheme.shapes.large,
-                    contentPadding = PaddingValues(horizontal = 18.dp),
-                    modifier = Modifier.height(40.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Terminal,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
+        // Anchored to the button, not a sheet: the list is short and the
+        // answer to "what can I do here" belongs next to the thing asked.
+        Box {
+            FilledTonalButton(
+                onClick = { menuOpen = true },
+                // The theme's own radius, so the button rounds with every other
+                // surface rather than carrying a number of its own.
+                shape = MaterialTheme.shapes.large,
+                contentPadding = PaddingValues(horizontal = 18.dp),
+                modifier = Modifier.height(40.dp),
+            ) {
+                Icon(
+                    Icons.Default.Terminal,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    commandLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                commands.forEach { command ->
+                    DropdownMenuItem(
+                        text = { Text(command.label) },
+                        enabled = command.enabled,
+                        onClick = {
+                            menuOpen = false
+                            command.onClick()
+                        },
                     )
-                    Spacer(Modifier.size(8.dp))
-                    Text(
-                        commandLabel,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    commands.forEach { command ->
-                        DropdownMenuItem(
-                            text = { Text(command.label) },
-                            enabled = command.enabled,
-                            onClick = {
-                                menuOpen = false
-                                command.onClick()
-                            },
-                        )
-                    }
                 }
             }
         }
-        if (showModel) {
-            // fill = false: the row stays left-aligned under the field and the
-            // chip grows only as far as the name needs, then ellipsises. The
-            // chevron is there because a chip that opens a sheet says so.
-            AssistChip(
-                onClick = onModel,
-                label = { Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                },
-                trailingIcon = {
-                    Icon(
-                        Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                modifier = Modifier.weight(1f, fill = false).height(40.dp),
-            )
-        }
+        // fill = false: the row stays left-aligned under the field and the
+        // chip grows only as far as the name needs, then ellipsises. The
+        // chevron is there because a chip that opens a sheet says so.
+        AssistChip(
+            onClick = onModel,
+            label = { Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            },
+            modifier = Modifier.weight(1f, fill = false).height(40.dp),
+        )
     }
 }
 
@@ -412,7 +403,6 @@ fun AttachSheet(
     onFile: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val ui = LocalUiSpec.current
     ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
         Column(
             Modifier
@@ -420,17 +410,10 @@ fun AttachSheet(
                 .navigationBarsPadding()
                 .padding(bottom = 12.dp),
         ) {
-            // The two options say everything; a heading above them repeated it
-            // and pushed the rows down, so it is off unless a spec asks for it.
-            if (ui.composer.showAttachTitle) {
-                Text(
-                    ui.attachTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
-                )
-            }
-            AttachOption(Icons.Default.Image, ui.attachMedia, onMedia)
-            AttachOption(Icons.Default.InsertDriveFile, ui.attachFile, onFile)
+            // The two options say everything; a heading above them would only
+            // repeat it and push the rows down, so there is none.
+            AttachOption(Icons.Default.Image, stringResource(R.string.attach_media), onMedia)
+            AttachOption(Icons.Default.InsertDriveFile, stringResource(R.string.attach_file), onFile)
         }
     }
 }

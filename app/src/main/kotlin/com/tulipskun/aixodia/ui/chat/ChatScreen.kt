@@ -41,7 +41,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -96,6 +95,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tulipskun.aixodia.BuildConfig
@@ -108,7 +108,6 @@ import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.repo.ChatRepository
-import com.tulipskun.aixodia.ui.LocalUiSpec
 import com.tulipskun.aixodia.ui.chat.ChatViewModel.LiveBlock
 import com.tulipskun.aixodia.ui.display.AttachSheet
 import com.tulipskun.aixodia.ui.display.ChatComposer
@@ -122,7 +121,6 @@ import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SetupNeeded
-import com.tulipskun.aixodia.ui.display.SpecScreen
 import com.tulipskun.aixodia.ui.display.SubAgentPanel
 import com.tulipskun.aixodia.ui.display.ThinkingLine
 import com.tulipskun.aixodia.ui.display.TokenField
@@ -228,7 +226,6 @@ fun ChatScreen(
     val pickedProvider by vm.selectedProvider.collectAsStateWithLifecycle()
     val pickedModel by vm.selectedModel.collectAsStateWithLifecycle()
     val hasStoredRoute by vm.hasStoredRoute.collectAsStateWithLifecycle()
-    val ui = LocalUiSpec.current
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var draft by rememberSaveable { mutableStateOf("") }
@@ -238,9 +235,6 @@ fun ChatScreen(
     var deleting by remember { mutableStateOf<ChatSession?>(null) }
     var showModelPicker by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf<ChatMessage?>(null) }
-    // Which daemon-composed screen is open, if any (AX-UI vocabulary).
-    var specScreen by remember { mutableStateOf<String?>(null) }
-    val specValues by settings.specValuesFlow.collectAsStateWithLifecycle(initialValue = emptyMap())
     var toast by remember { mutableStateOf("") }
 
     if (showSettings) {
@@ -300,16 +294,18 @@ fun ChatScreen(
     // name the same model for the same chat.
     val modelButtonLabel = pickedModel
         .ifBlank { providers.firstOrNull()?.defaultModel.orEmpty() }
-        .ifBlank { ui.agentDefault }
+        .ifBlank { stringResource(R.string.agent_default) }
     // Everything a chat can be asked to do that is not a message. The list has
     // a fixed shape — a command that has nothing to do is greyed rather than
     // removed, so the menu does not move under the thumb between openings.
+    val copiedText = stringResource(R.string.copied)
+    val copyHintText = stringResource(R.string.copy_long_press)
     val composerCommands = listOf(
-        ComposerCommand(ui.newChat) { vm.newChat() },
-        ComposerCommand(ui.stop, enabled = busy) { vm.stop() },
-        ComposerCommand(ui.clearDraft, enabled = draft.isNotBlank()) { draft = "" },
-        ComposerCommand(ui.refresh) { vm.refresh() },
-        ComposerCommand(ui.settings) { showSettings = true },
+        ComposerCommand(stringResource(R.string.new_chat)) { vm.newChat() },
+        ComposerCommand(stringResource(R.string.stop), enabled = busy) { vm.stop() },
+        ComposerCommand(stringResource(R.string.clear_draft), enabled = draft.isNotBlank()) { draft = "" },
+        ComposerCommand(stringResource(R.string.refresh)) { vm.refresh() },
+        ComposerCommand(stringResource(R.string.settings)) { showSettings = true },
     )
     // Uptime is counted on the phone from the daemon's start time, so it has to
     // advance on its own. A one-second tick is enough for a "2h 15m" readout.
@@ -402,69 +398,6 @@ fun ChatScreen(
             onDismiss = { showModelPicker = false },
         )
     }
-    // One dispatcher for every action a spec screen can name. An action the app
-    // does not know is ignored, so the daemon may introduce new ones safely.
-    val onSpecAction: (String, Map<String, String>) -> Unit = { action, params ->
-        when (action) {
-            "open_screen" -> params["screen"]?.takeIf { it.isNotBlank() }?.let { specScreen = it }
-            "close" -> specScreen = null
-            "open_settings" -> { specScreen = null; showSettings = true }
-            "open_providers" -> { specScreen = null; showProviders = true }
-            "new_chat" -> { specScreen = null; vm.newChat() }
-            "refresh" -> vm.refresh()
-            "send_text" -> { specScreen = null; vm.send(params["text"].orEmpty()) }
-            "open_url" -> params["url"]?.takeIf { it.isNotBlank() }?.let { url ->
-                runCatching {
-                    context.startActivity(
-                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                    )
-                }
-            }
-            "set_value" -> params["key"]?.takeIf { it.isNotBlank() }?.let { key ->
-                scope.launch { settings.setSpecValue(key, params["value"].orEmpty()) }
-            }
-            // A spec screen can reach any daemon endpoint, so a new server-side
-            // action (an engine update, a provider refresh) needs no new build.
-            "api_post" -> params["path"]?.takeIf { it.isNotBlank() }?.let { path ->
-                scope.launch {
-                    val ok = runCatching { repo.postJson(path) }.getOrNull() != null
-                    toast = if (ok) (params["ok"] ?: "เรียก $path แล้ว") else "เรียก $path ไม่สำเร็จ"
-                }
-            }
-            "put_ui" -> params["patch"]?.takeIf { it.isNotBlank() }?.let { patch ->
-                scope.launch {
-                    runCatching { history.saveUiSpec(patch)?.let { settings.saveUiSpec(it) } }
-                }
-            }
-        }
-    }
-    val openScreen = specScreen?.let { ui.screens[it] }
-    if (openScreen != null) {
-        BackHandler { specScreen = null }
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            topBar = {
-                TopAppBar(
-                    title = { Text(openScreen.title.ifBlank { "หน้าจอ" }, maxLines = 1) },
-                    navigationIcon = {
-                        IconButton(onClick = { specScreen = null }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
-                        }
-                    },
-                )
-            },
-        ) { pad ->
-            SpecScreen(
-                screen = openScreen,
-                values = specValues,
-                onAction = onSpecAction,
-                modifier = Modifier.padding(pad),
-            )
-        }
-        return
-    }
-
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
@@ -484,19 +417,6 @@ fun ChatScreen(
                     // top bar next to the status dot. The footer is anchored to
                     // the bottom of the sheet, so this row sits low instead of
                     // floating under a long list.
-                    // Rows the daemon added to the drawer, each opening one of
-                    // its composed screens.
-                    ui.drawerItems.filterNot { it.params["screen"] == "example" || it.title.contains("ตัวอย่าง", ignoreCase = true) }.forEach { item ->
-                        TextButton(
-                            onClick = {
-                                scope.launch { drawer.close() }
-                                onSpecAction(item.action, item.params)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(item.title)
-                        }
-                    }
                     UpdateRow(settings) { showSettings = true }
                 },
             )
@@ -524,32 +444,28 @@ fun ChatScreen(
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawer.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = ui.menu)
+                            Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.menu))
                         }
                     },
                     actions = {
-                        if (ui.topbar.showRefresh) {
-                            IconButton(onClick = { vm.refresh() }) {
-                                Icon(Icons.Default.Refresh, contentDescription = ui.refresh)
-                            }
+                        IconButton(onClick = { vm.refresh() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
                         }
                         // Status at a glance: a coloured dot and how long the
                         // daemon has been up. No words — the colour is the state.
                         // The counter is on screen from the first frame, at zero
                         // until a start time is known, so the header is never
                         // blank while the app waits for the daemon.
-                        if (ui.topbar.showStatusDot) ConnDot(conn)
-                        if (ui.topbar.showUptime) {
-                            val uptime = formatUptime(daemonStartedAt, uptimeNow, ui.topbar.uptimeFormat)
-                            if (uptime.isNotBlank()) {
-                                Text(
-                                    uptime,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 2.dp, end = 6.dp),
-                                )
-                            }
+                        ConnDot(conn)
+                        val uptime = formatUptime(daemonStartedAt, uptimeNow, "HH:mm:ss")
+                        if (uptime.isNotBlank()) {
+                            Text(
+                                uptime,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 2.dp, end = 6.dp),
+                            )
                         }
                     },
                 )
@@ -625,15 +541,12 @@ fun ChatScreen(
                             onRemoveAttachment = { vm.removeAttachment(it) },
                         )
                         ComposerActionsRow(
-                            commandLabel = ui.cmd,
                             commands = composerCommands,
                             modelLabel = modelButtonLabel,
                             onModel = {
                                 vm.loadProviders()
                                 showModelPicker = true
                             },
-                            showCommands = ui.composer.showCmdButton,
-                            showModel = ui.composer.showModelButton,
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                         )
                     }
@@ -667,10 +580,10 @@ fun ChatScreen(
                         startsAfterUser = index > 0 && messages[index - 1].role == "user",
                         onCopy = {
                             clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
-                            toast = ui.copied
+                            toast = copiedText
                         },
                         tokenFields = tokenFields,
-                        copyLabel = ui.copyHint,
+                        copyLabel = copyHintText,
                     )
                 }
                 // A failed turn stays visible as a retryable card until the user

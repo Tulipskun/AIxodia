@@ -7,12 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.tulipskun.aixodia.data.model.UiSpec
-import com.tulipskun.aixodia.ui.LocalUiSpec
 import com.tulipskun.aixodia.ui.chat.ChatScreen
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import kotlinx.coroutines.launch
@@ -26,21 +21,12 @@ class MainActivity : ComponentActivity() {
         val c = (application as AixodiaApp).container
         applyDebugSeed(intent)
         setContent {
-            // The daemon's UI spec decides the theme and the wording, so it is
-            // read here and handed to the whole tree (AX-UI).
-            val spec by c.settings.uiSpecFlow.collectAsStateWithLifecycle(initialValue = UiSpec())
-            AIxodiaTheme(
-                dark = spec.theme.dark,
-                cornerRadius = spec.theme.cornerRadius,
-                primary = spec.theme.primary,
-            ) {
-                CompositionLocalProvider(LocalUiSpec provides spec) {
-                    Surface(color = MaterialTheme.colorScheme.background) {
-                        ChatScreen(
-                            repo = c.repo, settings = c.settings, history = c.historyApi,
-                            socket = c.socket, discovery = c.discovery,
-                        )
-                    }
+            AIxodiaTheme {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    ChatScreen(
+                        repo = c.repo, settings = c.settings, history = c.historyApi,
+                        socket = c.socket, discovery = c.discovery,
+                    )
                 }
             }
         }

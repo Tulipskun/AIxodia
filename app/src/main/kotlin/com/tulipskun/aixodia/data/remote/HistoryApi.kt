@@ -441,28 +441,6 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrNull()
     }
 
-    /**
-     * A generic authenticated POST to one daemon path. Spec screens use it to
-     * reach endpoints the app has no dedicated call for (an engine update, a
-     * provider refresh), so a new server-side action does not need a new app
-     * build. Returns the body, or null when the call failed.
-     */
-    suspend fun postJson(path: String): String? = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
-        val clean = if (path.startsWith("/")) path else "/$path"
-        runCatching {
-            val req = Request.Builder().url(base + clean)
-                .header("Authorization", "Bearer ${c.token}")
-                .header("Content-Type", "application/json")
-                .post("{}".toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) null else r.body?.string()
-            }
-        }.getOrNull()
-    }
-
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) { d1.ping() }
 
@@ -511,43 +489,6 @@ class HistoryApi(private val settings: SettingsStore) {
                     mime = o.optString("mime"),
                     size = o.optLong("size"),
                 )
-            }
-        }.getOrNull()
-    }
-
-    /**
-     * The daemon's server-driven UI spec as raw JSON, so the app can cache the
-     * exact bytes it received. Null when the daemon is unreachable.
-     */
-    suspend fun uiSpecRaw(): String? = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
-        runCatching {
-            val req = Request.Builder().url("$base/api/ui")
-                .header("Authorization", "Bearer ${c.token}").get().build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return@use null
-                r.body?.string()
-            }
-        }.getOrNull()
-    }
-
-    /**
-     * Saves a partial UI spec on the daemon (merged server-side) and returns the
-     * effective spec, so the screen can show what actually took effect.
-     */
-    suspend fun saveUiSpec(raw: String): String? = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
-        runCatching {
-            val req = Request.Builder().url("$base/api/ui")
-                .header("Authorization", "Bearer ${c.token}")
-                .header("Content-Type", "application/json")
-                .put(raw.toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return@use null
-                r.body?.string()
             }
         }.getOrNull()
     }
