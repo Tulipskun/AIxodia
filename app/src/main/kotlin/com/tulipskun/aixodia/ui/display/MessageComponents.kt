@@ -89,6 +89,34 @@ fun formatClock(ts: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
 /**
+ * The wall clock a turn wears, on both sides of the conversation.
+ *
+ * A question wears its clock under the bubble and an answer wears one at the end
+ * of its footer, and both are the same reading of the same kind of thing: when
+ * this turn landed. They have to be drawn the same way for that to be true. They
+ * were not — the question's clock was a step larger and in the body font while
+ * the answer's was monospaced, so the two sides looked like two different apps
+ * and the question's timestamp read as something other than a time.
+ *
+ * The figures are monospaced so two clocks stacked in a column line up, and the
+ * size is the footer's own, because the footer's line is the tighter of the two
+ * and nothing here should make it grow.
+ */
+@Composable
+private fun clockStyle() = MaterialTheme.typography.labelSmall.copy(
+    fontSize = 10.sp,
+    fontFamily = FontFamily.Monospace,
+)
+
+/**
+ * The grey a wall clock wears: bright enough to read at a glance, quiet enough
+ * to be skipped until it is wanted. The harness draws it at `#7A838F`, which is
+ * this tint over the page.
+ */
+@Composable
+private fun clockTint() = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+
+/**
  * One message in the thread. A user turn is a bubble on the right, an answer is
  * plain text on the background, a tool step is a monospace card.
  */
@@ -211,8 +239,8 @@ fun MessageBlock(
                 text = clock,
                 maxLines = 1,
                 softWrap = false,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                style = clockStyle(),
+                color = clockTint(),
                 modifier = Modifier.padding(top = 2.dp, end = 2.dp),
             )
         } else {
@@ -339,10 +367,8 @@ fun FooterLine(
             Spacer(Modifier.width(12.dp))
             Text(
                 clock + if (approximate) "\u2248" else "",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                style = clockStyle(),
+                color = clockTint(),
                 maxLines = 1,
             )
         }
