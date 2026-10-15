@@ -4,8 +4,16 @@
 
     <!-- Token footer. These are labels, not sentences: a footer is read at a
          glance between two answers, so every one of them is a word a reader
-         already knows from every other tool. The full form of a count is
-         "part/total", which needs no explanation. -->
+         already knows from every other tool. -->
+
+    <!-- The session strip above the composer: five figures, five short labels.
+         Upper case and no word longer than five letters, because each one has a
+         fifth of the row and the figure under it is what is being read. -->
+    <string name="stat_in">IN</string>
+    <string name="stat_cache">CACHE</string>
+    <string name="stat_out">OUT</string>
+    <string name="stat_last">LAST</string>
+    <string name="stat_total">TOTAL</string>
 
 
     <string name="offline_title">ต่อ daemon ไม่ได้</string>
@@ -30,9 +38,8 @@
     <string name="retry">ลองอีกครั้ง</string>
     <string name="dismiss">ปิด</string>
 
-    <!-- The row under the composer. CMD is upper case and set large: it is the
-         one control in the app nobody finds by accident, so it is the one that
-         has to be seen. -->
+    <!-- The row under the composer. The button itself shows only a slash; this
+         is what a screen reader calls it. -->
     <string name="cmd">CMD</string>
     <string name="clear_draft">ล้างข้อความ</string>
     <string name="new_chat">แชทใหม่</string>
@@ -48,6 +55,8 @@
     <!-- Tool cards. -->
     <string name="collapse">ยุบ</string>
     <string name="expand">ขยาย</string>
+    <string name="tool_done">ทำเสร็จแล้ว</string>
+    <string name="tool_failed">ผิดพลาด</string>
 
     <!-- The connection dot, read out rather than shown. -->
     <string name="online">ออนไลน์</string>
@@ -67,5 +76,5 @@
     <string name="copy_long_press">แตะค้างเพื่อคัดลอก</string>
     <string name="token_fields_label">แสดงตัวเลข token</string>
     <string name="token_fields_subtitle">จัดลำดับว่าตัวเลขไหนขึ้นก่อน และจะแสดงบรรทัดไหนบ้าง</string>
-    <string name="token_fields_help">คั่นด้วยจุลภาค เรียงตามลำดับที่อยากเห็น\nใส่ได้: in out rate model time\nค่าเริ่มต้น: in,out,rate,model,time</string>
+    <string name="token_fields_help">คั่นด้วยจุลภาค เรียงตามลำดับที่อยากเห็น\nใส่ได้: in out rate model time\nค่าเริ่มต้น: model,rate,time\n(in/out ของแต่ละเทิร์นปิดไว้ เพราะยอดรวมอยู่ในแถบเหนือช่องพิมพ์แล้ว)</string>
 </resources>

@@ -5,8 +5,9 @@ import org.junit.Test
 
 /**
  * The footer text is data, not drawing, so it can be checked without a screen.
- * These lock the two lines that were asked for: the two token pairs on the
- * first, the turn's identity on the second, and no prompt total anywhere.
+ * These lock the one line the footer became: the model, the speed, the elapsed
+ * time and the wall clock — and none of the token pairs, which moved up into the
+ * session strip where a whole session's worth of them adds up.
  */
 class TokenFormatTest {
 
@@ -22,88 +23,100 @@ class TokenFormatTest {
         clock = "19:28",
     )
 
+    /** The line as plain text, which is what these tests are about. */
+    private fun line(counts: TokenCounts, fields: List<TokenField> = TokenField.DEFAULT) =
+        counts.footerLine(fields)
+
     @Test
-    fun `the speed sits with the counts and not with the model`() {
-        // A rate is a count per second, so it belongs on the line with the
-        // counts; the model and the clock are about which turn this was.
+    fun `the default names the turn and leaves the pairs to the strip`() {
+        // The counts of a turn add up into the session strip, so printing them
+        // again under every answer would be the same figure twice.
         assertEquals(
-            "in: 1/0  out: 0/1  7t/s\nmodel-x · ⏱ 1.0s  09:00",
-            openAi.copy(cacheRead = 1, cacheWrite = 0, reasoning = 0, output = 1, ratePerSecond = 7.0, millis = 1_000, model = "model-x", clock = "09:00")
-                .render(TokenField.DEFAULT),
+            "mimo-v2.5-free · 12.0 tok/s · 19s · 19:28",
+            line(openAi),
         )
     }
 
     @Test
-    fun `two lines hold the two pairs and then the turn`() {
+    fun `the pairs come back when a reader asks for them`() {
         assertEquals(
-            """
-            in: 63.5k/277  out: 0/238  12t/s
-            mimo-v2.5-free · ⏱ 19s  19:28
-            """.trimIndent(),
-            openAi.render(TokenField.DEFAULT),
+            "in 63.5k/277 · out 0/238 · 12.0 tok/s · mimo-v2.5-free · 19s · 19:28",
+            line(openAi, listOf(TokenField.Input, TokenField.Output, TokenField.Rate, TokenField.Model, TokenField.Time)),
         )
-    }
-
-    @Test
-    fun `the prompt total is nowhere in the footer text`() {
-        // It was a third number and a reader never asked for it: the sum of the
-        // halves is the provider's figure, not something the app measures.
-        val text = openAi.render(TokenField.DEFAULT)
-        assertEquals(false, text.contains("127125"))
-        assertEquals(listOf("in: 63.5k/277", "out: 0/238"), openAi.copy(cacheWrite = 277).lines(TokenField.DEFAULT).take(2))
     }
 
     @Test
     fun `a pair stays when either half has something in it`() {
-        assertEquals("in: 0/40", openAi.copy(cacheRead = 0, cacheWrite = 40)
-            .render(listOf(TokenField.Input)).lines().first())
+        assertEquals("in 0/40", line(openAi.copy(cacheRead = 0, cacheWrite = 40), listOf(TokenField.Input)))
+    }
+
+    @Test
+    fun `a count the provider did not report is left out, not zeroed`() {
+        // A turn that cached nothing shows no `in` part at all rather than a pair
+        // of zeroes, which would read as two measurements.
+        val uncached = openAi.copy(cacheRead = 0, cacheWrite = 0)
+        assertEquals(
+            "out 0/238 · 12.0 tok/s · mimo-v2.5-free · 19s · 19:28",
+            line(uncached, listOf(TokenField.Input, TokenField.Output, TokenField.Rate, TokenField.Model, TokenField.Time)),
+        )
     }
 
     @Test
     fun `the reasoning half drops only where the provider does not count it`() {
-        assertEquals("out: 0/238", openAi.render(listOf(TokenField.Output)).lines().first())
+        assertEquals("out 0/238", line(openAi, listOf(TokenField.Output)))
         // Anthropic's usage has no thinking count, so that half goes rather than
         // printing a zero that would read as a measurement.
-        assertEquals(
-            "out: 238",
-            openAi.copy(reportsReasoning = false).render(listOf(TokenField.Output)).lines().first(),
-        )
+        assertEquals("out 238", line(openAi.copy(reportsReasoning = false), listOf(TokenField.Output)))
     }
 
     @Test
     fun `the cache pair is the two halves, not the total`() {
         // The second half is what the cache could not serve, so the two figures
         // add up to the prompt rather than one of them being the prompt.
-        assertEquals("in: 63.5k/277", openAi.render(listOf(TokenField.Input)).lines().first())
-        assertEquals("in: 0/1.9k", openAi.copy(cacheRead = 0, cacheWrite = 1926)
-            .render(listOf(TokenField.Input)).lines().first())
+        assertEquals("in 63.5k/277", line(openAi, listOf(TokenField.Input)))
+        assertEquals("in 0/1.9k", line(openAi.copy(cacheRead = 0, cacheWrite = 1926), listOf(TokenField.Input)))
     }
 
     @Test
-    fun `the provider on screen drops only the half it does not count`() {
+    fun `the order is the configured order`() {
         assertEquals(
-            "in: 2.1k/157  out: 0/605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
-            openAi.copy(cacheRead = 2112, cacheWrite = 157, output = 605, ratePerSecond = 32.0,
-                    millis = 18_000, clock = "19:33").render(TokenField.DEFAULT),
+            "in 63.5k/277 · 12.0 tok/s · mimo-v2.5-free · 19s · 19:28",
+            line(openAi, listOf(TokenField.Input, TokenField.Rate, TokenField.Model, TokenField.Time)),
         )
     }
 
     @Test
-    fun `a count the provider did not report is left out, not zeroed`() {
-        // A turn that cached nothing shows no in: line at all rather than a pair
-        // of zeroes, which would read as two measurements.
-        val uncached = openAi.copy(cacheRead = 0, cacheWrite = 0)
+    fun `the elapsed time and the wall clock are separate parts`() {
+        // The clock is asked for apart from the elapsed time because the drawing
+        // puts it at the far end of the line, not beside the seconds.
+        assertEquals(listOf("19s"), openAi.entries(listOf(TokenField.Time)).map { it.text })
+        assertEquals("19:28", openAi.clockIfShown(listOf(TokenField.Time)))
+        assertEquals("19s · 19:28", line(openAi, listOf(TokenField.Time)))
+        // Either half alone still keeps the part.
+        assertEquals("19s", line(openAi.copy(clock = ""), listOf(TokenField.Time)))
+        assertEquals("19:28", line(openAi.copy(millis = 0L), listOf(TokenField.Time)))
+    }
+
+    @Test
+    fun `the rate keeps a decimal because that is the figure that moves`() {
         assertEquals(
-            "out: 0/238  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
-            uncached.render(TokenField.DEFAULT),
+            "52.3 tok/s",
+            openAi.copy(output = 12, ratePerSecond = 52.34).entries(listOf(TokenField.Rate)).first().text,
         )
     }
 
     @Test
-    fun `the order is the configured order inside one line`() {
+    fun `a turn with no counts at all renders nothing rather than a blank line`() {
+        assertEquals("", line(TokenCounts()))
+    }
+
+    @Test
+    fun `a figure is bright and its unit is dim`() {
+        // The drawing paints the pieces differently: the numbers are the reading,
+        // the words around them are the scale they are in.
         assertEquals(
-            "in: 63.5k/277  12t/s\nmimo-v2.5-free · ⏱ 19s  19:28",
-            openAi.render(listOf(TokenField.Input, TokenField.Model, TokenField.Rate, TokenField.Time)),
+            listOf("in " to true, "63.5k" to false, "/" to true, "277" to false),
+            openAi.entries(listOf(TokenField.Input)).first().pieces,
         )
     }
 
@@ -124,19 +137,6 @@ class TokenFormatTest {
         )
         // Nothing usable means the default, so a typo cannot blank the footer.
         assertEquals(TokenField.DEFAULT, TokenField.parse("   "))
-    }
-
-    @Test
-    fun `the elapsed time and the wall clock share one part`() {
-        assertEquals("⏱ 19s  19:28", openAi.render(listOf(TokenField.Time)).lines().first())
-        // Either half alone still keeps the part.
-        assertEquals("⏱ 19s", openAi.copy(clock = "").render(listOf(TokenField.Time)).lines().first())
-        assertEquals("19:28", openAi.copy(millis = 0L).render(listOf(TokenField.Time)).lines().first())
-    }
-
-    @Test
-    fun `a turn with no counts at all renders nothing rather than a blank line`() {
-        assertEquals("", TokenCounts().render(TokenField.DEFAULT))
     }
 
     @Test
@@ -162,11 +162,18 @@ class TokenFormatTest {
     }
 
     @Test
-    fun `the footer uses the shortened form`() {
-        assertEquals(
-            "in: 2.1k/157  out: 0/605  32t/s\nmimo-v2.5-free · ⏱ 18s  19:33",
-            openAi.copy(cacheRead = 2_112, cacheWrite = 157, output = 605, ratePerSecond = 32.0,
-                    millis = 18_000, clock = "19:33").render(TokenField.DEFAULT),
-        )
+    fun `a span under a minute is seconds and past it is minutes`() {
+        // The strip's figures, which are the ones that can run long enough to
+        // need two units.
+        assertEquals(listOf("7.4" to "s"), formatSpan(7_400))
+        assertEquals(listOf("45" to "s"), formatSpan(45_200))
+        assertEquals(listOf("12" to "m", "30" to "s"), formatSpan(750_000))
+        assertEquals(listOf("1" to "h", "5" to "m"), formatSpan(3_900_000))
+    }
+
+    @Test
+    fun `a count hands its scale back as the unit the strip dims`() {
+        assertEquals(listOf("24.8" to "k"), countParts(24_800))
+        assertEquals(listOf("512" to ""), countParts(512))
     }
 }

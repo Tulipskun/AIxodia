@@ -119,6 +119,8 @@ import com.tulipskun.aixodia.ui.display.formatClock
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
+import com.tulipskun.aixodia.ui.display.SessionStrip
+import com.tulipskun.aixodia.ui.display.sessionTotals
 import com.tulipskun.aixodia.ui.display.SetupNeeded
 import com.tulipskun.aixodia.ui.display.SubAgentPanel
 import com.tulipskun.aixodia.ui.display.ThinkingLine
@@ -524,6 +526,23 @@ fun ChatScreen(
                                 onStop = { vm.stopSubAgent(it) },
                             )
                         }
+                        // What the session has cost, summed from the thread. The
+                        // strip sits above the composer rather than in the thread
+                        // because it is about the conversation, not about any one
+                        // turn in it — and it is the one thing that has to stay
+                        // visible while the thread scrolls.
+                        val totals = remember(messages) { sessionTotals(messages) }
+                        SessionStrip(
+                            totals = totals,
+                            // A turn in flight has no stored duration yet, so it
+                            // reports its own elapsed time until it lands.
+                            lastMs = if (busy && stats.startedAtMs != 0L) {
+                                stats.elapsedMs(nowMs)
+                            } else {
+                                totals.lastTurnMs
+                            },
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        )
                         ChatComposer(
                             draft = draft,
                             onDraftChange = { draft = it },

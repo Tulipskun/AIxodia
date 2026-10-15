@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,16 +22,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,7 +58,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.AttachmentRef
@@ -66,10 +77,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Telegram/ChatGPT-style bubble corners: tail on the outgoing side. */
-val UserBubbleShape = RoundedCornerShape(
-    topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp,
-)
+/**
+ * The user's own bubble. Evenly rounded, with no tail on the outgoing corner:
+ * the bubble is already on the right and already the only blue thing in the
+ * thread, so a tail would be a third way of saying the same thing.
+ */
+val UserBubbleShape = RoundedCornerShape(13.dp)
 fun formatClock(ts: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
@@ -122,83 +135,22 @@ fun MessageBlock(
             }
         }
         if (isTool) {
-            // The header line names the tool and its arguments, the body expands
-            // on tap. A tool block starts collapsed: a long result is the one
-            // thing in a thread that is noise until it is asked for.
-            var expanded by remember { mutableStateOf(false) }
-            val tint = when {
-                m.role == "tool_result" && m.text.startsWith("{\"error\"") -> MaterialTheme.colorScheme.error
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shape = MaterialTheme.shapes.medium,
-                tonalElevation = 1.dp,
-                modifier = Modifier
-                    .padding(top = 4.dp)
-                    .widthIn(max = 760.dp)
-                    .fillMaxWidth(if (mine) 1f else 0.94f)
-                    .combinedClickable(
-                        onClick = { expanded = !expanded },
-                        onLongClick = onCopy,
-                        onLongClickLabel = copyLabel,
-                    ),
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            toolHeader(
-                                template = TOOL_HEADER_TEMPLATE,
-                                name = m.toolName.ifBlank { if (m.role == "tool_result") "result" else "call" },
-                                args = m.toolArgs,
-                                expanded = expanded,
-                                showIcon = true,
-                                // Long arguments are cut: the header is a label,
-                                // and the whole thing is in the body underneath.
-                                maxArgs = 80,
-                                duration = m.durationMs,
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = FontFamily.Monospace,
-                            color = tint,
-                            modifier = Modifier.weight(1f).padding(end = 10.dp),
-                        )
-                        Icon(
-                            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = stringResource(
-                                if (expanded) R.string.collapse else R.string.expand
-                            ),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    AnimatedVisibility(
-                        visible = expanded,
-                        enter = expandVertically(),
-                        exit = shrinkVertically(),
-                    ) {
-                        Column {
-                            if (m.toolArgs.isNotBlank() && m.text.isNotBlank()) {
-                                Text(
-                                    m.toolArgs,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    modifier = Modifier.padding(bottom = 4.dp),
-                                )
-                            }
-                            Text(
-                                body,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
+            // The card names the tool and what it was asked to do; the call's own
+            // output folds away underneath. A tool block starts collapsed: a long
+            // result is the one thing in a thread that is noise until it is asked
+            // for, and the header already says which tool ran.
+            ToolCallCard(
+                name = m.toolName.ifBlank { if (m.role == "tool_result") "result" else "call" },
+                args = m.toolArgs,
+                body = body,
+                durationMs = m.durationMs,
+                // A merged step is the result answering the call, so the step is
+                // over; a call with no result yet is the one still running.
+                done = m.role == "tool_result",
+                failed = m.role == "tool_result" && m.text.startsWith("{\"error\""),
+                onCopy = onCopy,
+                copyLabel = copyLabel,
+            )
         } else if (mine) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -295,25 +247,97 @@ fun MessageBlock(
 }
 
 /**
- * The footer of one answer: the two token splits, the rate, the model and how
- * long it took, one item per line.
+ * The footer of one answer: a single line naming the turn — the model, the speed
+ * it wrote at, how long the turn took and when it landed.
  *
- * The wording, the order and which lines appear live in [TokenField], not here,
- * because providers differ in what they report and a reader may want a
- * different set. Drawing knows nothing about the format.
+ * What the line contains, and in what order, lives in [TokenField], not here,
+ * because providers differ in what they report and a reader may want a different
+ * set. Drawing knows nothing about the format.
  */
 @Composable
 fun MessageFooter(m: ChatMessage, fields: List<TokenField> = TokenField.DEFAULT) {
-    val counts = m.toTokenCounts()
-    val shown = counts.visible(fields)
-    if (shown.isEmpty()) return
-    Text(
-        counts.render(fields),
-        style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.Monospace,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
-    )
+    FooterLine(m.toTokenCounts(), fields)
+}
+
+/**
+ * One footer line. Each part gets its own mark in front of it so the eye can
+ * find the figure it wants without reading the one before it, and the wall clock
+ * goes to the far end, where it reads as the end of the turn rather than as
+ * another figure in the middle of it.
+ *
+ * A part is drawn as pieces rather than as one string because the figures are
+ * the reading and the words around them are the scale: bright and monospaced for
+ * the number, dim for the unit, so a column of footers lines its figures up.
+ */
+@Composable
+fun FooterLine(
+    counts: TokenCounts,
+    fields: List<TokenField> = TokenField.DEFAULT,
+    approximate: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val entries = counts.entries(fields)
+    val clock = counts.clockIfShown(fields)
+    if (entries.isEmpty() && clock.isBlank()) return
+    Row(
+        modifier.fillMaxWidth().padding(top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        entries.forEachIndexed { index, entry ->
+            if (index > 0) {
+                Text(
+                    "\u00B7",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
+            }
+            if (entry.field == TokenField.Model) {
+                // The model is named by a dot in the accent rather than by an
+                // icon: it is not a measurement, it is whose turn this was.
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+                Spacer(Modifier.size(6.dp))
+            } else {
+                Icon(footerIcon(entry.field), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.size(4.dp))
+            }
+            entry.pieces.forEach { piece ->
+                Text(
+                    piece.first,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = if (piece.second) FontWeight.Normal else FontWeight.SemiBold,
+                    color = if (piece.second) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        if (clock.isNotBlank()) {
+            Text(
+                clock + if (approximate) "\u2248" else "",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** The mark in front of a footer part: what kind of figure is about to follow. */
+private fun footerIcon(field: TokenField): androidx.compose.ui.graphics.vector.ImageVector = when (field) {
+    TokenField.Input -> Icons.Default.Download
+    TokenField.Output -> Icons.Default.Upload
+    TokenField.Rate -> Icons.Default.Bolt
+    TokenField.Time -> Icons.Default.Schedule
+    TokenField.Model -> Icons.Default.Schedule
 }
 
 /**
@@ -439,18 +463,46 @@ fun LiveAnswer(
     }
 }
 
+/**
+ * The thinking of the turn in flight, as one closed pill.
+ *
+ * It cannot be opened. The daemon keeps the words the model thought and sends
+ * only how long it spent, so there is nothing behind the pill and a chevron
+ * would promise a reader something that is not there.
+ */
 @Composable
 fun ThinkingLine(reasoningMs: Long, agent: String) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    // A sub agent thinks in its own name, so the pill says whose thinking it is
+    // when it is not the conversation's own.
+    val who = when (agent) {
+        "sub" -> stringResource(R.string.agent_sub)
+        "worker" -> stringResource(R.string.agent_worker)
+        else -> ""
+    }
+    val text = stringResource(R.string.live_thinking, formatSeconds(reasoningMs))
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = CircleShape,
+        modifier = Modifier.padding(vertical = 4.dp),
     ) {
-        AgentBadge(ChatMessage(id = "thinking", sessionId = "", seq = 0, role = "model", text = "", createdAt = 0, agent = agent))
-        Text(
-            stringResource(R.string.live_thinking, formatSeconds(reasoningMs)),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            Modifier.padding(start = 12.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(13.dp),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                if (who.isBlank()) text else "$who \u00B7 $text",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -470,25 +522,16 @@ fun ToolSteps(steps: List<ToolStep>) {
     }
 }
 
-/** One tool step of the live turn, on its own line. */
+/** One tool step of the live turn, on the same card a stored step gets. */
 @Composable
 fun ToolStepCard(step: ToolStep) {
-    val tint = when {
-        !step.done -> MaterialTheme.colorScheme.tertiary
-        step.isError -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Text(
-        text = buildString {
-            append(if (step.done) "▸ " else "▾ ")
-            append(step.name)
-            if (step.args.isNotBlank()) append(" ").append(step.args.take(60))
-            if (step.durationMs > 0L) append(" · ").append(formatSeconds(step.durationMs))
-        },
-        style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.Monospace,
-        color = tint,
-        maxLines = 2,
+    ToolCallCard(
+        name = step.name,
+        args = step.args,
+        body = step.result,
+        durationMs = step.durationMs,
+        done = step.done,
+        failed = step.isError,
     )
 }
 
@@ -524,15 +567,9 @@ fun TurnStatsLine(
         clock = formatClock(wallClockMs),
     )
     if (counts.visible(fields).isEmpty()) return
-    Text(
-        text = counts.render(fields) + if (stats.exact) "" else "\u2248",
-        style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.Monospace,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    )
-    // The "running" line was a fourth line under a turn that already says it is
-    // streaming; the rate and the clock are what a reader actually wants.
+    // The same line, marked with the ≈ that says the counts are estimates until
+    // the provider reports the real ones.
+    FooterLine(counts = counts, fields = fields, approximate = !stats.exact)
 }
 
 /**
@@ -648,31 +685,139 @@ fun ErrorCard(
 
 
 /**
- * The one-line header of a tool block. The placeholders are {icon}, {name},
- * {args} and {duration}; any of them missing from the template simply does not
- * appear.
+ * One tool step of a turn, as a card: a badge, the tool's name, the one thing it
+ * was asked to do, and how it ended.
+ *
+ * The header is not a sentence. The name is what a reader scans a thread for,
+ * the arguments say which call this was — the same tool runs several times in a
+ * turn — and the outcome is a single mark at the end of the row rather than a
+ * word per step, because a word per step is a word to read on every step. The
+ * output itself folds away underneath, where a long result is quiet until it is
+ * asked for.
  */
-private const val TOOL_HEADER_TEMPLATE = "{icon} {name} {args}"
-
-fun toolHeader(
-    template: String,
+@Composable
+fun ToolCallCard(
     name: String,
     args: String,
-    expanded: Boolean,
-    showIcon: Boolean,
-    maxArgs: Int,
-    duration: Long,
-): String {
-    val icon = if (!showIcon) "" else if (expanded) "▾" else "▸"
-    val shortArgs = if (maxArgs > 0) args.take(maxArgs) else args
-    val durationText = if (duration > 0L) formatSeconds(duration) else ""
-    return template
-        .replace("{icon}", icon)
-        .replace("{name}", name)
-        .replace("{args}", shortArgs)
-        .replace("{duration}", durationText)
-        .trim()
-        .replace(Regex("\\s+"), " ")
+    body: String,
+    durationMs: Long,
+    done: Boolean,
+    failed: Boolean,
+    /** Left null where there is nothing to copy yet, e.g. a step in flight. */
+    onCopy: (() -> Unit)? = null,
+    copyLabel: String = "",
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val scheme = MaterialTheme.colorScheme
+    val shape = MaterialTheme.shapes.small
+    Surface(
+        color = scheme.surfaceContainerHigh,
+        shape = shape,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .widthIn(max = 760.dp)
+            .fillMaxWidth(0.94f)
+            .clip(shape)
+            .combinedClickable(
+                onClick = { expanded = !expanded },
+                onLongClick = onCopy,
+                // No long press, no label for one: a press that does nothing
+                // announces itself as a button and then does not behave like one.
+                onLongClickLabel = copyLabel.ifBlank { null },
+            ),
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // The badge is what makes a tool step recognisable at arm's
+                // length without reading it: the same small dark square on
+                // every one of them.
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(scheme.surfaceContainerHighest),
+                ) {
+                    Text(
+                        ">_",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = scheme.primary,
+                    )
+                }
+                Spacer(Modifier.size(8.dp))
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (failed) scheme.error else scheme.onSurface,
+                        maxLines = 1,
+                    )
+                    if (args.isNotBlank()) {
+                        Spacer(Modifier.size(6.dp))
+                        // The arguments are cut rather than wrapped: the header
+                        // is a label, and all of it is in the body underneath.
+                        Text(
+                            args,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (done) {
+                    Spacer(Modifier.size(6.dp))
+                    Icon(
+                        if (failed) Icons.Default.Close else Icons.Default.Check,
+                        contentDescription = stringResource(if (failed) R.string.tool_failed else R.string.tool_done),
+                        tint = if (failed) scheme.error else scheme.primary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+                if (durationMs > 0L) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        formatSeconds(durationMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                Spacer(Modifier.size(6.dp))
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = stringResource(if (expanded) R.string.collapse else R.string.expand),
+                    tint = scheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                // The output sits in its own recess, the way a code block does:
+                // it is a different kind of text from the thread around it.
+                Surface(
+                    color = scheme.surfaceContainerLowest,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    Text(
+                        body,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 

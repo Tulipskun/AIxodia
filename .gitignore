@@ -12,3 +12,6 @@ local.env.json
 
 # runtime config + secrets (never commit)
 config/aixodia.json
+
+# Kotlin 2.x build session cache
+.kotlin/

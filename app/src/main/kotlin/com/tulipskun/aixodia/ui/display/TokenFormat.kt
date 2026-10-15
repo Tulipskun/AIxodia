@@ -25,24 +25,48 @@ fun formatSeconds(millis: Long): String = when {
 }
 
 /**
- * How the token footer is written.
+ * A span of time as the session strip writes it: figure/unit pairs, so the units
+ * can be dimmed and the figures left bright.
  *
- * Two lines, because the footer answers two questions and they want different
- * amounts of attention. The first is what it cost and how fast: the prompt and
- * the answer, each split into the two halves that cost something different — the
- * cache read against the cache write, and the thinking against the words — with
- * the speed beside them, since a rate is a count per second and belongs with the
- * counts. The second is which turn this was: which model, how long it took, and
- * when it was asked. A single line of five figures forces the reader to hold all
- * of it to find the one they came for, and a line per figure means scrolling to
- * see what model answered.
+ * Under ten seconds the tenths are worth keeping — 7.4s is a measurement and 7s
+ * is a rounding — and past that the strip counts in minutes and seconds, or in
+ * hours and minutes once a session has been open that long.
+ */
+fun formatSpan(millis: Long): List<Pair<String, String>> {
+    val seconds = millis.coerceAtLeast(0L) / 1000.0
+    val whole = seconds.toInt()
+    return when {
+        seconds < 10.0 -> listOf(String.format(Locale.US, "%.1f", seconds) to "s")
+        whole < 60 -> listOf(whole.toString() to "s")
+        whole < 3600 -> listOf((whole / 60).toString() to "m", (whole % 60).toString() to "s")
+        else -> listOf((whole / 3600).toString() to "h", ((whole % 3600) / 60).toString() to "m")
+    }
+}
+
+/**
+ * A count as the strip writes it: the figure, and the scale suffix when there is
+ * one, as the two pieces [SessionStrip] dims differently.
+ */
+fun countParts(n: Int): List<Pair<String, String>> {
+    val text = formatCount(n)
+    val suffix = text.takeLastWhile { it.isLetter() }
+    return listOf(text.dropLast(suffix.length) to suffix)
+}
+
+/**
+ * How the footer of one turn is written.
  *
- * The prompt total is not shown. It was here earlier as a third number, and it
- * is the one a reader never asked for: what they want to know is what was
- * reused and what was generated, and the sum of those is the provider's number,
- * not the app's.
+ * One line, because the footer is read at a glance between two answers and the
+ * things it names are all answers to the same question — which turn was this.
+ * The model names it, the rate says how fast it wrote, the time says how long
+ * the turn took, and the wall clock at the far end says when it landed.
  *
- * Which of the five parts appear, and their order, is a list of [TokenField]
+ * The two token pairs are fields here too, but they are not on by default: a
+ * turn's counts add up into the session strip above the composer, and a figure
+ * already on screen should not be printed twice. A reader who wants them per
+ * turn names them in settings and gets them back.
+ *
+ * Which of the parts appear, and in what order, is a list of [TokenField]
  * because providers differ: Anthropic reports no reasoning count at all, and a
  * zero there would read as a measurement rather than as "this provider does not
  * say".
@@ -65,7 +89,12 @@ enum class TokenField(val aliases: List<String>) {
     ;
 
     companion object {
-        val DEFAULT: List<TokenField> = listOf(Input, Output, Rate, Model, Time)
+        /**
+         * What the footer line shows unless a reader says otherwise: which model
+         * answered, how fast it wrote, how long the turn took and when it
+         * landed. The token pairs are opt-in — see the class comment.
+         */
+        val DEFAULT: List<TokenField> = listOf(Model, Rate, Time)
 
         /**
          * Every spelling a reader might type resolves: the enum name, the short
@@ -129,47 +158,81 @@ data class TokenCounts(
         }
     }
 
-    /** One line per part, already formatted. Data, so a test can check the text. */
-    fun lines(fields: List<TokenField>): List<String> = visible(fields).map { field ->
+    /**
+     * The footer as the parts that have something to say, in the configured
+     * order. A part is a list of pieces because the drawing paints them
+     * differently: the figures are the reading and the words around them are the
+     * scale the reading is in.
+     */
+    fun entries(fields: List<TokenField>): List<FooterEntry> = visible(fields).mapNotNull { field ->
         when (field) {
-            TokenField.Input -> "in: ${formatCount(cacheRead)}/${formatCount(cacheWrite)}"
-            TokenField.Output ->
+            TokenField.Input -> FooterEntry(
+                field,
+                listOf(
+                    "in " to true,
+                    formatCount(cacheRead) to false,
+                    "/" to true,
+                    formatCount(cacheWrite) to false,
+                ),
+            )
+            TokenField.Output -> FooterEntry(
+                field,
                 if (reportsReasoning) {
-                    "out: ${formatCount(reasoning)}/${formatCount(output)}"
+                    listOf(
+                        "out " to true,
+                        formatCount(reasoning) to false,
+                        "/" to true,
+                        formatCount(output) to false,
+                    )
                 } else {
-                    "out: ${formatCount(output)}"
-                }
-            TokenField.Rate -> String.format(Locale.US, "%.0ft/s", ratePerSecond)
-            TokenField.Model -> model
-            // The gap belongs between the two halves and there is nothing to put
-            // after it when the clock is missing.
-            TokenField.Time -> buildString {
-                if (millis > 0L) append("\u23F1 ${formatSeconds(millis)}")
-                if (clock.isNotBlank()) {
-                    if (isNotEmpty()) append("  ")
-                    append(clock)
-                }
-            }
+                    listOf("out " to true, formatCount(output) to false)
+                },
+            )
+            TokenField.Rate -> FooterEntry(
+                field,
+                listOf(String.format(Locale.US, "%.1f", ratePerSecond) to false, " tok/s" to true),
+            )
+            TokenField.Model -> if (model.isBlank()) null else FooterEntry(field, listOf(model to false))
+            // The elapsed time is the only piece the part itself carries; the wall
+            // clock belongs to the whole line and the drawing puts it at the far
+            // end, so it is asked for separately rather than being the last piece.
+            TokenField.Time -> timingPieces().takeIf { it.isNotEmpty() }?.let { FooterEntry(field, it) }
         }
     }
 
+    /** The wall clock this turn landed at, when the footer has one to show. */
+    fun clockIfShown(fields: List<TokenField>): String =
+        if (TokenField.Time in visible(fields)) clock else ""
+
     /**
-     * The two lines, split the way the footer draws them: the two token pairs on
-     * the first with the speed beside them, then the model, the elapsed time and
-     * the wall clock on the second. The speed belongs with the counts because it
-     * is a count per second, and the rest belongs together because it is all
-     * about which turn this was.
-     *
-     * The split is fixed rather than configured because it is the only
-     * arrangement where the cost of a turn and the identity of a turn stay
-     * legible together.
+     * The whole line as plain text: the parts in order, then the wall clock at
+     * the end, which is where the drawing puts it too.
      */
-    fun render(fields: List<TokenField>): String {
-        val cost = lines(fields.filter { it == TokenField.Input || it == TokenField.Output || it == TokenField.Rate })
-        val turn = lines(fields.filter { it == TokenField.Model || it == TokenField.Time })
-        return listOf(
-            cost.joinToString("  "),
-            turn.joinToString(" \u00B7 "),
-        ).filter { it.isNotBlank() }.joinToString("\n")
+    fun footerLine(fields: List<TokenField>): String =
+        (entries(fields).map { it.text } + clockIfShown(fields))
+            .filter { it.isNotBlank() }
+            .joinToString(" \u00B7 ")
+
+    /** The elapsed time, split so the unit can be dimmed. */
+    private fun timingPieces(): List<Pair<String, Boolean>> {
+        if (millis <= 0L) return emptyList()
+        val seconds = formatSeconds(millis)
+        val unit = seconds.takeLastWhile { it.isLetter() }
+        return listOf(seconds.dropLast(unit.length) to false, unit to true)
     }
 }
+
+/**
+ * One part of the footer line, split into pieces so the drawing can put an icon
+ * in front of it and leave the unit behind: the figure is what was measured and
+ * the words are the scale it was measured in.
+ */
+data class FooterEntry(
+    val field: TokenField,
+    /** Each piece and whether it is dim, which is everything that is not a figure. */
+    val pieces: List<Pair<String, Boolean>>,
+) {
+    /** The part as one string, which is what a test wants to read. */
+    val text: String get() = pieces.joinToString("") { it.first }
+}
+

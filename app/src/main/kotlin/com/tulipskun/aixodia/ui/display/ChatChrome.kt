@@ -65,6 +65,13 @@ import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
 
 /**
+ * The blue that fills the send button. Deeper than the accent icons are drawn in
+ * so that a white arrow reads on it at a glance: this is the one control on the
+ * screen that is meant to be hit without reading.
+ */
+private val SendAccent = Color(0xFF2F6FED)
+
+/**
  * The connection state as a bare colour — green / amber / red — with no word
  * beside it. The state is already the thing the colour encodes, and a label on
  * every screen of every app is noise; a screen reader still gets the meaning
@@ -226,7 +233,7 @@ fun ChatComposer(
             .widthIn(max = 900.dp)
             .clip(card)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, card)
+            .border(1.dp, MaterialTheme.colorScheme.surfaceVariant, card)
             .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
     ) {
         // Picked files wait above the field as removable chips, so it is clear
@@ -300,12 +307,9 @@ fun ChatComposer(
                 modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CircleControl(
-                    icon = Icons.Default.Add,
-                    label = attachLabel,
-                    onClick = onAttach,
-                    enabled = !uploading,
-                )
+                DiscControl(label = attachLabel, onClick = onAttach, enabled = !uploading) { tint ->
+                    Icon(Icons.Default.Add, contentDescription = null, tint = tint)
+                }
                 Spacer(Modifier.size(8.dp))
                 // The model is chosen once per chat and then left alone, so it
                 // reads as a label on the message rather than as a control to
@@ -314,10 +318,22 @@ fun ChatComposer(
                 PillControl(label = modelLabel, onClick = onModel)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // The command menu keeps its own pill beside the model. Upper case
-                // only: CMD is the name of the menu, not a shout.
+                // The command menu is the slash: a slash at the start of a line
+                // is what it does, so the button can say it with one glyph and no
+                // word at all. It keeps the ring its neighbours do not wear, which
+                // is what says it opens something rather than sends something.
                 Box {
-                    PillControl(label = stringResource(R.string.cmd), onClick = { commandMenuOpen = true })
+                    DiscControl(
+                        label = stringResource(R.string.cmd),
+                        onClick = { commandMenuOpen = true },
+                        outlined = true,
+                    ) {
+                        Text(
+                            "/",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     DropdownMenu(
                         expanded = commandMenuOpen,
                         onDismissRequest = { commandMenuOpen = false },
@@ -340,20 +356,18 @@ fun ChatComposer(
                 // the touch target to 48dp on its own, and the row gains back
                 // the width the model name was short of.
                 if (busy) {
-                    CircleControl(
-                        icon = Icons.Default.Stop,
-                        label = stopLabel,
-                        onClick = onStop,
-                        primary = true,
-                    )
+                    DiscControl(label = stopLabel, onClick = onStop, primary = true) { tint ->
+                        Icon(Icons.Default.Stop, contentDescription = null, tint = tint)
+                    }
                 } else {
-                    CircleControl(
-                        icon = Icons.Default.ArrowUpward,
+                    DiscControl(
                         label = sendLabel,
                         onClick = onSend,
                         enabled = canSend,
                         primary = true,
-                    )
+                    ) { tint ->
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = tint)
+                    }
                 }
             }
         }
@@ -365,46 +379,51 @@ fun ChatComposer(
  * content description rather than a label: four labelled buttons would crowd
  * the model name out of the row.
  *
- * [primary] inverts the disc — a light circle with a dark glyph — which is how
- * the one button that ends the turn stands out from the quiet ones beside it.
- * Disabled, it drops back to the same grey as its neighbours.
+ * The glyph is a slot rather than an [ImageVector] because the command button is
+ * a slash and the rest are icons; the tint is handed to the slot so a disabled
+ * control dims whatever it is holding.
+ *
+ * [primary] paints the one button that ends the turn in the accent blue, which
+ * is what separates it from the quiet discs beside it. [outlined] draws the
+ * hairline ring that says a control opens something. Disabled, everything drops
+ * back to the same grey as its neighbours.
  */
 @Composable
-private fun CircleControl(
-    icon: ImageVector,
+private fun DiscControl(
     label: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
     primary: Boolean = false,
+    outlined: Boolean = false,
     size: Dp = 40.dp,
+    content: @Composable (Color) -> Unit,
 ) {
-    val inverted = primary && enabled
-    val container = if (inverted) MaterialTheme.colorScheme.onSurface
-    else MaterialTheme.colorScheme.surfaceContainerHighest
-    val content = when {
-        inverted -> MaterialTheme.colorScheme.surface
-        // The same tone the pill labels use. A dimmer glyph here made the
-        // attach button look switched off next to two lit-up pills.
-        enabled -> MaterialTheme.colorScheme.onSurface
-        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-    }
+    val container = if (primary && enabled) SendAccent else MaterialTheme.colorScheme.surfaceContainerHighest
+    val tint = if (enabled) MaterialTheme.colorScheme.onSurface
+    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
             .background(container)
+            .then(
+                if (outlined) Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                else Modifier
+            )
             .clickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
     ) {
-        Icon(icon, contentDescription = null, tint = content)
+        content(tint)
     }
 }
 
 /**
  * A full-round label that acts as a button — the shape Claude gives the model.
  * Base size and weight: it names something, so it sits quietly next to the
- * round controls instead of competing with them.
+ * round controls instead of competing with them. It wears the hairline the round
+ * controls do not, because unlike them it opens a sheet rather than acting at
+ * once.
  */
 @Composable
 private fun PillControl(
@@ -418,6 +437,7 @@ private fun PillControl(
             .height(40.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
             .clickable(onClick = onClick)
             // 10 rather than 12: the row has four controls in it, and the two
             // dp the pills give back are the two dp the model name is short of

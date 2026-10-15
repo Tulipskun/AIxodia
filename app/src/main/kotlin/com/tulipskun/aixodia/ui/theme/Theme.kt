@@ -13,15 +13,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val Navy950 = Color(0xFF0B1220)
-private val Navy900 = Color(0xFF0F1722)
-private val Navy800 = Color(0xFF1A2332)
-private val Navy700 = Color(0xFF1E2A3A)
-private val Navy600 = Color(0xFF26344A)
-private val Navy500 = Color(0xFF2D3A4E)
-private val Blue300 = Color(0xFFA7C7FF)
+// The dark scheme's surfaces, all of them one navy at five strengths.
+//
+// The page is pure black and every surface above it is the old navy taken down
+// to 55% (k = 0.55). That is the whole trick of the look: a surface only has to
+// sit far enough above black to be seen, and the higher it sits the louder it
+// reads — so this scale is a reading order, running from the well a code block
+// sits in up to the pill resting on a card.
+private val NavyRecess = Color(0xFF0B1220)
+private val NavySunken = Color(0xFF0E131C)
+private val NavyBase = Color(0xFF111720)
+private val NavyCard = Color(0xFF151D29)
+private val NavyPill = Color(0xFF19202B)
+/** The hairline that keeps two darks meeting each other from reading as one. */
+private val NavyLine = Color(0xFF2A3544)
+
+/** The accent: icons, the cursor, the slash on the command button. */
+private val Accent = Color(0xFF7FB2FF)
+
+/** The user's own words, in a blue deep enough to read as the page turned. */
+private val Bubble = Color(0xFF17305A)
+
 private val Blue900 = Color(0xFF0A0F2C)
-private val Blue800 = Color(0xFF1E3A8A)
 private val Blue200 = Color(0xFFD9E7FF)
 private val Mint200 = Color(0xFF9FFFE0)
 private val Sky300 = Color(0xFFB8D8FF)
@@ -36,9 +49,9 @@ private val Paper = Color(0xFFF5FBF8)
 private val PaperContainer = Color(0xFFE9EFEC)
 
 private val DarkColors = darkColorScheme(
-    primary = Blue300,
+    primary = Accent,
     onPrimary = Blue900,
-    primaryContainer = Blue800,
+    primaryContainer = Bubble,
     onPrimaryContainer = Blue200,
     secondary = Sky300,
     onSecondary = Sky900,
@@ -52,24 +65,24 @@ private val DarkColors = darkColorScheme(
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
     onErrorContainer = Color(0xFFFFDAD6),
-    background = Navy900,
+    background = Color(0xFF000000),
     onBackground = Color(0xFFF7F9FB),
-    surface = Navy900,
+    surface = Color(0xFF000000),
     onSurface = Color(0xFFF7F9FB),
-    surfaceVariant = Navy500,
+    surfaceVariant = NavyPill,
     onSurfaceVariant = Color(0xFFC8DCEE),
-    surfaceTint = Blue300,
+    surfaceTint = Accent,
     inverseSurface = Color(0xFFE7F0FF),
     inverseOnSurface = Blue900,
     outline = Color(0xFF71809A),
-    outlineVariant = Navy500,
-    surfaceBright = Navy600,
-    surfaceDim = Navy950,
-    surfaceContainerLowest = Navy950,
-    surfaceContainerLow = Navy800,
-    surfaceContainer = Navy700,
-    surfaceContainerHigh = Navy600,
-    surfaceContainerHighest = Navy500,
+    outlineVariant = NavyLine,
+    surfaceBright = NavyCard,
+    surfaceDim = NavyRecess,
+    surfaceContainerLowest = NavyRecess,
+    surfaceContainerLow = NavySunken,
+    surfaceContainer = NavyBase,
+    surfaceContainerHigh = NavyCard,
+    surfaceContainerHighest = NavyPill,
 )
 
 private val LightColors = lightColorScheme(
@@ -130,7 +143,7 @@ private val AppShapes = Shapes(
 @Composable
 fun AIxodiaTheme(
     dark: Boolean = true,
-    cornerRadius: Int = 18,
+    cornerRadius: Int = 12,
     primary: String = "",
     content: @Composable () -> Unit,
 ) {
