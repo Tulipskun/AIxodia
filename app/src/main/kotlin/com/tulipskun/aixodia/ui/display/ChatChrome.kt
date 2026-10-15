@@ -2,11 +2,11 @@ package com.tulipskun.aixodia.ui.display
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,15 +18,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.BottomSheetDefaults
@@ -35,12 +34,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,15 +49,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -191,7 +188,15 @@ fun OfflineBanner(@StringRes messageRes: Int, onRetry: () -> Unit) {
 }
 
 /**
- * Composer bar: multi-line field + send / stop — standard chatbot input.
+ * The composer: one rounded card holding the message being written and every
+ * control that acts on it, laid out the way Claude's is.
+ *
+ * The controls sit in a row along the card's bottom edge rather than beside the
+ * field. A button beside the field takes width from every line of a long
+ * message; along the bottom it takes none, and it puts send where a thumb
+ * already rests. The field itself is borderless inside the card — the card is
+ * the only edge the eye needs, and a second rounded outline inside it is what
+ * made the old composer read as a form rather than as a place to type.
  */
 @Composable
 fun ChatComposer(
@@ -200,6 +205,9 @@ fun ChatComposer(
     busy: Boolean,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    commands: List<ComposerCommand>,
+    modelLabel: String,
+    onModel: () -> Unit,
     modifier: Modifier = Modifier,
     attachments: List<AttachmentRef> = emptyList(),
     uploading: Boolean = false,
@@ -209,7 +217,18 @@ fun ChatComposer(
     val attachLabel = stringResource(R.string.attach)
     val stopLabel = stringResource(R.string.stop)
     val sendLabel = stringResource(R.string.send)
-    Column(modifier.fillMaxWidth().widthIn(max = 900.dp)) {
+    val card = MaterialTheme.shapes.extraLarge
+    val canSend = draft.isNotBlank() || attachments.isNotEmpty()
+    var commandMenuOpen by remember { mutableStateOf(false) }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .widthIn(max = 900.dp)
+            .clip(card)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, card)
+            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
+    ) {
         // Picked files wait above the field as removable chips, so it is clear
         // what will travel with the next message before it is sent.
         if (attachments.isNotEmpty()) {
@@ -235,53 +254,163 @@ fun ChatComposer(
                 }
             }
         }
-        Row(verticalAlignment = Alignment.Bottom) {
-            FilledTonalIconButton(
+        BasicTextField(
+            value = draft,
+            onValueChange = onDraftChange,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+            ),
+            maxLines = 5,
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            decorationBox = { inner ->
+                Box {
+                    if (draft.isEmpty()) {
+                        Text(
+                            stringResource(R.string.composer_hint),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    inner()
+                }
+            },
+        )
+        Spacer(Modifier.size(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircleControl(
+                icon = Icons.Default.Add,
+                label = attachLabel,
                 onClick = onAttach,
                 enabled = !uploading,
-                modifier = Modifier
-                    .size(48.dp)
-                    .semantics { contentDescription = attachLabel },
-            ) {
-                Icon(Icons.Default.Add, contentDescription = attachLabel)
-            }
-            Spacer(Modifier.size(8.dp))
-            OutlinedTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text(stringResource(R.string.composer_hint)) },
-                shape = MaterialTheme.shapes.large,
-                maxLines = 5,
             )
             Spacer(Modifier.size(8.dp))
+            // The model is chosen once per chat and then left alone, so it reads
+            // as a label on the message rather than as a control to work. It is
+            // given the room it needs, up to two thirds of the free width, and
+            // ellipsises past that — a long id should not push send off the row.
+            PillControl(
+                label = modelLabel,
+                onClick = onModel,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.size(6.dp))
+            // The command menu keeps its own pill beside the model. Upper case
+            // only: CMD is the name of the menu, not a shout.
+            Box {
+                PillControl(label = stringResource(R.string.cmd), onClick = { commandMenuOpen = true })
+                DropdownMenu(
+                    expanded = commandMenuOpen,
+                    onDismissRequest = { commandMenuOpen = false },
+                ) {
+                    commands.forEach { command ->
+                        DropdownMenuItem(
+                            text = { Text(command.label) },
+                            enabled = command.enabled,
+                            onClick = {
+                                commandMenuOpen = false
+                                command.onClick()
+                            },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.weight(0.5f))
             if (busy) {
-                FilledTonalIconButton(
+                CircleControl(
+                    icon = Icons.Default.Stop,
+                    label = stopLabel,
                     onClick = onStop,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .semantics { contentDescription = stopLabel },
-                ) {
-                    Icon(Icons.Default.Stop, contentDescription = stopLabel)
-                }
+                    primary = true,
+                    size = 44.dp,
+                )
             } else {
-                FilledIconButton(
+                CircleControl(
+                    icon = Icons.Default.ArrowUpward,
+                    label = sendLabel,
                     onClick = onSend,
-                    enabled = draft.isNotBlank() || attachments.isNotEmpty(),
-                    modifier = Modifier
-                        .size(48.dp)
-                        .semantics { contentDescription = sendLabel },
-                ) {
-                    Icon(Icons.Default.Send, contentDescription = sendLabel)
-                }
+                    enabled = canSend,
+                    primary = true,
+                    size = 44.dp,
+                )
             }
         }
     }
 }
 
+/**
+ * A round, wordless control for the composer's bottom row. What it does is a
+ * content description rather than a label: four labelled buttons would crowd
+ * the model name out of the row.
+ *
+ * [primary] inverts the disc — a light circle with a dark glyph — which is how
+ * the one button that ends the turn stands out from the quiet ones beside it.
+ * Disabled, it drops back to the same grey as its neighbours.
+ */
+@Composable
+private fun CircleControl(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    primary: Boolean = false,
+    size: Dp = 40.dp,
+) {
+    val inverted = primary && enabled
+    val container = if (inverted) MaterialTheme.colorScheme.onSurface
+    else MaterialTheme.colorScheme.surfaceContainerHighest
+    val content = when {
+        inverted -> MaterialTheme.colorScheme.surface
+        enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(container)
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = label },
+    ) {
+        Icon(icon, contentDescription = null, tint = content)
+    }
+}
 
 /**
- * One entry of the command menu under the composer.
+ * A full-round label that acts as a button — the shape Claude gives the model.
+ * Base size and weight: it names something, so it sits quietly next to the
+ * round controls instead of competing with them.
+ */
+@Composable
+private fun PillControl(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .height(40.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+
+/**
+ * One entry of the command menu in the composer's bottom row.
  *
  * A command runs on the phone, so it needs no round trip and no daemon
  * support: the menu is the set of things a chat can be asked to do that are
@@ -294,101 +423,6 @@ data class ComposerCommand(
     val enabled: Boolean = true,
     val onClick: () -> Unit,
 )
-
-/**
- * The row under the composer: the command menu on the left, this chat's model
- * beside it.
- *
- * The model picker used to be a chip in the top bar, nested under the session
- * title. It moved here because it acts on the next message rather than on the
- * screen, and because a long model name under a title pushed the title itself
- * off the bar. The command menu is new and sits next to it for the same reason:
- * both are about the message about to be sent.
- *
- * They are styled apart on purpose. The command menu is filled and bold — it is
- * the one thing here nobody will find by accident, so it is the one thing that
- * has to catch the eye. The model reads as a chip, quiet next to it, because it
- * is set once per chat and then left alone.
- */
-@Composable
-fun ComposerActionsRow(
-    commands: List<ComposerCommand>,
-    modelLabel: String,
-    onModel: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val commandLabel = stringResource(R.string.cmd)
-    var menuOpen by remember { mutableStateOf(false) }
-    // Same width rule as ChatComposer above, so the buttons line up with the
-    // field's own edges on a tablet instead of drifting to the screen's edge.
-    // The row sits a little below the field, not against it: the two are one
-    // group, and the gap is what says so.
-    Row(
-        modifier.fillMaxWidth().widthIn(max = 900.dp).padding(top = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // Anchored to the button, not a sheet: the list is short and the
-        // answer to "what can I do here" belongs next to the thing asked.
-        Box {
-            FilledTonalButton(
-                onClick = { menuOpen = true },
-                // The theme's own radius, so the button rounds with every other
-                // surface rather than carrying a number of its own.
-                shape = MaterialTheme.shapes.large,
-                contentPadding = PaddingValues(horizontal = 18.dp),
-                modifier = Modifier.height(40.dp),
-            ) {
-                Icon(
-                    Icons.Default.Terminal,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.size(8.dp))
-                Text(
-                    commandLabel,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                commands.forEach { command ->
-                    DropdownMenuItem(
-                        text = { Text(command.label) },
-                        enabled = command.enabled,
-                        onClick = {
-                            menuOpen = false
-                            command.onClick()
-                        },
-                    )
-                }
-            }
-        }
-        // fill = false: the row stays left-aligned under the field and the
-        // chip grows only as far as the name needs, then ellipsises. The
-        // chevron is there because a chip that opens a sheet says so.
-        AssistChip(
-            onClick = onModel,
-            label = { Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            leadingIcon = {
-                Icon(
-                    Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-            },
-            trailingIcon = {
-                Icon(
-                    Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-            },
-            modifier = Modifier.weight(1f, fill = false).height(40.dp),
-        )
-    }
-}
-
 
 /**
  * What the "+" button opens: a sheet to choose where the file comes from. The

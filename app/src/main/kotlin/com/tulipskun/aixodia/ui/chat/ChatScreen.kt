@@ -111,7 +111,6 @@ import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.chat.ChatViewModel.LiveBlock
 import com.tulipskun.aixodia.ui.display.AttachSheet
 import com.tulipskun.aixodia.ui.display.ChatComposer
-import com.tulipskun.aixodia.ui.display.ComposerActionsRow
 import com.tulipskun.aixodia.ui.display.ComposerCommand
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
@@ -433,8 +432,8 @@ fun ChatScreen(
                     // The title used to carry the model chip under it. The chip
                     // is gone: a long model name under the title squeezed the
                     // title, and the model is a property of the next message
-                    // rather than of the screen, so it moved down beside the
-                    // composer (see ComposerActionsRow).
+                    // rather than of the screen, so it moved down into the
+                    // composer's own bottom row (see ChatComposer).
                     title = {
                         Text(
                             sessionTitle(sessions, sessId),
@@ -471,15 +470,12 @@ fun ChatScreen(
                 )
             },
             bottomBar = {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    tonalElevation = 2.dp,
-                ) {
+                Surface(color = MaterialTheme.colorScheme.background) {
                     Column(
                         Modifier.fillMaxWidth()
                             .navigationBarsPadding()
                             .imePadding()
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
                         if (toast.isNotBlank()) {
                             Text(
@@ -534,13 +530,6 @@ fun ChatScreen(
                             busy = busy,
                             onSend = { vm.send(draft); draft = "" },
                             onStop = { vm.stop() },
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                            attachments = pendingAttachments,
-                            uploading = uploading,
-                            onAttach = { showAttachSheet = true },
-                            onRemoveAttachment = { vm.removeAttachment(it) },
-                        )
-                        ComposerActionsRow(
                             commands = composerCommands,
                             modelLabel = modelButtonLabel,
                             onModel = {
@@ -548,6 +537,10 @@ fun ChatScreen(
                                 showModelPicker = true
                             },
                             modifier = Modifier.align(Alignment.CenterHorizontally),
+                            attachments = pendingAttachments,
+                            uploading = uploading,
+                            onAttach = { showAttachSheet = true },
+                            onRemoveAttachment = { vm.removeAttachment(it) },
                         )
                     }
                 }
