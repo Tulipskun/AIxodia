@@ -27,6 +27,8 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.FilledIconButton
@@ -39,6 +41,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +56,7 @@ import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -264,6 +271,88 @@ fun ChatComposer(
                 ) {
                     Icon(Icons.Default.Send, contentDescription = ui.send)
                 }
+            }
+        }
+    }
+}
+
+
+/**
+ * One entry of the command menu under the composer.
+ *
+ * A command runs on the phone, so it needs no round trip and no daemon
+ * support: the menu is the set of things a chat can be asked to do that are
+ * not messages. [enabled] is false when the command would do nothing — asking
+ * to stop while nothing is running, or to clear an empty box — so the menu
+ * keeps the same shape instead of rows appearing and vanishing.
+ */
+data class ComposerCommand(
+    val label: String,
+    val enabled: Boolean = true,
+    val onClick: () -> Unit,
+)
+
+/**
+ * The row under the composer: the command menu on the left, this chat's model
+ * beside it.
+ *
+ * The model picker used to be a chip in the top bar, nested under the session
+ * title. It moved here because it acts on the next message rather than on the
+ * screen, and because a long model name under a title pushed the title itself
+ * off the bar. The command menu is new and sits next to it for the same reason:
+ * both are about the message about to be sent.
+ */
+@Composable
+fun ComposerActionsRow(
+    commandLabel: String,
+    commands: List<ComposerCommand>,
+    modelLabel: String,
+    onModel: () -> Unit,
+    modifier: Modifier = Modifier,
+    showCommands: Boolean = true,
+    showModel: Boolean = true,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    // Same width rule as ChatComposer above, so the buttons line up with the
+    // field's own edges on a tablet instead of drifting to the screen's edge.
+    Row(
+        modifier.fillMaxWidth().widthIn(max = 900.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        if (showCommands) {
+            // Anchored to the button, not a sheet: the list is short and the
+            // answer to "what can I do here" belongs next to the thing asked.
+            Box {
+                TextButton(onClick = { menuOpen = true }) { Text(commandLabel) }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    commands.forEach { command ->
+                        DropdownMenuItem(
+                            text = { Text(command.label) },
+                            enabled = command.enabled,
+                            onClick = {
+                                menuOpen = false
+                                command.onClick()
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        if (showModel) {
+            // fill = false: the row stays left-aligned under the field and the
+            // button grows only as far as the name needs, then ellipsises.
+            TextButton(
+                onClick = onModel,
+                modifier = Modifier.weight(1f, fill = false),
+            ) {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

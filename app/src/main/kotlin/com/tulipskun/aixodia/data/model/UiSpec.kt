@@ -59,6 +59,8 @@ data class UiSpec(
     val working get() = s("working", "agent กำลังทำงาน")
     val emptyTitle get() = s("empty_title", "เริ่มสนทนากับ agent")
     val emptyHint get() = s("empty_hint", "พิมพ์งานด้านล่าง แล้ว agent จะทำต่อแม้ปิดแอป")
+    val cmd get() = s("cmd", "cmd")
+    val clearDraft get() = s("clear_draft", "ล้างข้อความ")
 }
 
 @JsonClass(generateAdapter = true)
@@ -76,7 +78,6 @@ data class TopbarSpec(
     @Json(name = "show_uptime") val showUptime: Boolean = true,
     @Json(name = "uptime_format") val uptimeFormat: String = "HH:mm:ss",
     @Json(name = "show_refresh") val showRefresh: Boolean = true,
-    @Json(name = "show_model_chip") val showModelChip: Boolean = true,
 )
 
 @JsonClass(generateAdapter = true)
@@ -101,6 +102,15 @@ data class ComposerSpec(
     @Json(name = "show_stop_button") val showStopButton: Boolean = true,
     @Json(name = "show_attach") val showAttach: Boolean = true,
     @Json(name = "show_attach_title") val showAttachTitle: Boolean = false,
+    /**
+     * The command menu and the model picker live under the field, not in the top
+     * bar. Both act on the message that is about to be sent, and that is where
+     * the hand already is when they are wanted; the top bar is where the eye
+     * goes to leave the chat. The model picker used to sit under the title in
+     * the top bar, where a long model name pushed the title out of the way.
+     */
+    @Json(name = "show_cmd_button") val showCmdButton: Boolean = true,
+    @Json(name = "show_model_button") val showModelButton: Boolean = true,
 )
 
 

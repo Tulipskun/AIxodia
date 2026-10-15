@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -50,7 +49,6 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
@@ -114,6 +112,8 @@ import com.tulipskun.aixodia.ui.LocalUiSpec
 import com.tulipskun.aixodia.ui.chat.ChatViewModel.LiveBlock
 import com.tulipskun.aixodia.ui.display.AttachSheet
 import com.tulipskun.aixodia.ui.display.ChatComposer
+import com.tulipskun.aixodia.ui.display.ComposerActionsRow
+import com.tulipskun.aixodia.ui.display.ComposerCommand
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
@@ -293,6 +293,20 @@ fun ChatScreen(
         pickedModel.isBlank() -> pickedProvider
         else -> "$pickedProvider · $pickedModel"
     }
+    // What the model button under the field reads. Unlike the footer's
+    // routeLabel this one is never blank: with nothing picked it still has to
+    // say what tapping it will choose.
+    val modelButtonLabel = routeLabel.ifBlank { ui.agentDefault }
+    // Everything a chat can be asked to do that is not a message. The list has
+    // a fixed shape — a command that has nothing to do is greyed rather than
+    // removed, so the menu does not move under the thumb between openings.
+    val composerCommands = listOf(
+        ComposerCommand(ui.newChat) { vm.newChat() },
+        ComposerCommand(ui.stop, enabled = busy) { vm.stop() },
+        ComposerCommand(ui.clearDraft, enabled = draft.isNotBlank()) { draft = "" },
+        ComposerCommand(ui.refresh) { vm.refresh() },
+        ComposerCommand(ui.settings) { showSettings = true },
+    )
     // Uptime is counted on the phone from the daemon's start time, so it has to
     // advance on its own. A one-second tick is enough for a "2h 15m" readout.
     var uptimeNow by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -492,33 +506,17 @@ fun ChatScreen(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopAppBar(
+                    // The title used to carry the model chip under it. The chip
+                    // is gone: a long model name under the title squeezed the
+                    // title, and the model is a property of the next message
+                    // rather than of the screen, so it moved down beside the
+                    // composer (see ComposerActionsRow).
                     title = {
-                        Column {
-                            Text(
-                                sessionTitle(sessions, sessId),
-                                maxLines = 1,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            if (ui.topbar.showModelChip) {
-                                AssistChip(
-                                    onClick = {
-                                        vm.loadProviders()
-                                        showModelPicker = true
-                                    },
-                                    label = {
-                                        Text(
-                                            when {
-                                                pickedProvider.isBlank() -> ui.agentDefault
-                                                pickedModel.isBlank() -> "$pickedProvider · ${ui.pickModel}"
-                                                else -> "$pickedProvider · $pickedModel"
-                                            },
-                                            maxLines = 1,
-                                        )
-                                    },
-                                    modifier = Modifier.height(32.dp),
-                                )
-                            }
-                        }
+                        Text(
+                            sessionTitle(sessions, sessId),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawer.open() } }) {
@@ -621,6 +619,18 @@ fun ChatScreen(
                             uploading = uploading,
                             onAttach = { showAttachSheet = true },
                             onRemoveAttachment = { vm.removeAttachment(it) },
+                        )
+                        ComposerActionsRow(
+                            commandLabel = ui.cmd,
+                            commands = composerCommands,
+                            modelLabel = modelButtonLabel,
+                            onModel = {
+                                vm.loadProviders()
+                                showModelPicker = true
+                            },
+                            showCommands = ui.composer.showCmdButton,
+                            showModel = ui.composer.showModelButton,
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
                         )
                     }
                 }
