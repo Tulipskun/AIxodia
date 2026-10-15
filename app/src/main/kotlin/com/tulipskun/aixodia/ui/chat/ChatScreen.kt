@@ -535,11 +535,12 @@ fun ChatScreen(
                         SessionStrip(
                             totals = totals,
                             // A turn in flight has no stored duration yet, so it
-                            // reports its own elapsed time until it lands.
-                            lastMs = if (busy && stats.startedAtMs != 0L) {
+                            // adds its own elapsed time to the session's until it
+                            // lands and the thread carries it.
+                            liveMs = if (busy && stats.startedAtMs != 0L) {
                                 stats.elapsedMs(nowMs)
                             } else {
-                                totals.lastTurnMs
+                                0L
                             },
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                         )

@@ -6,14 +6,13 @@
          glance between two answers, so every one of them is a word a reader
          already knows from every other tool. -->
 
-    <!-- The session strip above the composer: five figures, five short labels.
-         Upper case and no word longer than five letters, because each one has a
-         fifth of the row and the figure under it is what is being read. -->
-    <string name="stat_in">IN</string>
-    <string name="stat_cache">CACHE</string>
-    <string name="stat_out">OUT</string>
-    <string name="stat_last">LAST</string>
-    <string name="stat_total">TOTAL</string>
+    <!-- The session strip above the composer: three counts under one bar, each
+         labelled by the word the bar's own legend uses. Lower case, because the
+         figure in front of the word is the reading and the word is only there to
+         say which count it is. -->
+    <string name="stat_cached">cached</string>
+    <string name="stat_new">new</string>
+    <string name="stat_out">out</string>
 
 
     <string name="offline_title">ต่อ daemon ไม่ได้</string>

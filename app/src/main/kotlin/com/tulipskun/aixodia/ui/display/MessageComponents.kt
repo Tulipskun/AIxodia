@@ -294,14 +294,10 @@ fun FooterLine(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             entries.forEachIndexed { index, entry ->
-                if (index > 0) {
-                    Text(
-                        "\u00B7",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(horizontal = 3.dp),
-                    )
-                }
+                // The gap is the whole separator now: a dot between two parts
+                // read as a third figure in a line that is already dense, and
+                // the mark in front of every part is separation enough.
+                if (index > 0) Spacer(Modifier.width(10.dp))
                 if (entry.field == TokenField.Model) {
                     // The model is named by a dot in the accent rather than by an
                     // icon: it is not a measurement, it is whose turn this was.

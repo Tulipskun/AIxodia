@@ -79,6 +79,34 @@ class SessionStripTest {
     }
 
     @Test
+    fun `the prompt splits into what the cache served and what it did not`() {
+        // The bar draws the second half as well as the first, so the two must
+        // add back up to the prompt the old single figure showed.
+        val totals = sessionTotals(
+            listOf(
+                msg(1, "model", tokensIn = 12_845, cacheRead = 9_600, tokensOut = 826, inputIncludesCache = true),
+                msg(2, "model", tokensIn = 6_103, cacheRead = 4_000, tokensOut = 446, inputIncludesCache = true),
+            ),
+        )
+        assertEquals(18_948, totals.promptTokens)
+        assertEquals(13_600, totals.cacheRead)
+        assertEquals(5_348, totals.freshInput)
+        assertEquals(totals.promptTokens, totals.cacheRead + totals.freshInput)
+    }
+
+    @Test
+    fun `a provider that sends cache beside the prompt still splits it`() {
+        // When the prompt does not already contain the cache, the whole of the
+        // input is fresh and the cache is extra rather than part of the total.
+        val totals = sessionTotals(
+            listOf(msg(1, "model", tokensIn = 900, cacheRead = 4_000, tokensOut = 20)),
+        )
+        assertEquals(4_900, totals.promptTokens)
+        assertEquals(4_000, totals.cacheRead)
+        assertEquals(900, totals.freshInput)
+    }
+
+    @Test
     fun `the last turn is the newest one, not the longest`() {
         val totals = sessionTotals(
             listOf(
