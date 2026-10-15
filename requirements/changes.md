@@ -319,3 +319,14 @@ Reason: เจอจากการตรวจภาพหน้าจอจร
 Impact: `ui/settings/SettingsComponents.kt` (RowScope, `iconRow()`), `ui/settings/SettingsScreen.kt` (ถอน `enabled` ที่ปุ่มวาง)
 Validation: รอ `gradle testDebugUnitTest` และ `assembleDebug` บน CI แล้วตรวจบนเครื่องจริงหลังติดตั้ง release
 Status: accepted
+
+## CHANGE-079: ถอดระบบ UI ที่ขับจาก daemon (api/ui) ออก แล้วเขียน UI ไว้ในแอป
+
+New: แอปเคยดึงสเปกหน้าตาจาก daemon (`GET /api/ui`) แคชไว้ใน DataStore รับซ้ำทาง socket แล้วให้ทุก composable อ่านผ่าน `LocalUiSpec` — ถอดออกทั้งหมด คำทุกคำย้ายไป `res/values/strings.xml` ค่าที่เคยตั้งจากสเปกได้ (tool block, composer, topbar, error card) กลายเป็นค่าคงที่ที่มีค่าเท่ากับ default เดิมของสเปก และธีมตรึงไว้ใน `Theme.kt`
+  ฝั่งแอปที่ถอดออกด้วย: `SpecScreen`, `ScreenAction`, แถวที่ daemon เพิ่มใน drawer, `specValues`/`setSpecValue`, `uiSpecRaw`/`saveUiSpec`, `postJson`, flow `uiSpecs` และกรณีพิเศษ `kind:"ui"` ใน `onMessage`
+  ฝั่ง engine: `io/gateway/ui.go` ทั้งไฟล์, เส้นทาง `GET/PUT /api/ui`, `SetUIChanged`/`UISpecJSON`, `BroadcastUI` และฟังก์ชันสเปกของ hub (กรอบ `kind="ui"` ที่ส่งตอนต่อ), `mergeMaps`
+Reason: แถว `ui_spec` ใน D1 เก็บ `{}` (2 ไบต์) ตั้งแต่แรก แปลว่าไม่มีอะไรถูกขับจากเซิร์ฟเวอร์เลย — แก้สเปกบน daemon ไม่มีทางเปลี่ยนสิ่งที่ขึ้นบนจอ แต่สิ่งที่มันแลกมาเป็นของจริง: เรียกเน็ตตอนเปิด, แคช, composition local, socket frame หนึ่งกรอบ, ตัว merge, และอีกที่หนึ่งที่ต้องไปหาทุกคำก่อนเปลี่ยนคำ ตรวจแถวจาก D1 ตรงๆ ก่อนลบ ไม่ได้อนุมานจากโค้ด
+  ค่าคงที่ทุกตัวที่ใส่แทนเลือกจาก default ของสเปกเดิมทีละตัว (`collapsed_by_default` true, `max_args_chars` 80, `max_lines` 5, `uptime_format` "HH:mm:ss", `show_duration`/`show_retry`/`show_dismiss` true) จึงไม่มีอะไรบนจอเปลี่ยน
+Impact: app `data/model/UiSpec.kt`, `data/repo/UiSpecSync.kt`, `ui/UiSpecProvider.kt`, `ui/display/SpecScreen.kt`, `screen/ScreenAction.kt` (ลบทั้งไฟล์), `ui/chat/ChatScreen.kt`, `ui/display/ChatChrome.kt`, `ui/display/MessageComponents.kt`, `ui/theme/Theme.kt`, `ui/settings/SettingsScreen.kt`, `data/remote/HistoryApi.kt`, `data/remote/AiDirectSocket.kt`, `data/repo/ChatRepository.kt`, `SettingsStore.kt`, `MainActivity.kt`, `AixodiaApp.kt`, `res/values/strings.xml`; engine `io/gateway/ui.go` (ลบ), `io/gateway/api.go`, `io/gateway/gateway.go`, `io/gateway/gateway_test.go`, `io/mobile/ws.go`, `io/mobile/ws_test.go`, `main.go`
+Validation: engine `go build ./...`, `gofmt -l`, `go vet ./...`, `go test ./...` สะอาดทุก package (CI "CI" และ "Release engine" ผ่าน); ลบแถว `ui_spec` จาก D1 แล้ว เหลือ 6 แถว; CI ของแอป build ผ่าน → release v0.1.316 (`AIxodia.apk` 20,480,264 ไบต์, เล็กลงราว 40 KB); เทียบ `R.string.*` ที่โค้ดใช้กับที่ประกาศไว้ ครบ 46/46 ไม่มีชื่อที่ขาด
+Status: accepted
