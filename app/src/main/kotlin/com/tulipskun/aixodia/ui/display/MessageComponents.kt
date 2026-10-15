@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +66,7 @@ import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.model.isAnswer
 import com.tulipskun.aixodia.data.model.splitAttachmentNote
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.model.freshInputTokens
@@ -283,43 +285,58 @@ fun FooterLine(
         modifier.fillMaxWidth().padding(top = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        entries.forEachIndexed { index, entry ->
-            if (index > 0) {
-                Text(
-                    "\u00B7",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(horizontal = 6.dp),
-                )
-            }
-            if (entry.field == TokenField.Model) {
-                // The model is named by a dot in the accent rather than by an
-                // icon: it is not a measurement, it is whose turn this was.
-                Box(
-                    Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
-                )
-                Spacer(Modifier.size(6.dp))
-            } else {
-                Icon(footerIcon(entry.field), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.size(4.dp))
-            }
-            entry.pieces.forEach { piece ->
-                Text(
-                    piece.first,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = if (piece.second) FontWeight.Normal else FontWeight.SemiBold,
-                    color = if (piece.second) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                )
+        // The parts share what the clock leaves, and the clock is measured first
+        // because a wall clock that runs into the elapsed time reads as one
+        // number — "7.4s20:09" is a time nobody has ever seen. The model name is
+        // the only part with no fixed length, so it is the one that gives way.
+        Row(
+            Modifier.weight(1f).clipToBounds(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            entries.forEachIndexed { index, entry ->
+                if (index > 0) {
+                    Text(
+                        "\u00B7",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    )
+                }
+                if (entry.field == TokenField.Model) {
+                    // The model is named by a dot in the accent rather than by an
+                    // icon: it is not a measurement, it is whose turn this was.
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                    Spacer(Modifier.size(6.dp))
+                } else {
+                    Icon(footerIcon(entry.field), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.size(4.dp))
+                }
+                entry.pieces.forEach { piece ->
+                    Text(
+                        piece.first,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = if (piece.second) FontWeight.Normal else FontWeight.SemiBold,
+                        color = if (piece.second) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (entry.field == TokenField.Model) {
+                            Modifier.weight(1f, fill = false)
+                        } else {
+                            Modifier
+                        },
+                    )
+                }
             }
         }
-        Spacer(Modifier.weight(1f))
         if (clock.isNotBlank()) {
+            Spacer(Modifier.width(12.dp))
             Text(
                 clock + if (approximate) "\u2248" else "",
                 style = MaterialTheme.typography.labelSmall,

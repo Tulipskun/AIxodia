@@ -1,6 +1,7 @@
 package com.tulipskun.aixodia.ui.display
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.model.isAnswer
 import com.tulipskun.aixodia.data.model.totalInputTokens
 
 /** The green a saved token wears, and the amber one that was paid for. */
@@ -79,7 +81,7 @@ fun sessionTotals(messages: List<ChatMessage>): SessionTotals {
     var total = 0L
     var last = 0L
     messages.forEach { m ->
-        if (m.role != "model") return@forEach
+        if (!m.isAnswer) return@forEach
         prompt += m.totalInputTokens()
         cache += m.cacheRead
         out += m.tokensOut
@@ -114,6 +116,9 @@ fun SessionStrip(
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = MaterialTheme.shapes.medium,
+        // The same hairline the composer card wears: both are cards resting on
+        // the page, and the border is what says where the card ends.
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
         modifier = modifier
             .fillMaxWidth()
             .widthIn(max = 900.dp)

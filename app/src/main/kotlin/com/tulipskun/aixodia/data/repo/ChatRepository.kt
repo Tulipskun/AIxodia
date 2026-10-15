@@ -1,6 +1,7 @@
 package com.tulipskun.aixodia.data.repo
 
 import com.tulipskun.aixodia.data.model.mergeToolPairs
+import com.tulipskun.aixodia.data.model.normalizedRole
 import com.tulipskun.aixodia.data.model.toolRowView
 import androidx.room.withTransaction
 import com.tulipskun.aixodia.data.local.AppDatabase
@@ -456,7 +457,7 @@ class ChatRepository(
         return MessageEntity(
         sessionId = sid,
         seq = seq,
-        role = role.ifBlank { "model" },
+        role = normalizedRole(role),
         text = view.text,
         toolName = view.toolName,
         toolArgs = view.toolArgs,

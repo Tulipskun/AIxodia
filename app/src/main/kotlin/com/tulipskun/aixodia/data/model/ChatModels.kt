@@ -248,6 +248,30 @@ fun ChatMessage.freshInputTokens(): Int =
 fun ChatMessage.totalInputTokens(): Int =
     if (inputIncludesCache) tokensIn else tokensIn + cacheRead + cacheWrite
 
+/**
+ * True for the model's own words, as opposed to a question or a tool step.
+ *
+ * The role is spelled twice in the wild: this app writes "model" for a reply it
+ * makes itself, and the daemon's D1 rows say "assistant" — the name the provider
+ * APIs use. Both are answers, so the test is what a message is *not* rather than
+ * a list of the spellings it might be.
+ */
+val ChatMessage.isAnswer: Boolean
+    get() = role != "user" && !role.startsWith("tool")
+
+/**
+ * The role a row is stored under.
+ *
+ * The daemon names the model's rows "assistant", the name the provider APIs use,
+ * while this app's own rows say "model". They are folded into one word on the way
+ * in so the table has a single vocabulary; a row written before that fold is read
+ * through [isAnswer], which takes either spelling.
+ */
+fun normalizedRole(role: String): String = when (role) {
+    "", "assistant" -> "model"
+    else -> role
+}
+
 data class ChatSession(
     val id: String,
     val title: String,
