@@ -121,13 +121,12 @@ fun SessionStrip(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
         modifier = modifier
             .fillMaxWidth()
-            .widthIn(max = 900.dp)
-            .padding(bottom = 6.dp),
+            .padding(bottom = 4.dp),
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 6.dp),
+                .padding(horizontal = 4.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             StripColumn(
@@ -190,31 +189,31 @@ private fun StripColumn(
     bar: Float? = null,
 ) {
     Column(
-        modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier.padding(horizontal = 2.dp, vertical = 1.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(5.dp))
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(11.dp))
+            Spacer(Modifier.width(3.dp))
             Text(
                 stringResource(labelRes),
                 style = MaterialTheme.typography.labelSmall,
-                fontSize = 9.sp,
+                fontSize = 8.sp,
                 letterSpacing = 0.7.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
             )
         }
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(1.dp))
         Text(statText(value), maxLines = 1, softWrap = false)
         if (bar != null) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             val track = RoundedCornerShape(1.5.dp)
             Box(
                 Modifier
                     .fillMaxWidth(0.72f)
-                    .height(3.dp)
+                    .height(2.dp)
                     .clip(track)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
@@ -222,7 +221,7 @@ private fun StripColumn(
                     Box(
                         Modifier
                             .fillMaxWidth(bar.coerceIn(0.02f, 1f))
-                            .height(3.dp)
+                            .height(2.dp)
                             .clip(track)
                             .background(tint),
                     )
@@ -238,7 +237,7 @@ private fun StripDivider() {
     Box(
         Modifier
             .width(1.dp)
-            .height(30.dp)
+            .height(24.dp)
             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)),
     )
 }
@@ -253,17 +252,17 @@ private fun statText(parts: List<Pair<String, String>>): AnnotatedString {
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     return buildAnnotatedString {
         parts.forEachIndexed { index, part ->
-            if (index > 0) withStyle(SpanStyle(color = dim, fontSize = 9.sp)) { append(" ") }
+            if (index > 0) withStyle(SpanStyle(color = dim, fontSize = 8.sp)) { append(" ") }
             withStyle(
                 SpanStyle(
                     color = bright,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     fontFamily = FontFamily.Monospace,
                 ),
             ) { append(part.first) }
             if (part.second.isNotEmpty()) {
-                withStyle(SpanStyle(color = dim, fontSize = 9.sp, fontFamily = FontFamily.Monospace)) {
+                withStyle(SpanStyle(color = dim, fontSize = 8.sp, fontFamily = FontFamily.Monospace)) {
                     append(part.second)
                 }
             }

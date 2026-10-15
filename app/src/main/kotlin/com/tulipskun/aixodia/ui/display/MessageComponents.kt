@@ -737,8 +737,7 @@ fun ToolCallCard(
         shape = shape,
         modifier = Modifier
             .padding(top = 4.dp)
-            .widthIn(max = 760.dp)
-            .fillMaxWidth(0.94f)
+            .fillMaxWidth()
             .clip(shape)
             .combinedClickable(
                 onClick = { expanded = !expanded },
