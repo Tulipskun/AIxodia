@@ -291,8 +291,13 @@ fun ChatComposer(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // The gap between the groups is padding, not a spacer: the left group
+            // is measured against what the right one leaves it, and a trailing
+            // spacer squeezed into what is left over collapses to zero exactly
+            // when the name is long enough to need it — the pills then touch.
+            // Padding is reserved before the children are measured, so it holds.
             Row(
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CircleControl(
@@ -307,9 +312,6 @@ fun ChatComposer(
                 // work. It ellipsises only once the row has nothing left to give
                 // it, which is what keeps a long id from pushing send off the row.
                 PillControl(label = modelLabel, onClick = onModel)
-                // A guard, not a gap: with a full-width name the two groups meet,
-                // and the pills should still not touch.
-                Spacer(Modifier.size(8.dp))
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // The command menu keeps its own pill beside the model. Upper case
@@ -413,7 +415,10 @@ private fun PillControl(
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
+            // 10 rather than 12: the row has four controls in it, and the two
+            // dp the pills give back are the two dp the model name is short of
+            // fitting. It still reads as a pill, not as a filled word.
+            .padding(horizontal = 10.dp),
     ) {
         Text(
             label,
