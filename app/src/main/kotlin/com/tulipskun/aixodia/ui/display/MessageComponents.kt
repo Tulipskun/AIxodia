@@ -299,7 +299,7 @@ fun FooterLine(
                         "\u00B7",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(horizontal = 6.dp),
+                        modifier = Modifier.padding(horizontal = 3.dp),
                     )
                 }
                 if (entry.field == TokenField.Model) {
