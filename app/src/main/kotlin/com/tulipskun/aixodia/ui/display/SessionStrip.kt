@@ -131,7 +131,6 @@ fun SessionStrip(
     modifier: Modifier = Modifier,
 ) {
     if (totals.isEmpty) return
-    val counted = totals.cacheRead + totals.freshInput + totals.outTokens
     val elapsed = totals.totalMs + liveMs.coerceAtLeast(0L)
     val cachedTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = CachedAlpha)
     val newTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NewAlpha)
@@ -154,37 +153,29 @@ fun SessionStrip(
                 .fillMaxWidth()
                 .padding(horizontal = 13.dp, vertical = 3.dp),
         ) {
-            if (counted > 0) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(BarHeight),
-                    horizontalArrangement = Arrangement.spacedBy(BarGap),
-                ) {
-                    UsageSegment(totals.cacheRead, cachedTint)
-                    UsageSegment(totals.freshInput, newTint)
-                    UsageSegment(totals.outTokens, outTint)
-                }
-                Spacer(Modifier.height(3.dp))
+            // The three parts are always drawn: a count that is zero is a
+            // reading too — it is how a reader learns the cache is not being
+            // used — so the bar and its legend keep their shape.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(BarHeight),
+                horizontalArrangement = Arrangement.spacedBy(BarGap),
+            ) {
+                UsageSegment(totals.cacheRead, cachedTint)
+                UsageSegment(totals.freshInput, newTint)
+                UsageSegment(totals.outTokens, outTint)
             }
+            Spacer(Modifier.height(3.dp))
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // A part is only named when it has something in it: "0 cached"
-                // is not a reading, and a provider that never reports cache
-                // should not be given a legend entry that always says nothing.
-                if (totals.cacheRead > 0) {
-                    Legend(cachedTint, R.string.stat_cached, countParts(totals.cacheRead))
-                }
-                if (totals.freshInput > 0) {
-                    if (totals.cacheRead > 0) Spacer(Modifier.width(LegendGap))
-                    Legend(newTint, R.string.stat_new, countParts(totals.freshInput))
-                }
-                if (totals.outTokens > 0) {
-                    if (totals.cacheRead > 0 || totals.freshInput > 0) Spacer(Modifier.width(LegendGap))
-                    Legend(outTint, R.string.stat_out, countParts(totals.outTokens))
-                }
+                Legend(cachedTint, R.string.stat_cached, countParts(totals.cacheRead))
+                Spacer(Modifier.width(LegendGap))
+                Legend(newTint, R.string.stat_new, countParts(totals.freshInput))
+                Spacer(Modifier.width(LegendGap))
+                Legend(outTint, R.string.stat_out, countParts(totals.outTokens))
                 // The time is the fourth figure and the only one that is not a
                 // fraction of the bar, so it is held at the far end where it
                 // cannot be read as one of the three.
