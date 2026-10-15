@@ -335,13 +335,16 @@ fun ChatComposer(
                     }
                 }
                 Spacer(Modifier.size(6.dp))
+                // Both round controls are the same size, the way Claude's are.
+                // Drawing them at 40dp costs nothing to reach: Compose widens
+                // the touch target to 48dp on its own, and the row gains back
+                // the width the model name was short of.
                 if (busy) {
                     CircleControl(
                         icon = Icons.Default.Stop,
                         label = stopLabel,
                         onClick = onStop,
                         primary = true,
-                        size = 44.dp,
                     )
                 } else {
                     CircleControl(
@@ -350,7 +353,6 @@ fun ChatComposer(
                         onClick = onSend,
                         enabled = canSend,
                         primary = true,
-                        size = 44.dp,
                     )
                 }
             }
@@ -381,8 +383,10 @@ private fun CircleControl(
     else MaterialTheme.colorScheme.surfaceContainerHighest
     val content = when {
         inverted -> MaterialTheme.colorScheme.surface
-        enabled -> MaterialTheme.colorScheme.onSurfaceVariant
-        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        // The same tone the pill labels use. A dimmer glyph here made the
+        // attach button look switched off next to two lit-up pills.
+        enabled -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     }
     Box(
         contentAlignment = Alignment.Center,
