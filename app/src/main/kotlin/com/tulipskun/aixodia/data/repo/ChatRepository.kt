@@ -24,9 +24,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Owns the merge of three sources (AXCH-005):
+ * Owns the merge of three sources:
  *  1. Room cache — instant, offline-capable.
- *  2. Cloudflare D1 over its REST API (D-011) — history + the newest rows,
+ *  2. Cloudflare D1 over its REST API — history + the newest rows,
  *     pulled on open, on reconnect and after a cold start. The phone reads D1
  *     itself, so this still answers with the daemon stopped.
  *  3. WebSocket — the live tail from the agent, which keeps running server-side
@@ -406,7 +406,7 @@ class ChatRepository(
                     // are duplicates. Keep pending rows and rows whose text is
                     // not in the pulled page: they may not have reached D1 yet,
                     // and deleting them makes the thread flicker or lose
-                    // messages (AXCH-026).
+                    // messages.
                     if (row.text in pulledTexts) {
                         db.messages().deleteOne(sid, row.seq)
                     }
@@ -442,7 +442,7 @@ class ChatRepository(
      * here: a streamed answer arrives as dozens of delta frames and would show
      * up as dozens of bubbles, and the daemon's own mirror would then duplicate
      * every one of them. Only the ack marker matters locally; the thread is
-     * rebuilt from D1 when the turn closes (AX-082).
+     * rebuilt from D1 when the turn closes.
      */
     private suspend fun onFrame(f: AiOutput) {
         if (f.kind == "ack" && f.clientMsgId.isNotBlank()) {
@@ -464,7 +464,7 @@ class ChatRepository(
         agent = agent,
         jobId = jobId,
         // The footer travels with the turn, so a chat reopened tomorrow still
-        // shows which model answered and what it cost (AX-095).
+        // shows which model answered and what it cost.
         tokensIn = inputTokens,
         tokensOut = outputTokens,
         cacheRead = cacheRead,

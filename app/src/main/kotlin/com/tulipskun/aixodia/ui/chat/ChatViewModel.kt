@@ -328,7 +328,7 @@ class ChatViewModel(
         val cacheWrite = frame.cacheWrite
         val stats = turnStats.value
         // The closing frame names the model that actually answered and how long
-        // it took, which is what the footer of that message says (AX-095). The
+        // it took, which is what the footer of that message says. The
         // route stays as the fallback while the answer is still streaming.
         val model = frame.model.ifBlank { stats.model }
         if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0 && frame.reasoningTokens <= 0) {
@@ -461,7 +461,7 @@ class ChatViewModel(
         // The daemon mirrored the turn into D1; pull it so live bubbles are
         // replaced by the stored rows instead of a second copy. The streamed
         // text and tool steps stay on screen until the stored rows are ready —
-        // clearing them first makes the answer flicker out and back (AXCH-026).
+        // clearing them first makes the answer flicker out and back.
         // Refresh runs even for tool-only turns (no streamed text): otherwise
         // their rows never arrive until the next open.
         viewModelScope.launch {

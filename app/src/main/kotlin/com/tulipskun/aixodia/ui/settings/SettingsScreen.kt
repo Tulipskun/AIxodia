@@ -115,7 +115,7 @@ private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
 private enum class SettingsPage { Main, Connection, Agent, About }
 
 /**
- * Connection settings (AX-030): the Cloudflare API token the app uses to read
+ * Connection settings: the Cloudflare API token the app uses to read
  * and write D1 directly, the daemon tunnel address that carries the live socket
  * and the provider/model API, and one-tap tests so a wrong token or a missing
  * tunnel row shows up here instead of as a silent empty chat.

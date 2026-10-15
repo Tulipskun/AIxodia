@@ -4,7 +4,7 @@ import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 
 // Mirrors ai sdk/io.go + sdk/types.go + sdk/trace.go (additive-only), plus the
-// AXCH-005 fields the mock agent adds: which agent spoke (main/sub), which job
+// fields the mock agent adds: which agent spoke (main/sub), which job
 // a step belongs to, and the client id used to clear the pending marker.
 
 @JsonClass(generateAdapter = true)
@@ -178,7 +178,7 @@ data class AiOutput(
     @Json(name = "reasoning_tokens") val reasoningTokens: Int = 0,
     @Json(name = "input_includes_cache") val inputIncludesCache: Boolean = false,
     @Json(name = "tool_duration_ms") val toolDurationMs: Long = 0,
-    // Footer of this one message (AX-095): the model that produced it and how
+    // Footer of this one message: the model that produced it and how
     // long it took, straight off the terminal trace.
     @Json(name = "model") val model: String = "",
     @Json(name = "duration_ms") val durationMs: Long = 0,

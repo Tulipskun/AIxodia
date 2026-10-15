@@ -16,7 +16,7 @@ private val Context.ds by preferencesDataStore("aixodia")
  * repo. Defaults are intentionally empty so an unconfigured app asks instead of
  * silently talking to a wrong endpoint.
  *
- * Since D-011 there is exactly one credential: the Cloudflare API token, which
+ * There is exactly one credential: the Cloudflare API token, which
  * the app uses against the D1 REST API and hands to the daemon in the WebSocket
  * hello. The account and database ids are the token's own answer — discovered
  * and cached, never required from the operator — and the daemon address only
@@ -91,7 +91,7 @@ class SettingsStore(private val ctx: Context) {
     /**
      * The one credential, plus the ids when they are already known. Blank ids
      * stay blank on purpose: D1Api resolves them from the token and writes them
-     * back here, so nobody has to type a Cloudflare id (AX-010, AX-030).
+     * back here, so nobody has to type a Cloudflare id.
      */
     suspend fun saveD1(tokenValue: String, accountValue: String = "", databaseValue: String = "") {
         ctx.ds.edit {
@@ -138,7 +138,7 @@ class SettingsStore(private val ctx: Context) {
 
     /**
      * True once a Cloudflare API token is set. History needs nothing else, so a
-     * phone with no daemon address still opens and edits its chats (AX-010);
+     * phone with no daemon address still opens and edits its chats;
      * only the live socket stays offline until an address is known.
      */
     suspend fun isConfigured(): Boolean = current().token.isNotBlank()

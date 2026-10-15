@@ -12,7 +12,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Cloudflare D1 over its REST API (D-011, AX-010). The phone reads and writes
+ * Cloudflare D1 over its REST API. The phone reads and writes
  * the history tables itself, so the Worker that used to sit in front of D1 is
  * gone. The daemon has talked to this same API since CHANGE-081, which is why
  * nothing new has to be deployed for the app to do it too.
@@ -125,7 +125,7 @@ class D1Api(private val settings: SettingsStore) {
 
     /**
      * Resolves the account and the database from the token, exactly like the
-     * daemon does (REQ-046(3)), and remembers the answer. A stored id wins only
+     * daemon does, and remembers the answer. A stored id wins only
      * while the token can still see it, so moving to another account repairs
      * itself instead of failing forever.
      */
@@ -201,7 +201,7 @@ class D1Api(private val settings: SettingsStore) {
 
     // ---------------------------------------------------------------- history
 
-    /** The session list, newest first (AX-011). */
+    /** The session list, newest first. */
     suspend fun sessions(): List<SessionRow> = query(
         "SELECT id, title, provider, model, created_at, updated_at FROM sessions " +
             "ORDER BY updated_at DESC LIMIT 200",
@@ -215,7 +215,7 @@ class D1Api(private val settings: SettingsStore) {
         )
     }
 
-    /** Creates the chat in D1 too, so the drawer and the daemon agree (AX-063). */
+    /** Creates the chat in D1 too, so the drawer and the daemon agree. */
     suspend fun createSession(id: String, title: String): Boolean {
         query(
             "INSERT OR IGNORE INTO sessions(id, title, model, created_at, updated_at) " +
@@ -241,7 +241,7 @@ class D1Api(private val settings: SettingsStore) {
         return query("DELETE FROM sessions WHERE id = ?", listOf(sessionId)).changes > 0
     }
 
-    /** One page of history, oldest-first, the way the thread renders (AX-011). */
+    /** One page of history, oldest-first, the way the thread renders. */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int): List<TurnRow> {
         val capped = limit.coerceIn(1, 200).toString()
         val page = if (beforeSeq <= 0L) {

@@ -31,7 +31,7 @@ import java.io.InputStream
 import java.net.URLEncoder
 
 /**
- * The app's two back ends in one place (D-011).
+ * The app's two back ends in one place.
  *
  *  - **Cloudflare D1** through `D1Api` for history — the chat list, paging and
  *    session-level writes — so a stopped daemon does not hide the history;
@@ -80,7 +80,7 @@ data class SessionRow(
 
 class HistoryApi(private val settings: SettingsStore) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    // History is Cloudflare D1 read directly (D-011); everything in this class
+    // History is Cloudflare D1 read directly; everything in this class
     // that still goes over HTTP talks to the daemon through its tunnel.
     private val d1 = D1Api(settings)
     // The settings calls are not all instant: asking the daemon to re-check its
@@ -113,7 +113,7 @@ class HistoryApi(private val settings: SettingsStore) {
     }
 
     /**
-     * Every chat D1 knows, newest first (AX-010, AX-011). The phone reads D1
+     * Every chat D1 knows, newest first. The phone reads D1
      * itself now, so the list still arrives with the daemon stopped.
      */
     suspend fun sessions(): List<SessionRow> = withContext(Dispatchers.IO) {
@@ -139,7 +139,7 @@ class HistoryApi(private val settings: SettingsStore) {
         runCatching { d1.renameSession(sessionId, title) }.getOrDefault(false)
     }
 
-    /** Deletes a chat with its history, in D1 (AX-014). */
+    /** Deletes a chat with its history, in D1. */
     suspend fun deleteSession(sessionId: String): Boolean = withContext(Dispatchers.IO) {
         runCatching { d1.deleteSession(sessionId) }.getOrDefault(false)
     }
@@ -147,7 +147,7 @@ class HistoryApi(private val settings: SettingsStore) {
     /** Newest page for a session; the app calls this on open and on reconnect. */
     suspend fun latest(sessionId: String, limit: Int = 200): List<TurnRow> = turns(sessionId, 0, limit)
 
-    /** One page of history, oldest-first, read straight from D1 (AX-011). */
+    /** One page of history, oldest-first, read straight from D1. */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {
             runCatching { d1.turns(sessionId, beforeSeq, limit) }.getOrDefault(emptyList())
@@ -496,13 +496,13 @@ class HistoryApi(private val settings: SettingsStore) {
     /**
      * Resolves the Cloudflare account and database from the token and reports
      * what was found, so the settings screen can show it and remember it
-     * (AX-030). Throws with Cloudflare's own message when it cannot.
+     * Throws with Cloudflare's own message when it cannot.
      */
     suspend fun discover(): D1Api.Target = withContext(Dispatchers.IO) { d1.discover() }
 
     /**
      * Tunnel discovery: where the ai daemon is, read from the D1 `tunnel` row
-     * (AX-050). A failure is reported rather than hidden, so the settings screen
+     * A failure is reported rather than hidden, so the settings screen
      * can tell "D1 unreachable" from "the daemon has not beaten yet".
      */
     suspend fun node(): NodeInfo? = withContext(Dispatchers.IO) { d1.node() }

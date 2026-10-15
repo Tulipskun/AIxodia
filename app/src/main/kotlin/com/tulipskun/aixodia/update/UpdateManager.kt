@@ -12,7 +12,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * In-app updater (AX-041): checks the latest AIxodia GitHub Release,
+ * In-app updater: checks the latest AIxodia GitHub Release,
  * downloads the APK and fires an install intent. Install goes OVER the
  * existing install (same applicationId + same stable signature +
  * higher versionCode), so Room history and settings survive —
@@ -21,7 +21,7 @@ import java.io.File
  * The repo is public, so no Authorization header is sent at all. The only
  * token the app stores is the Cloudflare API token, which must never leave
  * the Cloudflare/D1/daemon path — sending it to api.github.com answers 401
- * and the button wrongly reports "already latest" (AXCH-024).
+ * and the button wrongly reports "already latest".
  */
 object UpdateManager {
     const val REPO = "Tulipskun/AIxodia"

@@ -14,7 +14,6 @@ D1 REST API (D-011) — there is no Cloudflare Worker in this project.
 ```text
 app/            Android client (.kt, Compose Material3, Room, OkHttp WS, D1 REST)
 db/             Cloudflare D1 schema + migrations (applied with wrangler, no Worker)
-requirements/   spec source of truth (read before code)
 ```
 
 ## Setup

@@ -155,7 +155,7 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         // v3 adds the per-message footer, so a reopened chat still shows which
-        // model answered and what it cost (AX-095).
+        // model answered and what it cost.
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE messages ADD COLUMN model TEXT NOT NULL DEFAULT ''")
@@ -164,7 +164,7 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         // v4 adds cached usage to that footer. Old rows keep zeros and simply
-        // show no cache line (AX-099).
+        // show no cache line.
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE messages ADD COLUMN cacheRead INTEGER NOT NULL DEFAULT 0")
