@@ -278,62 +278,79 @@ fun ChatComposer(
             },
         )
         Spacer(Modifier.size(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CircleControl(
-                icon = Icons.Default.Add,
-                label = attachLabel,
-                onClick = onAttach,
-                enabled = !uploading,
-            )
-            Spacer(Modifier.size(8.dp))
-            // The model is chosen once per chat and then left alone, so it reads
-            // as a label on the message rather than as a control to work. It is
-            // given the room it needs, up to two thirds of the free width, and
-            // ellipsises past that — a long id should not push send off the row.
-            PillControl(
-                label = modelLabel,
-                onClick = onModel,
+        // Two groups, pushed apart: everything the message is about on the left,
+        // everything that ends it on the right. The left group carries the weight
+        // and the model pill takes what it is given, so the name is as wide as it
+        // needs and only the true remainder becomes the gap.
+        //
+        // Weighting the pill against a weighted gap instead — which is what this
+        // did at first — hands the pill only its share of the free width. A long
+        // model id then ellipsised with 60dp of the row sitting empty beside it.
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
                 modifier = Modifier.weight(1f, fill = false),
-            )
-            Spacer(Modifier.size(6.dp))
-            // The command menu keeps its own pill beside the model. Upper case
-            // only: CMD is the name of the menu, not a shout.
-            Box {
-                PillControl(label = stringResource(R.string.cmd), onClick = { commandMenuOpen = true })
-                DropdownMenu(
-                    expanded = commandMenuOpen,
-                    onDismissRequest = { commandMenuOpen = false },
-                ) {
-                    commands.forEach { command ->
-                        DropdownMenuItem(
-                            text = { Text(command.label) },
-                            enabled = command.enabled,
-                            onClick = {
-                                commandMenuOpen = false
-                                command.onClick()
-                            },
-                        )
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircleControl(
+                    icon = Icons.Default.Add,
+                    label = attachLabel,
+                    onClick = onAttach,
+                    enabled = !uploading,
+                )
+                Spacer(Modifier.size(8.dp))
+                // The model is chosen once per chat and then left alone, so it
+                // reads as a label on the message rather than as a control to
+                // work. It ellipsises only once the row has nothing left to give
+                // it, which is what keeps a long id from pushing send off the row.
+                PillControl(label = modelLabel, onClick = onModel)
+                // A guard, not a gap: with a full-width name the two groups meet,
+                // and the pills should still not touch.
+                Spacer(Modifier.size(8.dp))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The command menu keeps its own pill beside the model. Upper case
+                // only: CMD is the name of the menu, not a shout.
+                Box {
+                    PillControl(label = stringResource(R.string.cmd), onClick = { commandMenuOpen = true })
+                    DropdownMenu(
+                        expanded = commandMenuOpen,
+                        onDismissRequest = { commandMenuOpen = false },
+                    ) {
+                        commands.forEach { command ->
+                            DropdownMenuItem(
+                                text = { Text(command.label) },
+                                enabled = command.enabled,
+                                onClick = {
+                                    commandMenuOpen = false
+                                    command.onClick()
+                                },
+                            )
+                        }
                     }
                 }
-            }
-            Spacer(Modifier.weight(0.5f))
-            if (busy) {
-                CircleControl(
-                    icon = Icons.Default.Stop,
-                    label = stopLabel,
-                    onClick = onStop,
-                    primary = true,
-                    size = 44.dp,
-                )
-            } else {
-                CircleControl(
-                    icon = Icons.Default.ArrowUpward,
-                    label = sendLabel,
-                    onClick = onSend,
-                    enabled = canSend,
-                    primary = true,
-                    size = 44.dp,
-                )
+                Spacer(Modifier.size(6.dp))
+                if (busy) {
+                    CircleControl(
+                        icon = Icons.Default.Stop,
+                        label = stopLabel,
+                        onClick = onStop,
+                        primary = true,
+                        size = 44.dp,
+                    )
+                } else {
+                    CircleControl(
+                        icon = Icons.Default.ArrowUpward,
+                        label = sendLabel,
+                        onClick = onSend,
+                        enabled = canSend,
+                        primary = true,
+                        size = 44.dp,
+                    )
+                }
             }
         }
     }
