@@ -6,10 +6,12 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -17,11 +19,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
@@ -32,6 +36,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +60,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -301,6 +307,11 @@ data class ComposerCommand(
  * screen, and because a long model name under a title pushed the title itself
  * off the bar. The command menu is new and sits next to it for the same reason:
  * both are about the message about to be sent.
+ *
+ * They are styled apart on purpose. The command menu is filled and bold — it is
+ * the one thing here nobody will find by accident, so it is the one thing that
+ * has to catch the eye. The model reads as a chip, quiet next to it, because it
+ * is set once per chat and then left alone.
  */
 @Composable
 fun ComposerActionsRow(
@@ -315,16 +326,37 @@ fun ComposerActionsRow(
     var menuOpen by remember { mutableStateOf(false) }
     // Same width rule as ChatComposer above, so the buttons line up with the
     // field's own edges on a tablet instead of drifting to the screen's edge.
+    // The row sits a little below the field, not against it: the two are one
+    // group, and the gap is what says so.
     Row(
-        modifier.fillMaxWidth().widthIn(max = 900.dp),
+        modifier.fillMaxWidth().widthIn(max = 900.dp).padding(top = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (showCommands) {
             // Anchored to the button, not a sheet: the list is short and the
             // answer to "what can I do here" belongs next to the thing asked.
             Box {
-                TextButton(onClick = { menuOpen = true }) { Text(commandLabel) }
+                FilledTonalButton(
+                    onClick = { menuOpen = true },
+                    // The theme's own radius, so a spec that changes the corner
+                    // radius restyles this button with everything else.
+                    shape = MaterialTheme.shapes.large,
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                    modifier = Modifier.height(40.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Terminal,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        commandLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     commands.forEach { command ->
                         DropdownMenuItem(
@@ -341,19 +373,27 @@ fun ComposerActionsRow(
         }
         if (showModel) {
             // fill = false: the row stays left-aligned under the field and the
-            // button grows only as far as the name needs, then ellipsises.
-            TextButton(
+            // chip grows only as far as the name needs, then ellipsises. The
+            // chevron is there because a chip that opens a sheet says so.
+            AssistChip(
                 onClick = onModel,
-                modifier = Modifier.weight(1f, fill = false),
-            ) {
-                Icon(
-                    Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.size(6.dp))
-                Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+                label = { Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
+                trailingIcon = {
+                    Icon(
+                        Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                modifier = Modifier.weight(1f, fill = false).height(40.dp),
+            )
         }
     }
 }

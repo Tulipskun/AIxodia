@@ -293,10 +293,14 @@ fun ChatScreen(
         pickedModel.isBlank() -> pickedProvider
         else -> "$pickedProvider · $pickedModel"
     }
-    // What the model button under the field reads. Unlike the footer's
-    // routeLabel this one is never blank: with nothing picked it still has to
-    // say what tapping it will choose.
-    val modelButtonLabel = routeLabel.ifBlank { ui.agentDefault }
+    // What the model button under the field reads: the model alone. The footer
+    // carries the whole route because it belongs to one turn, but a button
+    // squeezed in beside "CMD" has no room for a provider name, and the model
+    // is the half a person recognises. Same fallback as the footer, so the two
+    // name the same model for the same chat.
+    val modelButtonLabel = pickedModel
+        .ifBlank { providers.firstOrNull()?.defaultModel.orEmpty() }
+        .ifBlank { ui.agentDefault }
     // Everything a chat can be asked to do that is not a message. The list has
     // a fixed shape — a command that has nothing to do is greyed rather than
     // removed, so the menu does not move under the thumb between openings.

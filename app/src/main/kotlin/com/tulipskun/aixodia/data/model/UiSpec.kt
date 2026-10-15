@@ -59,7 +59,7 @@ data class UiSpec(
     val working get() = s("working", "agent กำลังทำงาน")
     val emptyTitle get() = s("empty_title", "เริ่มสนทนากับ agent")
     val emptyHint get() = s("empty_hint", "พิมพ์งานด้านล่าง แล้ว agent จะทำต่อแม้ปิดแอป")
-    val cmd get() = s("cmd", "cmd")
+    val cmd get() = s("cmd", "CMD")
     val clearDraft get() = s("clear_draft", "ล้างข้อความ")
 }
 
