@@ -25,6 +25,15 @@ class ErrorTextTest {
             friendlyError("provider Zen has no API keys"),
         )
 
+    @Test fun freeTierRefusalIsNotAKeyProblem() =
+        assertEquals(
+            "ผู้ให้บริการโหมดฟรีปฏิเสธคำขอ ไม่เกี่ยวกับคีย์ API ลองส่งอีกครั้งหรือเปลี่ยนโมเดล",
+            friendlyError(
+                "upstream_error: OpenCode's free tier can only be used from within OpenCode. " +
+                    "Download it at https://opencode.ai and keep building.",
+            ),
+        )
+
     @Test fun unknownModelIsExplained() =
         assertEquals(
             "ไม่พบโมเดลหรือผู้ให้บริการที่เลือก ตรวจสอบการตั้งค่าโมเดล",
