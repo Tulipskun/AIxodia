@@ -320,6 +320,10 @@ fun FooterLine(
                     Text(
                         piece.first,
                         style = MaterialTheme.typography.labelSmall,
+                        // The harness draws this line at 26px on a 2.8125 px/dp
+                        // screen, which is 9.2sp. Ten is what fits the whole
+                        // model name on a 360dp thread without reaching for it.
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = if (piece.second) FontWeight.Normal else FontWeight.SemiBold,
                         color = if (piece.second) MaterialTheme.colorScheme.onSurfaceVariant
@@ -340,6 +344,7 @@ fun FooterLine(
             Text(
                 clock + if (approximate) "\u2248" else "",
                 style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                 maxLines = 1,
