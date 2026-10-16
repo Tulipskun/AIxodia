@@ -183,6 +183,7 @@ fun MessageBlock(
                 name = m.toolName.ifBlank { if (m.role == "tool_result") "result" else "call" },
                 args = m.toolArgs,
                 body = body,
+                durationMs = m.durationMs,
                 // A merged step is the result answering the call, so the step is
                 // over; a call with no result yet is the one still running.
                 done = m.role == "tool_result",
@@ -870,6 +871,7 @@ fun ToolStepCard(step: ToolStep, nowMs: Long = 0L) {
         name = step.name,
         args = step.args,
         body = step.result,
+        durationMs = step.durationMs,
         done = step.done,
         failed = step.isError,
         running = running,
@@ -1089,6 +1091,7 @@ fun ToolCallCard(
     name: String,
     args: String,
     body: String,
+    durationMs: Long,
     done: Boolean,
     failed: Boolean,
     /** Left null where there is nothing to copy yet, e.g. a step in flight. */
@@ -1185,15 +1188,13 @@ fun ToolCallCard(
                         modifier = Modifier.size(12.dp),
                     )
                 }
-                // The clock is the step's own while it works and is gone the
-                // moment it is done: a finished step is a line in a record, and
-                // the record has no running clock. The result below says it
-                // finished; a number left behind would only be read as a promise
-                // that the step is still going.
-                if (running) {
+                // The clock runs while the step works, then freezes on the time
+                // it took: a finished step keeps its figure so a turn's tools
+                // can be compared by how long each one ran.
+                if (durationMs > 0L || running) {
                     Spacer(Modifier.size(6.dp))
                     Text(
-                        formatSeconds(runningMs),
+                        formatSeconds(if (running) runningMs else durationMs),
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = scheme.onSurfaceVariant,
