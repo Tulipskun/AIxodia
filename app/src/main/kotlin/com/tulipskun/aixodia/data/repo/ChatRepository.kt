@@ -125,6 +125,7 @@ class ChatRepository(
                 generationMs = it.generationMs,
                 thinkingMs = it.thinkingMs,
                 reasoningContent = it.reasoningContent,
+                block = it.block,
             )
         }.let(::mergeToolPairs)
     }
@@ -530,6 +531,7 @@ class ChatRepository(
         // The final answer's reasoning arrives in the column; a tool round's
         // reasoning rides inside the call row's JSON, so fall back to it.
         reasoningContent = view.reasoning.ifBlank { reasoningContent },
+        block = block,
         )
     }
 

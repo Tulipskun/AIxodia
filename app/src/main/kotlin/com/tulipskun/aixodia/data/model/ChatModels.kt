@@ -150,6 +150,70 @@ data class ToolStep(
     val key: String get() = id.ifBlank { name }
 }
 
+/**
+ * One display unit as the engine describes it. The engine owns this vocabulary
+ * — text, reasoning, tool, request, status — and the thread renders each type
+ * with one generic renderer, so changing how a turn looks means changing what
+ * the engine emits, not shipping a new app. A type this app has never seen
+ * still draws as a plain card with its title and body.
+ */
+@JsonClass(generateAdapter = true)
+data class Block(
+    @Json(name = "id") val id: String = "",
+    @Json(name = "type") val type: String = "",
+    @Json(name = "state") val state: String = "",
+    @Json(name = "text") val text: String = "",
+    @Json(name = "name") val name: String = "",
+    @Json(name = "arguments") val args: String = "",
+    @Json(name = "result") val result: String = "",
+    @Json(name = "is_error") val isError: Boolean = false,
+    @Json(name = "duration_ms") val durationMs: Long = 0,
+    @Json(name = "thinking_ms") val thinkingMs: Long = 0,
+    @Json(name = "round") val round: Int = 0,
+) {
+    companion object {
+        const val TEXT = "text"
+        const val REASONING = "reasoning"
+        const val TOOL = "tool"
+        const val REQUEST = "request"
+        const val STATUS = "status"
+
+        /**
+         * The block id of one provider request round. The engine names it
+         * "req<N>"; a tool event carries only its round, so the phone
+         * derives the id the same way to settle the round that spoke.
+         */
+        fun requestId(round: Int): String = "req$round"
+
+        /** Decodes a stored block; null for rows that predate blocks. */
+        fun parse(raw: String): Block? {
+            if (raw.isBlank()) return null
+            return runCatching {
+                val o = org.json.JSONObject(raw)
+                val type = o.optString("type")
+                if (type.isBlank()) return null
+                Block(
+                    id = o.optString("id"),
+                    type = type,
+                    state = o.optString("state"),
+                    text = o.optString("text"),
+                    name = o.optString("name"),
+                    args = o.optString("arguments"),
+                    result = o.optString("result"),
+                    isError = o.optBoolean("is_error"),
+                    durationMs = o.optLong("duration_ms"),
+                    thinkingMs = o.optLong("thinking_ms"),
+                    round = o.optInt("round"),
+                )
+            }.getOrNull()
+        }
+    }
+
+    /** True for a type with its own drawing; the rest get the plain card. */
+    val known: Boolean get() = type == TEXT || type == REASONING || type == TOOL ||
+        type == REQUEST || type == STATUS
+}
+
 // Canonical inbound display frame (ai Output + agent attribution).
 @JsonClass(generateAdapter = true)
 data class AiOutput(
@@ -187,6 +251,9 @@ data class AiOutput(
     @Json(name = "duration_ms") val durationMs: Long = 0,
     @Json(name = "generation_ms") val generationMs: Long = 0,
     @Json(name = "reasoning_content") val reasoningContent: String = "",
+    // The display block for this frame, described by the engine. Frames from
+    // an older daemon carry nothing here and take the stage-based path.
+    @Json(name = "block") val block: Block? = null,
     @Json(name = "turns") val turns: List<TurnRow> = emptyList(),
     @Json(name = "turns_synced") val turnsSynced: Boolean = false,
 )
@@ -255,6 +322,11 @@ data class ChatMessage(
      * predate the column.
      */
     val reasoningContent: String = "",
+    /**
+     * The row's display block as JSON, written by the engine. Blank on rows
+     * that predate blocks, which render through the role instead.
+     */
+    val block: String = "",
 )
 
 /**

@@ -59,6 +59,9 @@ data class MessageEntity(
     // reasoningContent is what the model thought, stored by the daemon with
     // the turn. Old rows keep blank and their pill stays closed for good.
     val reasoningContent: String = "",
+    // block is the row's display block as JSON, written by the engine. Old
+    // rows keep blank and render through the role instead.
+    val block: String = "",
 )
 
 @Dao
@@ -137,7 +140,7 @@ interface MessageDao {
  * error and not a warning: it throws the first time the database is opened, and
  * the app closes before anything on screen. That is what shipped as v0.1.270.
  */
-internal const val DB_VERSION = 8
+internal const val DB_VERSION = 9
 
 // The version has to move whenever an entity gains a column, and it is the one
 // number nothing else forces you to touch: adding a field to MessageEntity and
@@ -218,10 +221,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v9 keeps the row's display block, as the daemon wrote it. Old rows
+        // keep blank and render through the role instead.
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN block TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
                 .also { inst = it }
         }

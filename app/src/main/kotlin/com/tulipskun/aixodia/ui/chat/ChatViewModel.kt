@@ -6,6 +6,7 @@ import android.os.SystemClock
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.AttachmentRef
+import com.tulipskun.aixodia.data.model.Block
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ToolStep
@@ -13,6 +14,7 @@ import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
+import com.tulipskun.aixodia.ui.display.toolStepFor
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -114,6 +116,13 @@ class ChatViewModel(
             val reasoning: String = "",
             val startedAtMs: Long = 0L,
             val endedAtMs: Long = 0L,
+            /**
+             * The engine's request block this wait-and-thought belongs to
+             * ("req1", "req2", …). Blank on the optimistic block send invents
+             * before the engine announces the round, which the announcement
+             * then adopts instead of doubling.
+             */
+            val id: String = "",
         ) : LiveBlock
     }
 
@@ -446,6 +455,166 @@ class ChatViewModel(
         status.value = line
     }
 
+    /**
+     * One live frame as the engine's display block. Every branch upserts by
+     * block id — the request's own block, the call's own id — so the live
+     * thread is the stored thread before it is stored, instead of a second
+     * guess at it built from stage order. True when the frame carried a
+     * block; false takes the stage path for older daemons.
+     */
+    private fun onBlockFrame(f: AiOutput): Boolean {
+        val block = f.block ?: return false
+        val now = SystemClock.elapsedRealtime()
+        when (block.type) {
+            Block.REQUEST -> {
+                if (block.state == "done") settleRequest(block.id, now)
+                else openRequest(block.id, now)
+            }
+            Block.REASONING -> {
+                val chunk = block.text
+                if (chunk.isEmpty()) return true
+                liveReasoning.value = (liveReasoning.value + chunk).takeLast(32 * 1024)
+                reasoningActive.value = true
+                // The reasoning belongs to the request named on the block, not
+                // to the turn as a whole: it grows that request's own block.
+                val blocks = liveBlocks.value
+                val at = blocks.indexOfFirst { it is LiveBlock.Think && it.id == block.id }
+                liveBlocks.value = if (at >= 0) {
+                    val think = blocks[at] as LiveBlock.Think
+                    val out = blocks.toMutableList()
+                    out[at] = think.copy(
+                        phase = ThinkPhase.THINKING,
+                        reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
+                        startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
+                    )
+                    out
+                } else {
+                    blocks + LiveBlock.Think(
+                        id = block.id,
+                        phase = ThinkPhase.THINKING,
+                        reasoning = chunk.takeLast(32 * 1024),
+                        startedAtMs = now,
+                    )
+                }
+            }
+            Block.TOOL -> {
+                if (block.state == "done" || block.state == "error") completeLiveTool(block)
+                else startLiveTool(block, now)
+            }
+            Block.TEXT -> {
+                if (block.text.isNotBlank()) {
+                    liveBlocks.value = liveBlocks.value +
+                        LiveBlock.Say(block.text, System.currentTimeMillis())
+                }
+            }
+            Block.STATUS -> traceNote(block.text)
+            else -> if (block.text.isNotBlank()) traceNote(block.text)
+        }
+        return true
+    }
+
+    /**
+     * The engine opened a provider request round: its wait-for-first-byte
+     * block. The guards are beginRequest's — no open wait while a tool still
+     * runs, no second wait on the same round — keyed by the block id instead
+     * of position. The optimistic block send invented is adopted, not doubled.
+     */
+    private fun openRequest(id: String, now: Long) {
+        if (liveBlocks.value.any { it is LiveBlock.Act && !it.step.done }) return
+        val blocks = liveBlocks.value
+        val waiting = blocks.indexOfLast { it is LiveBlock.Think && it.phase == ThinkPhase.WAITING }
+        if (waiting >= 0) {
+            val think = blocks[waiting] as LiveBlock.Think
+            if (think.id == id) return
+            if (think.id.isBlank()) {
+                val out = blocks.toMutableList()
+                out[waiting] = think.copy(id = id, startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now)
+                liveBlocks.value = out
+                return
+            }
+            settleRequest(think.id, now)
+        }
+        liveBlocks.value = liveBlocks.value + LiveBlock.Think(id = id, phase = ThinkPhase.WAITING, startedAtMs = now)
+    }
+
+    /**
+     * The engine closed a provider request round: the round spoke or its tools
+     * landed, so it is no longer waiting. A round that reasoned keeps its
+     * block, closed and showing what it thought; one that reasoned nothing is
+     * dropped rather than left as a thought over an empty body.
+     */
+    private fun settleRequest(id: String, now: Long = SystemClock.elapsedRealtime()) {
+        val blocks = liveBlocks.value
+        val at = blocks.indexOfLast { it is LiveBlock.Think && (it.id == id || it.id.isBlank()) }
+        if (at < 0) return
+        val think = blocks[at] as LiveBlock.Think
+        if (think.phase == ThinkPhase.DONE) return
+        val out = blocks.toMutableList()
+        if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
+            out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
+        } else {
+            out.removeAt(at)
+        }
+        liveBlocks.value = out
+    }
+
+    /** A tool call the engine announced: the round spoke, so it settles. */
+    private fun startLiveTool(block: Block, now: Long) {
+        reasoningActive.value = false
+        if (block.name.isBlank()) return
+        if (block.round > 0) settleRequest(Block.requestId(block.round), now)
+        else settleOpenRequest(now)
+        liveThinkingMs.value = 0L
+        // A turn that opens with tools never streams a word first, so
+        // the first call is where its thinking ends.
+        if (pendingThinkingMs == 0L) {
+            val started = turnStats.value.startedAtMs
+            if (started > 0L) {
+                pendingThinkingMs = (now - started).coerceAtLeast(0L)
+            }
+        }
+        // What came before this tool is its own turn, now and after.
+        val said = liveText.value.trim()
+        if (said.isNotEmpty()) {
+            liveBlocks.value = liveBlocks.value +
+                LiveBlock.Say(said, System.currentTimeMillis())
+            liveText.value = ""
+        }
+        liveBlocks.value = upsertStep(liveBlocks.value, toolStepFor(block, "", now))
+        traceNote("${block.name}…")
+    }
+
+    /**
+     * A tool result the engine announced: the step named by the call id is
+     * completed, lending it the arguments the result frame never carries.
+     * The next request is the engine's to open — unlike the old stage path,
+     * nothing here invents one.
+     */
+    private fun completeLiveTool(block: Block) {
+        liveThinkingMs.value = 0L
+        val key = block.id.ifBlank { block.name }
+        val known = liveBlocks.value.filterIsInstance<LiveBlock.Act>()
+            .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
+        liveBlocks.value = liveBlocks.value.map { item ->
+            if (item is LiveBlock.Act && item.step.key == key) {
+                item.copy(
+                    step = item.step.copy(
+                        args = block.args.ifBlank { known },
+                        result = block.result.take(160),
+                        isError = block.isError,
+                        done = true,
+                        durationMs = block.durationMs,
+                    ),
+                )
+            } else {
+                item
+            }
+        }
+        val note = if (block.isError) "${block.name} ล้มเหลว" else "${block.name} เสร็จแล้ว"
+        status.value = note
+        traceNote(note)
+    }
+
     private fun onTrace(f: AiOutput) {
         if (f.agent.isNotEmpty() && f.agent != "main") {
             val detail = when (f.stage) {
@@ -458,6 +627,11 @@ class ChatViewModel(
             }
             noteSubAgent(f, detail)
         }
+        // The engine's display block, when the frame has one: it names the
+        // round or step outright, so the live thread is upserted by id instead
+        // of re-derived from stage order. Frames from an older daemon carry
+        // nothing here and take the stage path below.
+        if (onBlockFrame(f)) return
         when (f.stage) {
             "reasoning" -> {
                 val chunk = f.text

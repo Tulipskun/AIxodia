@@ -57,6 +57,7 @@ data class TurnRow(
     @Json(name = "input_includes_cache") val inputIncludesCache: Boolean = false,
     @Json(name = "duration_ms") val durationMs: Long = 0,
     @Json(name = "generation_ms") val generationMs: Long = 0,
+    @Json(name = "block") val block: String = "",
 )
 
 

@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.AttachmentRef
+import com.tulipskun.aixodia.data.model.Block
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.isAnswer
 import com.tulipskun.aixodia.data.model.splitAttachmentNote
@@ -135,6 +136,12 @@ fun MessageBlock(
 ) {
     val mine = m.role == "user"
     val isTool = m.role == "tool_call" || m.role == "tool_result"
+    // The engine's display block, when the row has one: it names what this
+    // row is — words, a thought, a tool step — and the drawing follows it
+    // rather than re-deriving the kind from the role. Rows that predate
+    // blocks, and types this app has never seen, take the paths below.
+    val block = Block.parse(m.block)
+    val toolish = isTool || block?.type == Block.TOOL
     val body = m.text.ifBlank { m.toolArgs }
     // The main agent is the conversation itself, so it carries no name; a sub
     // agent or a tool step keeps its badge because it is a separate voice.
@@ -166,7 +173,7 @@ fun MessageBlock(
                 AgentBadge(m)
             }
         }
-        if (isTool) {
+        if (toolish) {
             // The thinking that led to this call belongs to this request alone.
             // It rides on the call row, so it is shown above the card rather than
             // merged into the answer's one pill at the end of the turn.
@@ -178,13 +185,13 @@ fun MessageBlock(
             // result is the one thing in a thread that is noise until it is asked
             // for, and the header already says which tool ran.
             ToolCallCard(
-                name = m.toolName.ifBlank { if (m.role == "tool_result") "result" else "call" },
-                args = m.toolArgs,
+                name = toolCardName(m, block).ifBlank { if (m.role == "tool_result") "result" else "call" },
+                args = toolCardArgs(m, block),
                 body = body,
-                durationMs = m.durationMs,
+                durationMs = toolCardDurationMs(m, block),
                 // A merged step is the result answering the call, so the step is
                 // over; a call with no result yet is the one still running.
-                done = m.role == "tool_result",
+                done = toolCardDone(m),
                 failed = m.role == "tool_result" && m.text.startsWith("{\"error\""),
                 onCopy = onCopy,
                 copyLabel = copyLabel,
@@ -275,6 +282,17 @@ fun MessageBlock(
                     modifier = Modifier.padding(top = 2.dp, end = 2.dp),
                 )
             }
+        } else if (block != null && block.type == Block.REASONING) {
+            // A standalone thought with no words of its own: the pill is the
+            // whole block.
+            val thought = m.reasoningContent.ifBlank { block.text }
+            if (thought.isNotBlank()) {
+                ThoughtPill(block.thinkingMs, thought)
+            }
+        } else if (block != null && !block.known) {
+            // A kind of content this app has never seen: the plain card, so
+            // it stays readable with no app update.
+            UnknownBlockCard(block)
         } else {
             // A finished request keeps its thinking only where the model
             // actually reasoned. A send-to-first-token figure with nothing

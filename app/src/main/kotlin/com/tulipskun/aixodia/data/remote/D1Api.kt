@@ -244,18 +244,27 @@ class D1Api(private val settings: SettingsStore) {
     /** One page of history, oldest-first, the way the thread renders. */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int): List<TurnRow> {
         val capped = limit.coerceIn(1, 200).toString()
-        val page = if (beforeSeq <= 0L) {
+        suspend fun page(columns: String): Rows = if (beforeSeq <= 0L) {
             query(
-                "$TURN_COLUMNS WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+                "$columns WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
                 listOf(sessionId, capped),
             )
         } else {
             query(
-                "$TURN_COLUMNS WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
+                "$columns WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
                 listOf(sessionId, beforeSeq.toString(), capped),
             )
         }
-        return page.rows.map { row ->
+        // A database whose daemon never wrote blocks has no such column; the
+        // whole statement fails, so read the old columns instead and let the
+        // rows render through the role.
+        val rows = try {
+            page(TURN_COLUMNS)
+        } catch (e: Exception) {
+            if (!e.message.orEmpty().contains("no such column", ignoreCase = true)) throw e
+            page(TURN_COLUMNS_LEGACY)
+        }
+        return rows.rows.map { row ->
             TurnRow(
                 seq = row.optLong("seq"),
                 role = row.optString("role"),
@@ -274,6 +283,7 @@ class D1Api(private val settings: SettingsStore) {
                 inputIncludesCache = row.optInt("input_includes_cache") != 0,
                 durationMs = row.optLong("duration_ms"),
                 generationMs = row.optLong("generation_ms"),
+                block = row.optString("block"),
             )
         }.reversed()
     }
@@ -323,6 +333,13 @@ class D1Api(private val settings: SettingsStore) {
         private const val DEFAULT_DATABASE = "aixodia"
 
         private const val TURN_COLUMNS =
+            "SELECT seq, role, agent, job_id, text, created_at, model, " +
+                "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, " +
+                "reasoning_tokens, reasoning_content, " +
+                "duration_ms, generation_ms, block FROM turns"
+
+        /** The same page for a database whose daemon never wrote blocks. */
+        private const val TURN_COLUMNS_LEGACY =
             "SELECT seq, role, agent, job_id, text, created_at, model, " +
                 "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, " +
                 "reasoning_tokens, reasoning_content, " +
