@@ -106,6 +106,7 @@ class ChatRepository(
                 durationMs = it.durationMs,
                 generationMs = it.generationMs,
                 thinkingMs = it.thinkingMs,
+                reasoningContent = it.reasoningContent,
             )
         }.let(::mergeToolPairs)
     }
@@ -495,6 +496,7 @@ class ChatRepository(
         // turn runs and stamps it afterwards, so a pulled row always starts
         // at zero here and the mirror keeps the local figure.
         thinkingMs = 0,
+        reasoningContent = reasoningContent,
         )
     }
 

@@ -244,6 +244,12 @@ data class ChatMessage(
      * turn runs and kept across mirrors. Zero when the turn predates it.
      */
     val thinkingMs: Long = 0,
+    /**
+     * What a reasoning model wrote before its answer, stored by the daemon
+     * with the turn. Blank for models that do not think, and for turns that
+     * predate the column.
+     */
+    val reasoningContent: String = "",
 )
 
 /**

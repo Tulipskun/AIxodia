@@ -74,10 +74,11 @@
     <!-- The five live states, in the harness's words. Sending is what a bubble
          wears while its row is still on its way; the thinking title heads the
          expanded card every request shows, and the thought pill is what a
-         finished turn keeps. -->
-    <string name="sending">กำลังส่ง…</string>
-    <string name="thinking_title">กำลังคิด…</string>
-    <string name="thought_for">คิดไป %1$s</string>
+         finished turn keeps. English, like the harness draws them. -->
+    <string name="sending">Sending…</string>
+    <string name="thinking_title">Thinking…</string>
+    <string name="thought_for">Thought for %1$s</string>
+    <string name="thought">Thought</string>
     <string name="copy_message">คัดลอกข้อความ</string>
     <string name="retry_turn">ส่งใหม่</string>
     <string name="copied">คัดลอกแล้ว</string>

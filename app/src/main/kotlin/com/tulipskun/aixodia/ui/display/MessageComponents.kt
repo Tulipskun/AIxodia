@@ -50,7 +50,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -269,13 +271,13 @@ fun MessageBlock(
                 )
             }
         } else {
-            // Every request thought first, so every answer wears its thinking
-            // time as a closed pill above its words. It cannot be opened: the
-            // daemon keeps what was thought and reports no duration of its
-            // own, so the figure is the phone's own send-to-first-token, and
-            // there is nothing behind the pill a chevron could promise.
-            if (m.thinkingMs > 0L) {
-                ThoughtPill(m.thinkingMs)
+            // Every request thought first, so every answer that kept anything
+            // of it wears the pill above its words: the phone's own
+            // send-to-first-token, and the model's own reasoning where the
+            // daemon stored any. Turns from before either existed show nothing
+            // rather than a figure that was never measured.
+            if (m.thinkingMs > 0L || m.reasoningContent.isNotBlank()) {
+                ThoughtPill(m.thinkingMs, m.reasoningContent)
             }
             // An answer is the page, not a bubble: the words sit straight on the
             // background and the turn is read from the gap above it. Only code
@@ -579,33 +581,93 @@ fun LiveAnswer(text: String) {
 
 /**
  * What a finished turn kept of its thinking: send to first word, measured on
- * the phone. A closed pill, like the live one — there is still nothing behind
- * it, so still no chevron.
+ * the phone, and what the model actually thought, as the daemon stored it.
+ *
+ * The pill opens when there is something behind it — the daemon's own
+ * reasoning text — and stays closed otherwise: a chevron that opens onto
+ * nothing would be the same lie the live pill refused.
  */
 @Composable
-private fun ThoughtPill(thinkingMs: Long) {
+private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
+    var open by remember { mutableStateOf(false) }
+    val canOpen = reasoning.isNotBlank()
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = CircleShape,
         modifier = Modifier.padding(vertical = 4.dp),
     ) {
-        Row(
-            Modifier.padding(start = 12.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Default.AutoAwesome,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(13.dp),
-            )
-            Spacer(Modifier.size(6.dp))
-            Text(
-                stringResource(R.string.thought_for, formatSeconds(thinkingMs)),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+        Column {
+            Row(
+                Modifier
+                    .padding(start = 12.dp, end = 14.dp, top = 6.dp, bottom = 6.dp)
+                    .then(
+                        if (canOpen) {
+                            Modifier.combinedClickable(
+                                onClick = { open = !open },
+                                onLongClick = null,
+                                onLongClickLabel = null,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(13.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    if (thinkingMs > 0L) {
+                        stringResource(R.string.thought_for, formatSeconds(thinkingMs))
+                    } else {
+                        stringResource(R.string.thought)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                if (canOpen) {
+                    Spacer(Modifier.size(4.dp))
+                    Icon(
+                        if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = stringResource(
+                            if (open) R.string.collapse else R.string.expand,
+                        ),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = open && canOpen,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                // The model's own words, in the same recess a tool's output
+                // sits in: a different kind of text from the thread around it.
+                // Capped in height with its own scroll, so a long chain of
+                // thought does not push the answer off the screen.
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+                ) {
+                    Text(
+                        reasoning,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
+            }
         }
     }
 }

@@ -26,6 +26,7 @@
     <string name="sending">Sending…</string>
     <string name="thinking_title">Thinking…</string>
     <string name="thought_for">Thought for %1$s</string>
+    <string name="thought">Thought</string>
     <string name="copy_message">Copy message</string>
     <string name="retry_turn">Retry</string>
     <string name="copied">Message copied</string>
