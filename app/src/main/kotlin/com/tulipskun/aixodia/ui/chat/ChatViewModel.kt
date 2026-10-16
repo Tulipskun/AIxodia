@@ -499,30 +499,40 @@ class ChatViewModel(
         } else if (stage == "already_done") {
             notice.value = "งานนั้นจบไปแล้ว"
         }
+        // The thinking was measured while the turn ran; its rows only just
+        // arrived, so stamp the figure now while their seqs are known.
+        val sid = frame.sessionId.ifBlank { sessionId }
+        val baseSeq = turnBaseSeq
+        val thinkingMs = pendingThinkingMs
+        clearLiveTurn()
+        answerSettled = false
+        // Repository has already committed the WS rows. A D1 read is only a
+        // compatibility/recovery fallback for a daemon without a complete batch.
+        viewModelScope.launch {
+            if (!frame.turnsSynced) runCatching { repo.refreshLatest(sid) }
+            if (baseSeq >= 0L) runCatching { repo.stampThinkingMs(sid, baseSeq, thinkingMs) }
+        }
+    }
+
+    /**
+     * Takes the in-flight turn off the screen: the streamed text, the tool
+     * cards, the status line and the busy flag. Any rows the turn produced are
+     * already in D1; this only clears the live copy, so it is safe to call
+     * whether the daemon confirmed the end or the screen is being unstuck.
+     */
+    private fun clearLiveTurn() {
         status.value = ""
         liveSubText = ""
         liveBlocks.value = emptyList()
         liveThinkingMs.value = 0L
+        liveReasoning.value = ""
         reasoningActive.value = false
         busy.value = false
-        answerSettled = false
         subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
-        // Repository has already committed the WS rows. A D1 read is only a
-        // compatibility/recovery fallback for a daemon without a complete batch.
-        val sid = frame.sessionId.ifBlank { sessionId }
-        val baseSeq = turnBaseSeq
-        val thinkingMs = pendingThinkingMs
         turnBaseSeq = -1L
         pendingThinkingMs = 0L
         liveText.value = ""
-        liveReasoning.value = ""
-        viewModelScope.launch {
-            if (!frame.turnsSynced) runCatching { repo.refreshLatest(sid) }
-            // The thinking was measured while the turn ran; its rows only just
-            // arrived, so stamp the figure now while their seqs are known.
-            if (baseSeq >= 0L) runCatching { repo.stampThinkingMs(sid, baseSeq, thinkingMs) }
-        }
     }
 
     /** Freezes the footer's numbers when the turn ends. */
@@ -602,16 +612,20 @@ class ChatViewModel(
     }
 
     /**
-     * The stop button. The daemon answers with a done frame whose stage says
-     * whether it stopped something, so the phone can say so honestly instead of
-     * pretending the turn finished.
+     * The stop button. It takes the turn off the screen at once — the user
+     * asked to stop, and a screen that keeps showing a turn the daemon has
+     * nothing running for is the bug this fixes — then tells the daemon to
+     * cancel. The daemon answers a cancel even when nothing is running, so a
+     * done frame that follows only confirms the stop. Clearing locally is what
+     * makes the button work when the socket is down, where no cancel can be
+     * delivered at all: a stop that only changed a status line left the thread
+     * stuck busy forever.
      */
     fun stop() {
-        if (!repo.stopTurn(sessionId)) {
-            notice.value = "ยังหยุดไม่ได้ — socket ไม่ออนไลน์"
-            return
-        }
-        status.value = "กำลังหยุด…"
+        val sent = repo.stopTurn(sessionId)
+        clearLiveTurn()
+        answerSettled = true
+        notice.value = if (sent) "หยุดการทำงานแล้ว" else "socket ไม่ออนไลน์ — ล้างสถานะที่ค้างอยู่แทน"
     }
 
     /** Loads the catalogue the picker offers, once the daemon is online. */
