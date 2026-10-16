@@ -674,19 +674,13 @@ private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
 
 /**
  * The thinking of the turn in flight, as the harness draws it: a full-width
- * card with what the turn is doing, how long it has been at it, and the trail
- * it left getting there.
- *
- * Every request shows this card while it waits for its first word — the daemon
- * reports no thinking of its own, so waiting for its report would leave most
- * requests with no thinking at all. The trail is the turn's own status history
- * in the thread's words, not the model's raw reasoning, which never leaves the
- * daemon; the last few lines are what fit without pushing the answer away.
+ * card with elapsed time and the reasoning text upstream actually exposed.
+ * Every request shows the header; absent reasoning leaves the body empty.
  */
 @Composable
 fun ThinkingLive(
     elapsedMs: Long,
-    trail: List<String>,
+    reasoning: String,
     modifier: Modifier = Modifier,
 ) {
     val pulse by rememberInfiniteTransition(label = "thinking-live").animateFloat(
@@ -727,7 +721,7 @@ fun ThinkingLive(
                     maxLines = 1,
                 )
             }
-            val lines = trail.takeLast(4)
+            val lines = reasoning.lines().filter { it.isNotBlank() }.takeLast(4)
             if (lines.isNotEmpty()) {
                 Spacer(Modifier.size(8.dp))
                 // The row is only as tall as its lines, and the accent fills

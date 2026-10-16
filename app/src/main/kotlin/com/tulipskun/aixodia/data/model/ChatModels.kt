@@ -2,6 +2,7 @@ package com.tulipskun.aixodia.data.model
 
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
+import com.tulipskun.aixodia.data.remote.TurnRow
 
 // Mirrors ai sdk/io.go + sdk/types.go + sdk/trace.go (additive-only), plus the
 // fields the mock agent adds: which agent spoke (main/sub), which job
@@ -184,6 +185,10 @@ data class AiOutput(
     // long it took, straight off the terminal trace.
     @Json(name = "model") val model: String = "",
     @Json(name = "duration_ms") val durationMs: Long = 0,
+    @Json(name = "generation_ms") val generationMs: Long = 0,
+    @Json(name = "reasoning_content") val reasoningContent: String = "",
+    @Json(name = "turns") val turns: List<TurnRow> = emptyList(),
+    @Json(name = "turns_synced") val turnsSynced: Boolean = false,
 )
 
 // Canonical outbound frame (ai Input).

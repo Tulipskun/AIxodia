@@ -141,23 +141,16 @@ class ChatViewModel(
 
     /** Latest live status line for the thread ("sub: web_fetch …"). */
     val status = MutableStateFlow("")
-    /**
-     * What the turn has done so far, newest last: every trace stage in the
-     * words the thread would use. The thinking card shows the last few, so a
-     * request that never streams a word still narrates itself instead of
-     * sitting blank until the answer lands.
-     */
-    val statusLog = MutableStateFlow<List<String>>(emptyList())
     val busy = MutableStateFlow(false)
     val notice = MutableStateFlow("")
 
     /**
-     * The answer as it streams in, before D1 has it. Kept out of the database
-     * on purpose: the daemon writes one authoritative row per turn, and the
-     * thread is refreshed from there when the turn closes, so a streamed bubble
-     * can never become a duplicate row.
+     * Deltas stay UI-only; committed WS rows replace them when the turn closes.
      */
     val liveText = MutableStateFlow("")
+    /** Actual upstream reasoning; never filled with status messages. */
+    val liveReasoning = MutableStateFlow("")
+    val reasoningActive = MutableStateFlow(false)
     val liveAgent = MutableStateFlow("main")
     /**
      * What the live turn has said and done, in the order it happened: a piece of
@@ -171,7 +164,7 @@ class ChatViewModel(
     val liveBlocks = MutableStateFlow<List<LiveBlock>>(emptyList())
     /** Recorded thinking time for the current reasoning event, if the daemon sent one. */
     val liveThinkingMs = MutableStateFlow(0L)
-    /** Which agent that thinking event belongs to; raw reasoning never leaves the daemon. */
+    /** Which agent that thinking event belongs to. */
     val liveThinkingAgent = MutableStateFlow("main")
     val providers = MutableStateFlow<List<ProviderView>>(emptyList())
     /** Same catalogue's global health/key counts, shown as a caption in the session sheet. */
@@ -263,10 +256,11 @@ class ChatViewModel(
                     "done" -> onTurnDone(f)
                     "error" -> {
                         status.value = ""
-                        statusLog.value = emptyList()
                         liveText.value = ""
                         liveBlocks.value = emptyList()
                         liveThinkingMs.value = 0L
+                        liveReasoning.value = ""
+                        reasoningActive.value = false
                         turnBaseSeq = -1L
                         pendingThinkingMs = 0L
                         busy.value = false
@@ -289,6 +283,7 @@ class ChatViewModel(
     private fun onDelta(agent: String, chunk: String, frame: AiOutput? = null) {
         if (chunk.isEmpty() || answerSettled) return
         liveThinkingMs.value = 0L
+        reasoningActive.value = false
         if (agent.isNotEmpty() && agent != "main") {
             status.value = "${if (agent == "sub") "sub" else agent}: " + (liveSubText + chunk).take(80)
             liveSubText += chunk
@@ -326,19 +321,23 @@ class ChatViewModel(
     }
 
     private fun onMessage(agent: String, text: String, frame: AiOutput? = null) {
-        if (text.isBlank()) return
         if (agent.isNotEmpty() && agent != "main") {
             status.value = "${if (agent == "sub") "sub" else agent}: " + text.take(80)
             liveSubText = text
             noteSubAgent(frame, text.take(80))
             return
         }
+        recordUsage(frame)
+        if (pendingThinkingMs == 0L && turnStats.value.startedAtMs > 0L) {
+            pendingThinkingMs = (SystemClock.elapsedRealtime() - turnStats.value.startedAtMs).coerceAtLeast(0L)
+        }
+        if (text.isBlank()) return
         // Replace whatever streamed in with the daemon's own copy: it is the one
         // that also lands in D1.
         answerSettled = true
         liveText.value = text
         liveThinkingMs.value = 0L
-        recordUsage(frame)
+        reasoningActive.value = false
         busy.value = true
     }
 
@@ -358,7 +357,7 @@ class ChatViewModel(
         // it took, which is what the footer of that message says. The
         // route stays as the fallback while the answer is still streaming.
         val model = frame.model.ifBlank { stats.model }
-        if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0 && frame.reasoningTokens <= 0) {
+        if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0 && frame.reasoningTokens <= 0 && frame.seq == 0L) {
             if (model != stats.model) turnStats.value = stats.copy(model = model)
             return
         }
@@ -382,15 +381,10 @@ class ChatViewModel(
         )
     }
 
-    /**
-     * Names what the turn is doing, in the words the thread would use. The
-     * status line shows the latest; the log keeps the trail the thinking card
-     * narrates from, capped so a long tool-heavy turn does not grow it forever.
-     */
+    /** Status is separate from upstream reasoning. */
     private fun traceNote(line: String) {
         if (line.isBlank()) return
         status.value = line
-        statusLog.value = (statusLog.value + line).takeLast(6)
     }
 
     private fun onTrace(f: AiOutput) {
@@ -406,7 +400,12 @@ class ChatViewModel(
             noteSubAgent(f, detail)
         }
         when (f.stage) {
+            "reasoning" -> {
+                liveReasoning.value = (liveReasoning.value + f.text).takeLast(32 * 1024)
+                reasoningActive.value = true
+            }
             "tool_call", "tool_running" -> {
+                reasoningActive.value = false
                 val name = f.toolCall?.name ?: return
                 liveThinkingMs.value = 0L
                 // A turn that opens with tools never streams a word first, so
@@ -501,29 +500,28 @@ class ChatViewModel(
             notice.value = "งานนั้นจบไปแล้ว"
         }
         status.value = ""
-        statusLog.value = emptyList()
         liveSubText = ""
         liveBlocks.value = emptyList()
         liveThinkingMs.value = 0L
+        reasoningActive.value = false
         busy.value = false
         answerSettled = false
         subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
-        // The daemon mirrored the turn into D1; pull it so live bubbles are
-        // replaced by the stored rows instead of a second copy. The streamed
-        // text and tool steps stay on screen until the stored rows are ready —
-        // clearing them first makes the answer flicker out and back.
-        // Refresh runs even for tool-only turns (no streamed text): otherwise
-        // their rows never arrive until the next open.
+        // Repository has already committed the WS rows. A D1 read is only a
+        // compatibility/recovery fallback for a daemon without a complete batch.
+        val sid = frame.sessionId.ifBlank { sessionId }
+        val baseSeq = turnBaseSeq
+        val thinkingMs = pendingThinkingMs
+        turnBaseSeq = -1L
+        pendingThinkingMs = 0L
+        liveText.value = ""
+        liveReasoning.value = ""
         viewModelScope.launch {
-            runCatching { repo.refreshLatest(sessionId) }
+            if (!frame.turnsSynced) runCatching { repo.refreshLatest(sid) }
             // The thinking was measured while the turn ran; its rows only just
             // arrived, so stamp the figure now while their seqs are known.
-            runCatching { repo.stampThinkingMs(sessionId, turnBaseSeq, pendingThinkingMs) }
-            turnBaseSeq = -1L
-            pendingThinkingMs = 0L
-            liveText.value = ""
-            liveBlocks.value = emptyList()
+            if (baseSeq >= 0L) runCatching { repo.stampThinkingMs(sid, baseSeq, thinkingMs) }
         }
     }
 
@@ -742,7 +740,9 @@ class ChatViewModel(
         liveSubText = ""
         liveBlocks.value = emptyList()
         subAgents.value = emptyList()
-        statusLog.value = emptyList()
+        liveText.value = ""
+        liveReasoning.value = ""
+        reasoningActive.value = false
         pendingThinkingMs = 0L
         turnBaseSeq = -1L
         // The footer opens with this turn: which model answers, from when, and

@@ -16,10 +16,13 @@ import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -43,20 +46,34 @@ class ChatRepository(
     val connState: StateFlow<ConnState> = socket.state
     /** A string resource id (0 = nothing wrong). */
     val socketError: StateFlow<Int> = socket.lastError
-    val liveFrames get() = socket.frames
+    // UI sees the closing frame only after its authoritative rows reach Room.
+    private val processedFrames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 64)
+    val liveFrames = processedFrames.asSharedFlow()
 
     private val _active = MutableStateFlow("default")
     val activeSession: StateFlow<String> = _active
 
     init {
         scope.launch {
-            socket.frames.collect { onFrame(it) }
+            socket.frames.collect {
+                val frame = try {
+                    onFrame(it)
+                    it
+                } catch (err: CancellationException) {
+                    throw err
+                } catch (_: Exception) {
+                    // Keep consuming frames and allow the recovery read at close.
+                    it.copy(turnsSynced = false)
+                }
+                processedFrames.emit(frame)
+            }
         }
         scope.launch {
+            var connectedBefore = false
             var wasOnline = false
             socket.state.collect { st ->
                 if (st == ConnState.ONLINE) {
-                    if (wasOnline) {
+                    if (connectedBefore && !wasOnline) {
                         // reconnect: pull whatever the agent finished while we
                         // were away, then resend anything still queued.
                         refreshLatest(_active.value)
@@ -67,8 +84,9 @@ class ChatRepository(
                     // nothing.
                     syncSessions()
                     wasOnline = true
+                    connectedBefore = true
                     flushPending()
-                } else if (st == ConnState.OFFLINE) {
+                } else {
                     wasOnline = false
                 }
             }
@@ -155,15 +173,8 @@ class ChatRepository(
             )
         }
         db.sessions().clearUnread(sid)
-        val localMax = db.messages().maxSeq(sid)
-        // Older page first (keeps the whole thread), then the newest rows.
-        val min = db.messages().minSeq(sid)
-        if (db.messages().count(sid) == 0 || min > 1) {
-            history.turns(sid, beforeSeq = 0, limit = 200).takeIf { it.isNotEmpty() }?.let { rows ->
-                reconcile(sid, rows)
-            }
-        }
-        refreshLatest(sid, skipAtOrBelow = localMax)
+        // One newest-page read on open; loadOlder backfills the rest on demand.
+        refreshLatest(sid)
         socket.switchSession(sid)
         socket.open(sid, db.messages().maxSeq(sid))
         flushPending()
@@ -192,7 +203,7 @@ class ChatRepository(
         // Prefer a session that already has messages, else start a new chat.
         val rows = try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }
         val withContent = rows.firstOrNull { db.messages().count(it.id) > 0 } ?: rows.firstOrNull()
-        val id = withContent?.id ?: createSession("")
+        val id = withContent?.id ?: return createSession("")
         openSession(id)
         return id
     }
@@ -267,7 +278,8 @@ class ChatRepository(
     /** Removes one chat's stored route; the daemon then uses the agent defaults. */
     suspend fun clearSessionModel(sid: String): Boolean = history.clearSessionModel(sid)
 
-    suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {        val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
+    suspend fun refreshLatest(sid: String) {
+        val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
         if (rows.isEmpty()) return
         // The whole page goes to reconcile, not just the rows past the local
         // max: a row the old filter hid is healed instead of lost.
@@ -439,7 +451,7 @@ class ChatRepository(
                     continue
                 }
                 if (existing.role == e.role && existing.text == e.text) {
-                    if (existing.pending || existing.createdAt != e.createdAt) {
+                    if (existing != e.copy(clientMsgId = existing.clientMsgId, thinkingMs = existing.thinkingMs)) {
                         // D1 knows nothing of the thinking time the phone
                         // measured, so adopting its row must not wipe it.
                         db.messages().upsert(e.copy(pending = false, clientMsgId = existing.clientMsgId, thinkingMs = existing.thinkingMs))
@@ -455,16 +467,35 @@ class ChatRepository(
         }
     }
 
-    /**
-     * The local table is a mirror of D1, so a live frame must never become a row
-     * here: a streamed answer arrives as dozens of delta frames and would show
-     * up as dozens of bubbles, and the daemon's own mirror would then duplicate
-     * every one of them. Only the ack marker matters locally; the thread is
-     * rebuilt from D1 when the turn closes.
-     */
+    /** Deltas remain UI-only. Committed rows arrive with real D1 seqs at close. */
     private suspend fun onFrame(f: AiOutput) {
         if (f.kind == "ack" && f.clientMsgId.isNotBlank()) {
             db.messages().markAcked(f.clientMsgId)
+        }
+        if (f.sessionId.isBlank() || f.turns.isEmpty()) return
+        val sid = f.sessionId
+        val entities = f.turns.filter { it.seq > 0 }.map { it.toEntity(sid) }
+        if (entities.isEmpty()) return
+        db.withTransaction {
+            val local = db.messages().allNow(sid)
+            val merged = mergeCommittedTurns(local, entities, f.clientMsgId)
+            val keptSeqs = merged.map { it.seq }.toSet()
+            for (row in local) {
+                if (row.seq !in keptSeqs) db.messages().deleteOne(sid, row.seq)
+            }
+            val localBySeq = local.associateBy { it.seq }
+            for (row in merged) {
+                if (localBySeq[row.seq] != row) db.messages().upsert(row)
+            }
+            val last = entities.lastOrNull { !it.role.startsWith("tool") } ?: entities.last()
+            val cur = db.sessions().get(sid) ?: SessionEntity(id = sid)
+            db.sessions().upsert(cur.copy(
+                title = cur.title.takeIf { it.isNotBlank() && it != sid }
+                    ?: entities.firstOrNull { it.role == "user" }?.text?.take(42) ?: sid,
+                model = entities.lastOrNull { it.model.isNotBlank() }?.model ?: cur.model,
+                lastSnippet = last.text.take(120),
+                lastAt = last.createdAt,
+            ))
         }
     }
 

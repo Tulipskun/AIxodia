@@ -215,7 +215,8 @@ fun ChatScreen(
     val daemonStartedAt by vm.daemonStartedAt.collectAsStateWithLifecycle()
     val liveText by vm.liveText.collectAsStateWithLifecycle()
     val liveBlocks by vm.liveBlocks.collectAsStateWithLifecycle()
-    val statusTrail by vm.statusLog.collectAsStateWithLifecycle()
+    val liveReasoning by vm.liveReasoning.collectAsStateWithLifecycle()
+    val reasoningActive by vm.reasoningActive.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
@@ -554,7 +555,7 @@ fun ChatScreen(
                             // rather than stranding it behind a dead send.
                             // Until then the send arrow sits disabled, which is
                             // the harness's sending state.
-                            activityStarted = statusTrail.isNotEmpty() ||
+                            activityStarted = status.isNotEmpty() || liveReasoning.isNotEmpty() ||
                                 liveText.isNotBlank() ||
                                 liveBlocks.isNotEmpty() ||
                                 stats.elapsedMs(nowMs) > 3_000L,
@@ -640,17 +641,14 @@ fun ChatScreen(
                         }
                     }
                 }
-                // The thinking card is the turn's first face, and every request
-                // wears it: the daemon reports no thinking of its own, so
-                // waiting for its report would leave most requests with no
-                // thinking at all. It stays until the first word or tool call
-                // replaces it.
-                val thinking = busy && liveText.isBlank() && liveBlocks.isEmpty()
+                // Every request shows Thinking; its body contains only actual
+                // reasoning and also appears during reasoning between tools.
+                val thinking = busy && (reasoningActive || (liveText.isBlank() && liveBlocks.isEmpty()))
                 if (thinking) {
                     item(key = "live-thinking") {
                         ThinkingLive(
                             elapsedMs = stats.elapsedMs(nowMs),
-                            trail = statusTrail,
+                            reasoning = liveReasoning,
                         )
                     }
                 }
