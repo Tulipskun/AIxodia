@@ -591,54 +591,59 @@ fun LiveAnswer(text: String) {
 private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
     var open by remember { mutableStateOf(false) }
     val canOpen = reasoning.isNotBlank()
+    val scheme = MaterialTheme.colorScheme
+    // The same card a tool step wears: a small radius on both the card and its
+    // recess, full width, so thinking reads as part of the turn's record rather
+    // than as a stray rounded chip in the thread.
+    val shape = MaterialTheme.shapes.small
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = CircleShape,
-        modifier = Modifier.padding(vertical = 4.dp),
+        color = scheme.surfaceContainerHigh,
+        shape = shape,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .fillMaxWidth()
+            .clip(shape)
+            .then(
+                if (canOpen) {
+                    Modifier.combinedClickable(
+                        onClick = { open = !open },
+                        onLongClick = null,
+                        onLongClickLabel = null,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
     ) {
-        Column {
-            Row(
-                Modifier
-                    .padding(start = 12.dp, end = 14.dp, top = 6.dp, bottom = 6.dp)
-                    .then(
-                        if (canOpen) {
-                            Modifier.combinedClickable(
-                                onClick = { open = !open },
-                                onLongClick = null,
-                                onLongClickLabel = null,
-                            )
-                        } else {
-                            Modifier
-                        },
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Default.AutoAwesome,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(13.dp),
+                    tint = scheme.primary,
+                    modifier = Modifier.size(14.dp),
                 )
-                Spacer(Modifier.size(6.dp))
+                Spacer(Modifier.size(8.dp))
                 Text(
                     if (thinkingMs > 0L) {
                         stringResource(R.string.thought_for, formatSeconds(thinkingMs))
                     } else {
                         stringResource(R.string.thought)
                     },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurfaceVariant,
                     maxLines = 1,
+                    modifier = Modifier.weight(1f),
                 )
                 if (canOpen) {
-                    Spacer(Modifier.size(4.dp))
+                    Spacer(Modifier.size(6.dp))
                     Icon(
                         if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = stringResource(
                             if (open) R.string.collapse else R.string.expand,
                         ),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp),
+                        tint = scheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             }
@@ -652,17 +657,17 @@ private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
                 // Capped in height with its own scroll, so a long chain of
                 // thought does not push the answer off the screen.
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+                    color = scheme.surfaceContainerLowest,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 ) {
                     Text(
                         reasoning,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = scheme.onSurfaceVariant,
                         modifier = Modifier
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
                             .heightIn(max = 320.dp)
                             .verticalScroll(rememberScrollState()),
                     )
