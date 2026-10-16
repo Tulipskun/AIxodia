@@ -126,7 +126,7 @@ import com.tulipskun.aixodia.ui.display.SubAgentPanel
 import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.ToolStepCard
-import com.tulipskun.aixodia.ui.display.TurnStatsLine
+import com.tulipskun.aixodia.ui.display.turnFooterIds
 import com.tulipskun.aixodia.ui.sessions.ChatActionsSheet
 import com.tulipskun.aixodia.ui.sessions.DeleteChatDialog
 import com.tulipskun.aixodia.ui.sessions.RenameChatDialog
@@ -222,6 +222,7 @@ fun ChatScreen(
     // The footer format follows the provider, because what is worth printing
     // differs: Anthropic has no reasoning count to show.
     val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initialValue = TokenField.DEFAULT)
+    val footerIds = remember(messages) { turnFooterIds(messages) }
     val providers by vm.providers.collectAsStateWithLifecycle()
     val providerStatuses by vm.providerStatuses.collectAsStateWithLifecycle()
     val pickedProvider by vm.selectedProvider.collectAsStateWithLifecycle()
@@ -282,11 +283,6 @@ fun ChatScreen(
             tick = Tick.now()
             kotlinx.coroutines.delay(200)
         }
-    }
-    val routeLabel = when {
-        pickedProvider.isBlank() -> ""
-        pickedModel.isBlank() -> pickedProvider
-        else -> "$pickedProvider · $pickedModel"
     }
     // What the model button under the field reads: the model alone. The footer
     // carries the whole route because it belongs to one turn, but a button
@@ -609,7 +605,7 @@ fun ChatScreen(
                             clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
                             toast = copiedText
                         },
-                        onRetry = { vm.retryLast() },
+                        showFooter = m.id in footerIds,
                         tokenFields = tokenFields,
                         copyLabel = copyHintText,
                     )
@@ -667,20 +663,6 @@ fun ChatScreen(
                 if (liveText.isNotBlank()) {
                     item(key = "live-answer") {
                         LiveAnswer(liveText)
-                    }
-                }
-                // One live turn-meta line for the whole live turn — thinking,
-                // tools and words alike — with no wall clock: a turn in flight
-                // has no landing time yet.
-                if (busy && (liveText.isNotBlank() || liveBlocks.isNotEmpty())) {
-                    item(key = "live-meta") {
-                        TurnStatsLine(
-                            stats = stats,
-                            model = routeLabel,
-                            nowMs = nowMs,
-                            live = true,
-                            fields = tokenFields,
-                        )
                     }
                 }
             }

@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -80,7 +79,6 @@ import com.tulipskun.aixodia.data.model.freshInputTokens
 import com.tulipskun.aixodia.data.model.totalInputTokens
 import com.tulipskun.aixodia.ui.chat.MarkdownText
 import com.tulipskun.aixodia.ui.chat.SubAgentActivity
-import com.tulipskun.aixodia.ui.chat.TurnStats
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -131,7 +129,7 @@ fun MessageBlock(
     m: ChatMessage,
     startsAfterUser: Boolean = false,
     onCopy: () -> Unit = {},
-    onRetry: (() -> Unit)? = null,
+    showFooter: Boolean = false,
     tokenFields: List<TokenField> = TokenField.DEFAULT,
     copyLabel: String = "",
 ) {
@@ -312,8 +310,8 @@ fun MessageBlock(
                 )
             }
         }
-        if (!mine && !isTool) {
-            MessageFooter(m, tokenFields, onCopy = onCopy, onRetry = onRetry, copyLabel = copyLabel)
+        if (showFooter && !mine && !isTool) {
+            MessageFooter(m, tokenFields)
         }
     }
 }
@@ -330,16 +328,10 @@ fun MessageBlock(
 fun MessageFooter(
     m: ChatMessage,
     fields: List<TokenField> = TokenField.DEFAULT,
-    onCopy: (() -> Unit)? = null,
-    onRetry: (() -> Unit)? = null,
-    copyLabel: String = "",
 ) {
     FooterLine(
         m.toTokenCounts(),
         fields,
-        onCopy = onCopy,
-        onRetry = onRetry,
-        copyLabel = copyLabel,
     )
 }
 
@@ -357,12 +349,7 @@ fun MessageFooter(
 fun FooterLine(
     counts: TokenCounts,
     fields: List<TokenField> = TokenField.DEFAULT,
-    approximate: Boolean = false,
     modifier: Modifier = Modifier,
-    /** Offered after the clock, where the harness puts copy and retry. Null hides. */
-    onCopy: (() -> Unit)? = null,
-    onRetry: (() -> Unit)? = null,
-    copyLabel: String = "",
 ) {
     val entries = counts.entries(fields)
     val clock = counts.clockIfShown(fields)
@@ -424,32 +411,10 @@ fun FooterLine(
         if (clock.isNotBlank()) {
             Spacer(Modifier.width(12.dp))
             Text(
-                clock + if (approximate) "\u2248" else "",
+                clock,
                 style = clockStyle(),
                 color = clockTint(),
                 maxLines = 1,
-            )
-        }
-        // What the turn left behind: copy takes its words, retry runs it again.
-        // Both sit after the clock because they act on the finished turn, not
-        // on any one figure in it, and both stay quiet — the same grey as the
-        // clock — until they are wanted.
-        if (onCopy != null) {
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                Icons.Default.ContentCopy,
-                contentDescription = copyLabel.ifBlank { null },
-                tint = clockTint(),
-                modifier = Modifier.size(13.dp).combinedClickable(onClick = onCopy),
-            )
-        }
-        if (onRetry != null) {
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                Icons.Default.Refresh,
-                contentDescription = stringResource(R.string.retry_turn),
-                tint = clockTint(),
-                modifier = Modifier.size(14.dp).combinedClickable(onClick = onRetry),
             )
         }
     }
@@ -550,9 +515,8 @@ fun AgentBadge(m: ChatMessage) {
 
 /**
  * The answer while it is still streaming: the words so far and the block
- * cursor where the next one lands. No header — the thinking card above already
- * said whose turn this is — and no footer here either: the one live turn-meta
- * line under the whole live turn covers thinking, tools and words alike.
+ * cursor where the next one lands. The footer is added to the stored closing
+ * answer after the tool loop exits, using the engine's aggregate statistics.
  */
 @Composable
 fun LiveAnswer(text: String) {
@@ -926,41 +890,6 @@ private fun CommandLine(command: String) {
                 .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulse)),
         )
     }
-}
-
-/**
- * The same footer, while the answer is still streaming. It reuses the format
- * rather than repeating it, so a reader who learned the settled line has not
- * learned a second language when the turn is still running. The ≈ marks the
- * counts that are estimates until the provider reports the real ones.
- */
-@Composable
-fun TurnStatsLine(
-    stats: TurnStats,
-    model: String,
-    nowMs: Long,
-    live: Boolean,
-    wallClockMs: Long = System.currentTimeMillis(),
-    fields: List<TokenField> = TokenField.DEFAULT,
-) {
-    if (stats.startedAtMs == 0L && model.isBlank()) return
-    val tokens = stats.outputTokensNow()
-    val counts = TokenCounts(
-        cacheRead = stats.cacheRead,
-        cacheWrite = stats.cacheWrite,
-        reasoning = stats.reasoningTokens,
-        output = (tokens - stats.reasoningTokens).coerceAtLeast(0),
-        ratePerSecond = stats.tokensPerSecond(nowMs),
-        millis = stats.elapsedMs(nowMs),
-        model = stats.model.ifBlank { model },
-        // A turn in flight has no landing time yet, so the live line ends at
-        // its elapsed time. The settled footer gains the wall clock instead.
-        clock = if (live) "" else formatClock(wallClockMs),
-    )
-    if (counts.visible(fields).isEmpty()) return
-    // The same line, marked with the ≈ that says the counts are estimates until
-    // the provider reports the real ones.
-    FooterLine(counts = counts, fields = fields, approximate = !stats.exact)
 }
 
 /**
