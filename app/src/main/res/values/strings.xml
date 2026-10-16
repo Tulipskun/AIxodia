@@ -76,6 +76,7 @@
          expanded card every request shows, and the thought pill is what a
          finished turn keeps. English, like the harness draws them. -->
     <string name="sending">Sending…</string>
+    <string name="sending_request">Sending request to provider…</string>
     <string name="thinking_title">Thinking…</string>
     <string name="thought_for">Thought for %1$s</string>
     <string name="thought">Thought</string>

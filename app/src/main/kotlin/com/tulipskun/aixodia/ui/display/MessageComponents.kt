@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.CircularProgressIndicator
@@ -168,6 +169,12 @@ fun MessageBlock(
             }
         }
         if (isTool) {
+            // The thinking that led to this call belongs to this request alone.
+            // It rides on the call row, so it is shown above the card rather than
+            // merged into the answer's one pill at the end of the turn.
+            if (m.reasoningContent.isNotBlank()) {
+                ThoughtPill(m.thinkingMs, m.reasoningContent)
+            }
             // The card names the tool and what it was asked to do; the call's own
             // output folds away underneath. A tool block starts collapsed: a long
             // result is the one thing in a thread that is noise until it is asked
@@ -176,7 +183,6 @@ fun MessageBlock(
                 name = m.toolName.ifBlank { if (m.role == "tool_result") "result" else "call" },
                 args = m.toolArgs,
                 body = body,
-                durationMs = m.durationMs,
                 // A merged step is the result answering the call, so the step is
                 // over; a call with no result yet is the one still running.
                 done = m.role == "tool_result",
@@ -271,12 +277,12 @@ fun MessageBlock(
                 )
             }
         } else {
-            // Every request thought first, so every answer that kept anything
-            // of it wears the pill above its words: the phone's own
-            // send-to-first-token, and the model's own reasoning where the
-            // daemon stored any. Turns from before either existed show nothing
-            // rather than a figure that was never measured.
-            if (m.thinkingMs > 0L || m.reasoningContent.isNotBlank()) {
+            // A finished request keeps its thinking only where the model
+            // actually reasoned. A send-to-first-token figure with nothing
+            // behind it is not a thought, so it earns no pill: "Thought for 2s"
+            // over an answer the model never thought about is the same lie a
+            // chevron onto an empty body would be.
+            if (m.reasoningContent.isNotBlank()) {
                 ThoughtPill(m.thinkingMs, m.reasoningContent)
             }
             // An answer is the page, not a bubble: the words sit straight on the
@@ -759,6 +765,88 @@ fun ThinkingLive(
 }
 
 /**
+ * The wait before a request has said anything: the phone has handed the turn to
+ * the provider and is waiting for its first byte. The timer is time to first
+ * token — the only figure there is until the model speaks — and it is a state of
+ * its own, not a thought, so it wears no "Thought" and no reasoning body.
+ */
+@Composable
+fun SendingLive(elapsedMs: Long, modifier: Modifier = Modifier) {
+    val pulse by rememberInfiniteTransition(label = "sending-live").animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "sending-live-alpha",
+    )
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.Send,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = pulse),
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                stringResource(R.string.sending_request),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                formatSeconds(elapsedMs),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * Where one provider request is in the live thread: waiting for its first byte,
+ * thinking with reasoning streaming, or done. Every request of a turn is one of
+ * these, so a turn with three tool rounds wears three separate blocks in the
+ * order they happened, rather than one block that keeps sinking to the bottom.
+ */
+enum class ThinkPhase { WAITING, THINKING, DONE }
+
+/**
+ * One request's thinking, as the harness draws it. The wait and the thought are
+ * the same request seen at two moments, so they share a card: "Sending request
+ * to provider…" until the first byte, then "Thinking…" with whatever reasoning
+ * came, then — only if there was reasoning — the finished "Thought for …" pill.
+ */
+@Composable
+fun LiveThink(
+    phase: ThinkPhase,
+    reasoning: String,
+    elapsedMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    when (phase) {
+        ThinkPhase.WAITING -> SendingLive(elapsedMs, modifier)
+        ThinkPhase.THINKING -> ThinkingLive(elapsedMs, reasoning, modifier)
+        // Done with nothing thought is not a thought: draw nothing rather than a
+        // pill over an empty body.
+        ThinkPhase.DONE -> if (reasoning.isNotBlank()) ThoughtPill(elapsedMs, reasoning)
+    }
+}
+
+/**
  * The tool calls of the turn in flight, as one compact row each. A long
  * sentence per step ("— เสร็จแล้ว", "เครื่องมือ 3") is noise: the colour says
  * whether it is running, done or failed, and the name plus its arguments say
@@ -782,7 +870,6 @@ fun ToolStepCard(step: ToolStep, nowMs: Long = 0L) {
         name = step.name,
         args = step.args,
         body = step.result,
-        durationMs = step.durationMs,
         done = step.done,
         failed = step.isError,
         running = running,
@@ -1002,7 +1089,6 @@ fun ToolCallCard(
     name: String,
     args: String,
     body: String,
-    durationMs: Long,
     done: Boolean,
     failed: Boolean,
     /** Left null where there is nothing to copy yet, e.g. a step in flight. */
@@ -1099,10 +1185,15 @@ fun ToolCallCard(
                         modifier = Modifier.size(12.dp),
                     )
                 }
-                if (durationMs > 0L || running) {
+                // The clock is the step's own while it works and is gone the
+                // moment it is done: a finished step is a line in a record, and
+                // the record has no running clock. The result below says it
+                // finished; a number left behind would only be read as a promise
+                // that the step is still going.
+                if (running) {
                     Spacer(Modifier.size(6.dp))
                     Text(
-                        formatSeconds(if (running) runningMs else durationMs),
+                        formatSeconds(runningMs),
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = scheme.onSurfaceVariant,

@@ -116,13 +116,14 @@ import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
 import com.tulipskun.aixodia.ui.display.LiveAnswer
+import com.tulipskun.aixodia.ui.display.LiveThink
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SessionStrip
 import com.tulipskun.aixodia.ui.display.sessionTotals
-import com.tulipskun.aixodia.ui.display.ThinkingLive
 import com.tulipskun.aixodia.ui.display.SetupNeeded
 import com.tulipskun.aixodia.ui.display.SubAgentPanel
+import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.ToolStepCard
 import com.tulipskun.aixodia.ui.display.TurnStatsLine
@@ -216,7 +217,6 @@ fun ChatScreen(
     val liveText by vm.liveText.collectAsStateWithLifecycle()
     val liveBlocks by vm.liveBlocks.collectAsStateWithLifecycle()
     val liveReasoning by vm.liveReasoning.collectAsStateWithLifecycle()
-    val reasoningActive by vm.reasoningActive.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
@@ -555,9 +555,12 @@ fun ChatScreen(
                             // rather than stranding it behind a dead send.
                             // Until then the send arrow sits disabled, which is
                             // the harness's sending state.
+                            // The request's own wait block is that sending
+                            // state, not something said back, so it does not
+                            // count here.
                             activityStarted = status.isNotEmpty() || liveReasoning.isNotEmpty() ||
                                 liveText.isNotBlank() ||
-                                liveBlocks.isNotEmpty() ||
+                                liveBlocks.any { it !is LiveBlock.Think } ||
                                 stats.elapsedMs(nowMs) > 3_000L,
                             onSend = { vm.send(draft); draft = "" },
                             onStop = { vm.stop() },
@@ -639,17 +642,24 @@ fun ChatScreen(
                         is LiveBlock.Act -> item(key = "live-act-$index") {
                             ToolStepCard(block.step, nowMs)
                         }
-                    }
-                }
-                // Every request shows Thinking; its body contains only actual
-                // reasoning and also appears during reasoning between tools.
-                val thinking = busy && (reasoningActive || (liveText.isBlank() && liveBlocks.isEmpty()))
-                if (thinking) {
-                    item(key = "live-thinking") {
-                        ThinkingLive(
-                            elapsedMs = stats.elapsedMs(nowMs),
-                            reasoning = liveReasoning,
-                        )
+                        // Each request's own wait-and-thought, in the place it
+                        // happened: a "Sending request to provider…" that becomes
+                        // "Thinking…" and then a finished "Thought for …", so a
+                        // turn with three tool rounds reads as three requests
+                        // rather than one merged block at the bottom.
+                        is LiveBlock.Think -> item(key = "live-think-$index") {
+                            val elapsed = when (block.phase) {
+                                ThinkPhase.DONE ->
+                                    (block.endedAtMs - block.startedAtMs).coerceAtLeast(0L)
+                                else ->
+                                    (nowMs - block.startedAtMs).coerceAtLeast(0L)
+                            }
+                            LiveThink(
+                                phase = block.phase,
+                                reasoning = block.reasoning,
+                                elapsedMs = elapsed,
+                            )
+                        }
                     }
                 }
                 // The answer being streamed right now. It is not in the
@@ -662,7 +672,7 @@ fun ChatScreen(
                 // One live turn-meta line for the whole live turn — thinking,
                 // tools and words alike — with no wall clock: a turn in flight
                 // has no landing time yet.
-                if (busy && (thinking || liveText.isNotBlank() || liveBlocks.isNotEmpty())) {
+                if (busy && (liveText.isNotBlank() || liveBlocks.isNotEmpty())) {
                     item(key = "live-meta") {
                         TurnStatsLine(
                             stats = stats,

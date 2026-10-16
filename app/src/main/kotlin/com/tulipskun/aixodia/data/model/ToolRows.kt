@@ -8,7 +8,17 @@ import com.squareup.moshi.Moshi
  * the tool name and the arguments. Any other row, or JSON we cannot read, is
  * shown unchanged so nothing is lost.
  */
-data class ToolRowView(val text: String, val toolName: String, val toolArgs: String)
+data class ToolRowView(
+    val text: String,
+    val toolName: String,
+    val toolArgs: String,
+    /**
+     * What the model thought before this call, as the daemon stored it inside
+     * the call row's JSON. It belongs to this one request, not the turn's final
+     * answer, so it is carried through the merge and shown above the card.
+     */
+    val reasoning: String = "",
+)
 
 private val mapAdapter by lazy { Moshi.Builder().build().adapter(Map::class.java) }
 
@@ -19,7 +29,12 @@ fun toolRowView(role: String, raw: String): ToolRowView {
     val name = map["name"] as? String ?: ""
     val content = map["content"] as? String ?: ""
     return if (role == "tool_call") {
-        ToolRowView(text = content, toolName = name, toolArgs = humanToolArgs(map["arguments"] as? String ?: ""))
+        ToolRowView(
+            text = content,
+            toolName = name,
+            toolArgs = humanToolArgs(map["arguments"] as? String ?: ""),
+            reasoning = map["reasoning"] as? String ?: "",
+        )
     } else {
         ToolRowView(text = content, toolName = name, toolArgs = "")
     }
@@ -75,6 +90,10 @@ fun mergeToolPairs(messages: List<ChatMessage>): List<ChatMessage> {
                         toolArgs = call.toolArgs,
                         text = body,
                         model = m.model.ifBlank { call.model },
+                        // The round's thinking rides on the call row; the result
+                        // row has none. Carry it so each tool step keeps its own
+                        // "Thought" above the card instead of losing it here.
+                        reasoningContent = call.reasoningContent,
                     )
                 } else {
                     out += m

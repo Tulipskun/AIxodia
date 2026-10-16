@@ -527,7 +527,9 @@ class ChatRepository(
         // turn runs and stamps it afterwards, so a pulled row always starts
         // at zero here and the mirror keeps the local figure.
         thinkingMs = 0,
-        reasoningContent = reasoningContent,
+        // The final answer's reasoning arrives in the column; a tool round's
+        // reasoning rides inside the call row's JSON, so fall back to it.
+        reasoningContent = view.reasoning.ifBlank { reasoningContent },
         )
     }
 

@@ -11,6 +11,7 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.ChatRepository
+import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,6 +102,19 @@ class ChatViewModel(
         data class Say(val text: String, val atMs: Long) : LiveBlock
         /** A tool step: the call, then its result when it lands. */
         data class Act(val step: ToolStep) : LiveBlock
+        /**
+         * One provider request's wait and thought, in the live thread: the
+         * waiting-for-first-byte phase, then the reasoning it exposed. A turn
+         * with several tool rounds therefore wears several of these, in the
+         * order they happened, instead of one block that keeps sinking to the
+         * bottom of the thread.
+         */
+        data class Think(
+            val phase: ThinkPhase,
+            val reasoning: String = "",
+            val startedAtMs: Long = 0L,
+            val endedAtMs: Long = 0L,
+        ) : LiveBlock
     }
 
     /**
@@ -118,6 +132,38 @@ class ChatViewModel(
         val kept = (out[at] as LiveBlock.Act).step
         out[at] = LiveBlock.Act(step.copy(startedAtMs = kept.startedAtMs.takeIf { it > 0L } ?: step.startedAtMs))
         return out
+    }
+
+    /**
+     * Opens a new provider request in the live thread: the block that counts the
+     * wait for its first byte, the request's time-to-first-token. Every request
+     * of a turn opens one of these, so a turn that runs tools shows a fresh
+     * "Sending request to provider…" after each round instead of one block that
+     * keeps sinking to the bottom.
+     */
+    private fun beginRequest(now: Long = SystemClock.elapsedRealtime()) {
+        liveBlocks.value = liveBlocks.value + LiveBlock.Think(phase = ThinkPhase.WAITING, startedAtMs = now)
+    }
+
+    /**
+     * The open request has answered: it produced words or a tool call, so it is
+     * no longer waiting or thinking. A request that reasoned keeps its block,
+     * closed and showing what it thought; one that reasoned nothing is dropped
+     * rather than left as a "Thought" over an empty body.
+     */
+    private fun settleOpenRequest(now: Long = SystemClock.elapsedRealtime()) {
+        val blocks = liveBlocks.value
+        val at = blocks.indexOfLast { it is LiveBlock.Think }
+        if (at < 0) return
+        val think = blocks[at] as LiveBlock.Think
+        if (think.phase == ThinkPhase.DONE) return
+        val out = blocks.toMutableList()
+        if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
+            out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
+        } else {
+            out.removeAt(at)
+        }
+        liveBlocks.value = out
     }
 
     /** The chat currently on screen; set by ensureSession, like a chat app. */
@@ -291,6 +337,8 @@ class ChatViewModel(
             return
         }
         liveAgent.value = agent.ifEmpty { "main" }
+        // The request has spoken: it is no longer waiting or thinking.
+        settleOpenRequest()
         liveText.value += chunk
         liveChars += chunk.length
         // The clock for the rate starts here, not when the question was sent.
@@ -335,6 +383,9 @@ class ChatViewModel(
         // Replace whatever streamed in with the daemon's own copy: it is the one
         // that also lands in D1.
         answerSettled = true
+        // A turn that never streamed still answered: close the open request so
+        // its wait does not outlive the answer.
+        settleOpenRequest()
         liveText.value = text
         liveThinkingMs.value = 0L
         reasoningActive.value = false
@@ -401,12 +452,36 @@ class ChatViewModel(
         }
         when (f.stage) {
             "reasoning" -> {
-                liveReasoning.value = (liveReasoning.value + f.text).takeLast(32 * 1024)
+                val chunk = f.text
+                liveReasoning.value = (liveReasoning.value + chunk).takeLast(32 * 1024)
                 reasoningActive.value = true
+                // The reasoning belongs to the request that is open now, not to
+                // the turn as a whole: it grows that request's own block, and a
+                // new request opens a new block.
+                val now = SystemClock.elapsedRealtime()
+                val blocks = liveBlocks.value
+                val at = blocks.indexOfLast { it is LiveBlock.Think }
+                liveBlocks.value = if (at >= 0) {
+                    val think = blocks[at] as LiveBlock.Think
+                    val out = blocks.toMutableList()
+                    out[at] = think.copy(
+                        phase = ThinkPhase.THINKING,
+                        reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
+                        startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
+                    )
+                    out
+                } else {
+                    blocks + LiveBlock.Think(
+                        phase = ThinkPhase.THINKING,
+                        reasoning = chunk.takeLast(32 * 1024),
+                        startedAtMs = now,
+                    )
+                }
             }
             "tool_call", "tool_running" -> {
                 reasoningActive.value = false
                 val name = f.toolCall?.name ?: return
+                settleOpenRequest()
                 liveThinkingMs.value = 0L
                 // A turn that opens with tools never streams a word first, so
                 // the first call is where its thinking ends.
@@ -467,6 +542,10 @@ class ChatViewModel(
                 }
                 status.value = if (f.toolResult?.isError == true) "$name ล้มเหลว" else "$name เสร็จแล้ว"
                 traceNote(status.value)
+                // The result goes back to the provider and the next request
+                // starts: a new "Sending request to provider…" for the next
+                // round, so each request's wait and thought is its own.
+                beginRequest()
             }
             "response_text" -> {
                 liveThinkingMs.value = f.reasoningMs
@@ -759,6 +838,10 @@ class ChatViewModel(
         reasoningActive.value = false
         pendingThinkingMs = 0L
         turnBaseSeq = -1L
+        // The first request of the turn is open from the moment the question
+        // leaves: this is the phone's time-to-first-token, drawn as the
+        // "Sending request to provider…" block until the first word or tool.
+        beginRequest()
         // The footer opens with this turn: which model answers, from when, and
         // nothing else yet. A chat that follows the agent's default says so —
         // printing whatever route happens to be current later would put another

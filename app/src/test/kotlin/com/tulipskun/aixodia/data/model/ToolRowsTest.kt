@@ -21,6 +21,20 @@ class ToolRowsTest {
     @Test fun ordinaryRowsAreUntouched() {
         assertEquals(ToolRowView("hi", "", ""), toolRowView("user", "hi"))
     }
+
+    @Test fun toolCallCarriesItsRoundsReasoning() {
+        val view = toolRowView(
+            "tool_call",
+            """{"id":"c1","name":"bash","arguments":"{}","content":"checking","reasoning":"weighed it first"}""",
+        )
+        assertEquals("weighed it first", view.reasoning)
+    }
+
+    @Test fun toolResultHasNoReasoning() {
+        // Reasoning rides on the call, never on the result that answers it.
+        val view = toolRowView("tool_result", """{"tool_call_id":"c1","name":"bash","content":"ok","reasoning":"x"}""")
+        assertEquals("", view.reasoning)
+    }
 }
 
 class ToolDisplayTest {
@@ -92,5 +106,22 @@ class ToolMergeTest {
         ))
         assertEquals(1, merged.size)
         assertEquals("Running it now.\n\nw1", merged[0].text)
+    }
+
+    @Test fun mergedStepKeepsTheCallsOwnReasoning() {
+        // The round's thinking rides on the call row; the result row has none.
+        // The merged step must carry it so the stored thread shows one thought
+        // block per request, above each tool card.
+        val call = ChatMessage(
+            id = "s:1", sessionId = "s", seq = 1, role = "tool_call", text = "",
+            createdAt = 1000, toolName = "bash", toolArgs = "pwd", reasoningContent = "thought hard",
+        )
+        val result = ChatMessage(
+            id = "s:2", sessionId = "s", seq = 2, role = "tool_result", text = "w1",
+            createdAt = 2000, toolName = "bash",
+        )
+        val merged = mergeToolPairs(listOf(call, result))
+        assertEquals(1, merged.size)
+        assertEquals("thought hard", merged[0].reasoningContent)
     }
 }
