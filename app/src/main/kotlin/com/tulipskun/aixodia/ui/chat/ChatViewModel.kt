@@ -142,6 +142,14 @@ class ChatViewModel(
      * keeps sinking to the bottom.
      */
     private fun beginRequest(now: Long = SystemClock.elapsedRealtime()) {
+        // The next request only starts once every tool of the round has
+        // finished: a result that lands while a parallel call is still running
+        // must not open the next request early.
+        if (liveBlocks.value.any { it is LiveBlock.Act && !it.step.done }) return
+        // One open wait per request: parallel results that all arrive late must
+        // not stack a second "Sending request to provider…" onto the same one.
+        val last = liveBlocks.value.lastOrNull()
+        if (last is LiveBlock.Think && last.phase == ThinkPhase.WAITING) return
         liveBlocks.value = liveBlocks.value + LiveBlock.Think(phase = ThinkPhase.WAITING, startedAtMs = now)
     }
 
