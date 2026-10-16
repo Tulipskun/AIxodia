@@ -105,6 +105,7 @@ class ChatRepository(
                 model = it.model,
                 durationMs = it.durationMs,
                 generationMs = it.generationMs,
+                thinkingMs = it.thinkingMs,
             )
         }.let(::mergeToolPairs)
     }
@@ -265,8 +266,7 @@ class ChatRepository(
     /** Removes one chat's stored route; the daemon then uses the agent defaults. */
     suspend fun clearSessionModel(sid: String): Boolean = history.clearSessionModel(sid)
 
-    suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {
-        val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
+    suspend fun refreshLatest(sid: String, skipAtOrBelow: Long = 0) {        val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
         if (rows.isEmpty()) return
         // The whole page goes to reconcile, not just the rows past the local
         // max: a row the old filter hid is healed instead of lost.
@@ -280,6 +280,20 @@ class ChatRepository(
                 lastAt = if (last.createdAt > 0) last.createdAt * 1000 else System.currentTimeMillis(),
             )
         )
+    }
+
+    /** The highest stored seq, so a turn can stamp only the rows it created. */
+    suspend fun maxSeq(sid: String): Long = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
+
+    /**
+     * Records how long a finished turn thought before its first word. Only rows
+     * the turn itself created — past the seq the thread ended on when it was
+     * sent — and only answers that have no figure yet, so an old turn never
+     * borrows a new one's thinking time.
+     */
+    suspend fun stampThinkingMs(sid: String, afterSeq: Long, ms: Long) {
+        if (ms <= 0L) return
+        try { db.messages().stampThinking(sid, afterSeq, ms) } catch (_: Exception) { }
     }
 
     /**
@@ -413,7 +427,7 @@ class ChatRepository(
                     }
                 }
                 for (e in entities.sortedBy { it.seq }) {
-                    db.messages().upsert(e)
+                    db.messages().upsert(e.copy(thinkingMs = localBySeq[e.seq]?.thinkingMs ?: 0))
                 }
                 return@withTransaction
             }
@@ -425,7 +439,9 @@ class ChatRepository(
                 }
                 if (existing.role == e.role && existing.text == e.text) {
                     if (existing.pending || existing.createdAt != e.createdAt) {
-                        db.messages().upsert(e.copy(pending = false, clientMsgId = existing.clientMsgId))
+                        // D1 knows nothing of the thinking time the phone
+                        // measured, so adopting its row must not wipe it.
+                        db.messages().upsert(e.copy(pending = false, clientMsgId = existing.clientMsgId, thinkingMs = existing.thinkingMs))
                     }
                     continue
                 }
@@ -475,6 +491,10 @@ class ChatRepository(
         model = model,
         durationMs = durationMs,
         generationMs = generationMs,
+        // D1 carries no thinking duration; the phone measures it while the
+        // turn runs and stamps it afterwards, so a pulled row always starts
+        // at zero here and the mirror keeps the local figure.
+        thinkingMs = 0,
         )
     }
 

@@ -115,17 +115,17 @@ import com.tulipskun.aixodia.ui.display.ComposerCommand
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
-import com.tulipskun.aixodia.ui.display.formatClock
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SessionStrip
 import com.tulipskun.aixodia.ui.display.sessionTotals
+import com.tulipskun.aixodia.ui.display.ThinkingLive
 import com.tulipskun.aixodia.ui.display.SetupNeeded
 import com.tulipskun.aixodia.ui.display.SubAgentPanel
-import com.tulipskun.aixodia.ui.display.ThinkingLine
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.ToolStepCard
+import com.tulipskun.aixodia.ui.display.TurnStatsLine
 import com.tulipskun.aixodia.ui.sessions.ChatActionsSheet
 import com.tulipskun.aixodia.ui.sessions.DeleteChatDialog
 import com.tulipskun.aixodia.ui.sessions.RenameChatDialog
@@ -214,9 +214,8 @@ fun ChatScreen(
     val errorCard by vm.errorCard.collectAsStateWithLifecycle()
     val daemonStartedAt by vm.daemonStartedAt.collectAsStateWithLifecycle()
     val liveText by vm.liveText.collectAsStateWithLifecycle()
-    val liveThinkingMs by vm.liveThinkingMs.collectAsStateWithLifecycle()
-    val liveThinkingAgent by vm.liveThinkingAgent.collectAsStateWithLifecycle()
     val liveBlocks by vm.liveBlocks.collectAsStateWithLifecycle()
+    val statusTrail by vm.statusLog.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
@@ -548,6 +547,17 @@ fun ChatScreen(
                             draft = draft,
                             onDraftChange = { draft = it },
                             busy = busy,
+                            // The stop square only replaces send once the turn
+                            // has said something back — a trace, a word, a tool
+                            // call — or three seconds pass with nothing, in
+                            // which case the turn is offered the stop anyway
+                            // rather than stranding it behind a dead send.
+                            // Until then the send arrow sits disabled, which is
+                            // the harness's sending state.
+                            activityStarted = statusTrail.isNotEmpty() ||
+                                liveText.isNotBlank() ||
+                                liveBlocks.isNotEmpty() ||
+                                stats.elapsedMs(nowMs) > 3_000L,
                             onSend = { vm.send(draft); draft = "" },
                             onStop = { vm.stop() },
                             commands = composerCommands,
@@ -595,6 +605,7 @@ fun ChatScreen(
                             clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
                             toast = copiedText
                         },
+                        onRetry = { vm.retryLast() },
                         tokenFields = tokenFields,
                         copyLabel = copyHintText,
                     )
@@ -619,34 +630,49 @@ fun ChatScreen(
                 liveBlocks.forEachIndexed { index, block ->
                     when (block) {
                         is LiveBlock.Say -> item(key = "live-say-$index") {
-                            Column(Modifier.fillMaxWidth()) {
-                                MarkdownText(
-                                    text = block.text,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                // The clock a stored answer carries under its own
-                                // text, so the block looks the same either way.
-                                Text(
-                                    formatClock(block.atMs),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 5.dp),
-                                )
-                            }
+                            MarkdownText(
+                                text = block.text,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
                         }
                         is LiveBlock.Act -> item(key = "live-act-$index") {
-                            ToolStepCard(block.step)
+                            ToolStepCard(block.step, nowMs)
                         }
+                    }
+                }
+                // The thinking card is the turn's first face, and every request
+                // wears it: the daemon reports no thinking of its own, so
+                // waiting for its report would leave most requests with no
+                // thinking at all. It stays until the first word or tool call
+                // replaces it.
+                val thinking = busy && liveText.isBlank() && liveBlocks.isEmpty()
+                if (thinking) {
+                    item(key = "live-thinking") {
+                        ThinkingLive(
+                            elapsedMs = stats.elapsedMs(nowMs),
+                            trail = statusTrail,
+                        )
                     }
                 }
                 // The answer being streamed right now. It is not in the
                 // database yet; the stored row replaces it when the turn ends.
-                if (liveThinkingMs > 0L && liveText.isBlank()) {
-                    item(key = "live-thinking") { ThinkingLine(liveThinkingMs, liveThinkingAgent) }
-                }
                 if (liveText.isNotBlank()) {
                     item(key = "live-answer") {
-                        LiveAnswer(liveText, stats, routeLabel, tick, tokenFields)
+                        LiveAnswer(liveText)
+                    }
+                }
+                // One live turn-meta line for the whole live turn — thinking,
+                // tools and words alike — with no wall clock: a turn in flight
+                // has no landing time yet.
+                if (busy && (thinking || liveText.isNotBlank() || liveBlocks.isNotEmpty())) {
+                    item(key = "live-meta") {
+                        TurnStatsLine(
+                            stats = stats,
+                            model = routeLabel,
+                            nowMs = nowMs,
+                            live = true,
+                            fields = tokenFields,
+                        )
                     }
                 }
             }

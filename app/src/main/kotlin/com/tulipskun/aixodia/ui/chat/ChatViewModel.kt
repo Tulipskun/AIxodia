@@ -113,7 +113,10 @@ class ChatViewModel(
         val at = blocks.indexOfFirst { it is LiveBlock.Act && it.step.key == step.key }
         if (at < 0) return blocks + LiveBlock.Act(step)
         val out = blocks.toMutableList()
-        out[at] = LiveBlock.Act(step)
+        // A call that reports again while it runs must not restart its own
+        // clock: the elapsed time is since the call started, not the report.
+        val kept = (out[at] as LiveBlock.Act).step
+        out[at] = LiveBlock.Act(step.copy(startedAtMs = kept.startedAtMs.takeIf { it > 0L } ?: step.startedAtMs))
         return out
     }
 
@@ -138,6 +141,13 @@ class ChatViewModel(
 
     /** Latest live status line for the thread ("sub: web_fetch …"). */
     val status = MutableStateFlow("")
+    /**
+     * What the turn has done so far, newest last: every trace stage in the
+     * words the thread would use. The thinking card shows the last few, so a
+     * request that never streams a word still narrates itself instead of
+     * sitting blank until the answer lands.
+     */
+    val statusLog = MutableStateFlow<List<String>>(emptyList())
     val busy = MutableStateFlow(false)
     val notice = MutableStateFlow("")
 
@@ -191,6 +201,14 @@ class ChatViewModel(
     private var answerSettled = false
     private var liveSubText = ""
     private var liveChars = 0
+    /**
+     * Where the thread ended when the turn was sent, so the thinking time it
+     * measured can be stamped on just the rows it created. -1 when no turn is
+     * in flight.
+     */
+    private var turnBaseSeq = -1L
+    /** Send-to-first-token of the running turn, stamped onto its rows at close. */
+    private var pendingThinkingMs = 0L
     val selectedProvider = MutableStateFlow("")
     val selectedModel = MutableStateFlow("")
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
@@ -245,9 +263,12 @@ class ChatViewModel(
                     "done" -> onTurnDone(f)
                     "error" -> {
                         status.value = ""
+                        statusLog.value = emptyList()
                         liveText.value = ""
                         liveBlocks.value = emptyList()
                         liveThinkingMs.value = 0L
+                        turnBaseSeq = -1L
+                        pendingThinkingMs = 0L
                         busy.value = false
                         // Raw daemon text is logged by the daemon; the user sees Thai.
                         // The error becomes a retryable card, not just a notice line.
@@ -280,7 +301,13 @@ class ChatViewModel(
         // The clock for the rate starts here, not when the question was sent.
         val stats = turnStats.value
         if (stats.firstTokenAtMs == 0L) {
-            turnStats.value = stats.copy(firstTokenAtMs = SystemClock.elapsedRealtime())
+            val now = SystemClock.elapsedRealtime()
+            turnStats.value = stats.copy(firstTokenAtMs = now)
+            // The thinking ends where the first word begins: send to first
+            // token is the figure the stored pill shows. The daemon reports no
+            // thinking duration of its own, so this local measurement is the
+            // only one there is.
+            pendingThinkingMs = (now - stats.startedAtMs).coerceAtLeast(0L)
         }
         estimateTokens()
         busy.value = true
@@ -355,6 +382,17 @@ class ChatViewModel(
         )
     }
 
+    /**
+     * Names what the turn is doing, in the words the thread would use. The
+     * status line shows the latest; the log keeps the trail the thinking card
+     * narrates from, capped so a long tool-heavy turn does not grow it forever.
+     */
+    private fun traceNote(line: String) {
+        if (line.isBlank()) return
+        status.value = line
+        statusLog.value = (statusLog.value + line).takeLast(6)
+    }
+
     private fun onTrace(f: AiOutput) {
         if (f.agent.isNotEmpty() && f.agent != "main") {
             val detail = when (f.stage) {
@@ -371,6 +409,14 @@ class ChatViewModel(
             "tool_call", "tool_running" -> {
                 val name = f.toolCall?.name ?: return
                 liveThinkingMs.value = 0L
+                // A turn that opens with tools never streams a word first, so
+                // the first call is where its thinking ends.
+                if (pendingThinkingMs == 0L) {
+                    val started = turnStats.value.startedAtMs
+                    if (started > 0L) {
+                        pendingThinkingMs = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
+                    }
+                }
                 // What came before this tool is its own turn, now and after.
                 val said = liveText.value.trim()
                 if (said.isNotEmpty()) {
@@ -383,8 +429,9 @@ class ChatViewModel(
                         name = name,
                         args = f.toolCall?.arguments.orEmpty(),
                         durationMs = f.toolDurationMs,
+                        startedAtMs = SystemClock.elapsedRealtime(),
                     ))
-                status.value = "$name…"
+                traceNote("$name…")
             }
             "tool_result" -> {
                 val name = f.toolResult?.name ?: f.toolCall?.name ?: return
@@ -420,20 +467,23 @@ class ChatViewModel(
                     }
                 }
                 status.value = if (f.toolResult?.isError == true) "$name ล้มเหลว" else "$name เสร็จแล้ว"
+                traceNote(status.value)
             }
             "response_text" -> {
                 liveThinkingMs.value = f.reasoningMs
                 liveThinkingAgent.value = f.agent.ifEmpty { "main" }
-                status.value = if (f.reasoningMs > 0) {
-                    "กำลังคิด · " + String.format(Locale.US, "%.1fs", f.reasoningMs / 1000.0)
-                } else {
-                    "กำลังคิด…"
-                }
+                traceNote(
+                    if (f.reasoningMs > 0) {
+                        "กำลังคิด · " + String.format(Locale.US, "%.1fs", f.reasoningMs / 1000.0)
+                    } else {
+                        "กำลังคิด…"
+                    },
+                )
             }
-            "retry_wait" -> status.value = "รอสลองใหม่…"
-            "request" -> status.value = "กำลังส่งให้ provider…"
-            "provider_ready" -> status.value = "provider รับแล้ว กำลังประมวลผล"
-            else -> status.value = f.text.ifEmpty { f.stage }
+            "retry_wait" -> traceNote("รอสลองใหม่…")
+            "request" -> traceNote("กำลังส่งให้ provider…")
+            "provider_ready" -> traceNote("provider รับแล้ว กำลังประมวลผล")
+            else -> traceNote(f.text.ifEmpty { f.stage })
         }
     }
 
@@ -451,6 +501,7 @@ class ChatViewModel(
             notice.value = "งานนั้นจบไปแล้ว"
         }
         status.value = ""
+        statusLog.value = emptyList()
         liveSubText = ""
         liveBlocks.value = emptyList()
         liveThinkingMs.value = 0L
@@ -466,6 +517,11 @@ class ChatViewModel(
         // their rows never arrive until the next open.
         viewModelScope.launch {
             runCatching { repo.refreshLatest(sessionId) }
+            // The thinking was measured while the turn ran; its rows only just
+            // arrived, so stamp the figure now while their seqs are known.
+            runCatching { repo.stampThinkingMs(sessionId, turnBaseSeq, pendingThinkingMs) }
+            turnBaseSeq = -1L
+            pendingThinkingMs = 0L
             liveText.value = ""
             liveBlocks.value = emptyList()
         }
@@ -686,6 +742,9 @@ class ChatViewModel(
         liveSubText = ""
         liveBlocks.value = emptyList()
         subAgents.value = emptyList()
+        statusLog.value = emptyList()
+        pendingThinkingMs = 0L
+        turnBaseSeq = -1L
         // The footer opens with this turn: which model answers, from when, and
         // nothing else yet. A chat that follows the agent's default says so —
         // printing whatever route happens to be current later would put another
@@ -703,6 +762,7 @@ class ChatViewModel(
             running = true,
         )
         viewModelScope.launch {
+            turnBaseSeq = repo.maxSeq(sessionId)
             val fresh = repo.send(sessionId, text.trim(), attachments)
             pendingAttachments.value = emptyList()
             if (!fresh) notice.value = "ส่งไปแล้ว กำลังรอการตอบกลับ"

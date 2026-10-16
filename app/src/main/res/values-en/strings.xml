@@ -23,6 +23,11 @@
     <string name="agent_user">you</string>
     <string name="live_answering">answering</string>
     <string name="live_thinking">thinking · %1$s</string>
+    <string name="sending">Sending…</string>
+    <string name="thinking_title">Thinking…</string>
+    <string name="thought_for">Thought for %1$s</string>
+    <string name="copy_message">Copy message</string>
+    <string name="retry_turn">Retry</string>
     <string name="copied">Message copied</string>
     <string name="copy_long_press">Copy message</string>
     <string name="token_fields_label">Token counts shown</string>

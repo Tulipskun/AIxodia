@@ -52,6 +52,10 @@ data class MessageEntity(
     // which is what the rate is computed from.
     val durationMs: Long = 0,
     val generationMs: Long = 0,
+    // thinkingMs is measured on the phone, from send to the first streamed
+    // token: the daemon reports no thinking duration of its own. Old rows keep
+    // zero and show no thinking pill.
+    val thinkingMs: Long = 0,
 )
 
 @Dao
@@ -118,6 +122,9 @@ interface MessageDao {
 
     @Query("DELETE FROM messages WHERE sessionId = :sid")
     suspend fun deleteSession(sid: String)
+
+    @Query("UPDATE messages SET thinkingMs = :ms WHERE sessionId = :sid AND seq > :afterSeq AND thinkingMs = 0 AND (role = 'model' OR role = 'assistant')")
+    suspend fun stampThinking(sid: String, afterSeq: Long, ms: Long)
 }
 
 /**
@@ -127,7 +134,7 @@ interface MessageDao {
  * error and not a warning: it throws the first time the database is opened, and
  * the app closes before anything on screen. That is what shipped as v0.1.270.
  */
-internal const val DB_VERSION = 6
+internal const val DB_VERSION = 7
 
 // The version has to move whenever an entity gains a column, and it is the one
 // number nothing else forces you to touch: adding a field to MessageEntity and
@@ -192,10 +199,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v7 records how long a turn thought before its first word, measured on
+        // the phone. Old rows keep zero and show no thinking pill.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN thinkingMs INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
                 .also { inst = it }
         }

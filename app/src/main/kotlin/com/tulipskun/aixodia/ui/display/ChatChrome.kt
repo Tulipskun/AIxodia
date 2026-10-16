@@ -210,6 +210,8 @@ fun ChatComposer(
     draft: String,
     onDraftChange: (String) -> Unit,
     busy: Boolean,
+    /** False while a sent turn waits for its first word back: send stays put, disabled. */
+    activityStarted: Boolean = true,
     onSend: () -> Unit,
     onStop: () -> Unit,
     commands: List<ComposerCommand>,
@@ -351,11 +353,10 @@ fun ChatComposer(
                     }
                 }
                 Spacer(Modifier.size(6.dp))
-                // Both round controls are the same size, the way Claude's are.
-                // Drawing them at 40dp costs nothing to reach: Compose widens
-                // the touch target to 48dp on its own, and the row gains back
-                // the width the model name was short of.
-                if (busy) {
+                // While the turn runs, send becomes stop — but only once the
+                // turn has answered with something. A question still on its way
+                // keeps the send arrow, disabled: there is nothing to stop yet.
+                if (busy && activityStarted) {
                     DiscControl(label = stopLabel, onClick = onStop, primary = true) { tint ->
                         Icon(Icons.Default.Stop, contentDescription = null, tint = tint)
                     }
@@ -363,7 +364,7 @@ fun ChatComposer(
                     DiscControl(
                         label = sendLabel,
                         onClick = onSend,
-                        enabled = canSend,
+                        enabled = canSend && !busy,
                         primary = true,
                     ) { tint ->
                         Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = tint)

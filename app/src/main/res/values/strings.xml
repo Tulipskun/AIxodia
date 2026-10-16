@@ -71,6 +71,15 @@
     <string name="agent_user">คุณ</string>
     <string name="live_answering">กำลังตอบ</string>
     <string name="live_thinking">กำลังคิด · %1$s</string>
+    <!-- The five live states, in the harness's words. Sending is what a bubble
+         wears while its row is still on its way; the thinking title heads the
+         expanded card every request shows, and the thought pill is what a
+         finished turn keeps. -->
+    <string name="sending">กำลังส่ง…</string>
+    <string name="thinking_title">กำลังคิด…</string>
+    <string name="thought_for">คิดไป %1$s</string>
+    <string name="copy_message">คัดลอกข้อความ</string>
+    <string name="retry_turn">ส่งใหม่</string>
     <string name="copied">คัดลอกแล้ว</string>
     <string name="copy_long_press">แตะค้างเพื่อคัดลอก</string>
     <string name="token_fields_label">แสดงตัวเลข token</string>

@@ -142,6 +142,8 @@ data class ToolStep(
     val isError: Boolean = false,
     val done: Boolean = false,
     val durationMs: Long = 0,
+    /** When the call started, so a step still running can show its own elapsed time. */
+    val startedAtMs: Long = 0,
 ) {
     /** What makes one step of a tool distinct from the next run of that tool. */
     val key: String get() = id.ifBlank { name }
@@ -235,6 +237,13 @@ data class ChatMessage(
     val durationMs: Long = 0,
     /** Time inside the provider only. Zero when the turn predates this split. */
     val generationMs: Long = 0,
+    /**
+     * How long the turn spent thinking before its first word, measured on the
+     * phone from send to first token. The daemon never reports this — its D1
+     * rows carry no thinking duration — so it is recorded locally when the
+     * turn runs and kept across mirrors. Zero when the turn predates it.
+     */
+    val thinkingMs: Long = 0,
 )
 
 /**
