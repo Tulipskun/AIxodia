@@ -374,19 +374,10 @@ fun SettingsScreen(
                 Button(onClick = { showAgentDialog = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("Open agent model settings")
                 }
-                RouteCard(
-                    title = "Global default — main agent",
-                    route = mainRoute,
-                    modelCount = modelsByProvider[mainRoute.provider].orEmpty().size,
-                    onPickProvider = { picker = Picker.MainProvider },
-                    onPickModel = { picker = Picker.MainModel },
-                )
-                RouteCard(
-                    title = "Global default — sub agent",
-                    route = subRoute,
-                    modelCount = modelsByProvider[subRoute.provider].orEmpty().size,
-                    onPickProvider = { picker = Picker.SubProvider },
-                    onPickModel = { picker = Picker.SubModel },
+                Text(
+                    "main: ${mainRoute.provider}/${mainRoute.model}  ·  sub: ${if (subRoute.provider.isBlank()) "(use main)" else "${subRoute.provider}/${subRoute.model}"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 HorizontalDivider()
                 Text("Main agent response style", style = MaterialTheme.typography.titleMedium)
