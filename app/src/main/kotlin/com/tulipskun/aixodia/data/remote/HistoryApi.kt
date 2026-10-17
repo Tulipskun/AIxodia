@@ -157,46 +157,163 @@ class HistoryApi(private val settings: SettingsStore) {
     }
 
     /**
-     * Every chat D1 knows, newest first. The phone reads D1
-     * itself now, so the list still arrives with the daemon stopped.
+     * Every chat the engine knows, newest first. History lives on the engine
+     * machine now (SQLite), so the phone reads it through the daemon.
      */
     suspend fun sessions(): List<SessionRow> = withContext(Dispatchers.IO) {
-        runCatching { d1.sessions() }.getOrDefault(emptyList())
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+        runCatching {
+            val req = Request.Builder().url("$base/v1/sessions")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use emptyList()
+                val arr = env.optJSONArray("sessions") ?: return@use emptyList()
+                val out = ArrayList<SessionRow>()
+                for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
+                    out.add(SessionRow(
+                        id = o.optString("id"),
+                        title = o.optString("title"),
+                        provider = o.optString("provider"),
+                        model = o.optString("model"),
+                        updatedAt = o.optLong("updated_at"),
+                    ))
+                }
+                out
+            }
+        }.getOrDefault(emptyList())
     }
 
     /**
-     * Null when D1 cannot be reached (or is not configured); an empty list
-     * only when D1 truly has no chats. Sync uses this so a failed fetch
-     * keeps local data while a real wipe prunes it.
+     * Null when the daemon cannot be reached (or is not configured); an empty
+     * list only when it truly has no chats.
      */
     suspend fun sessionsOrNull(): List<SessionRow>? = withContext(Dispatchers.IO) {
-        runCatching { d1.sessions() }.getOrNull()
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/v1/sessions")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use null
+                val arr = env.optJSONArray("sessions") ?: return@use emptyList()
+                val out = ArrayList<SessionRow>()
+                for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
+                    out.add(SessionRow(
+                        id = o.optString("id"),
+                        title = o.optString("title"),
+                        provider = o.optString("provider"),
+                        model = o.optString("model"),
+                        updatedAt = o.optLong("updated_at"),
+                    ))
+                }
+                out
+            }
+        }.getOrNull()
     }
 
-    /** Creates the chat in D1 too, so the daemon and phone agree. */
-    suspend fun createSession(id: String, title: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { d1.createSession(id, title) }.getOrDefault(false)
+    /** Creates the chat on the daemon; returns its id (engine-generated) or "". */
+    suspend fun createSession(id: String, title: String): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext ""
+        runCatching {
+            val body = JSONObject().put("title", title).toString()
+            val req = Request.Builder().url("$base/v1/sessions")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use ""
+                env.optString("id").ifBlank { "" }
+            }
+        }.getOrDefault("")
     }
 
-    /** Renames a chat, the way Gemini/ChatGPT let you retitle a conversation. */
+    /** Renames a chat on the daemon. */
     suspend fun renameSession(sessionId: String, title: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { d1.renameSession(sessionId, title) }.getOrDefault(false)
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
+        runCatching {
+            val body = JSONObject().put("title", title).toString()
+            val req = Request.Builder().url("$base/v1/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .patch(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r -> r.isSuccessful }
+        }.getOrDefault(false)
     }
 
-    /** Deletes a chat with its history, in D1. */
+    /** Deletes a chat with its history, on the daemon. */
     suspend fun deleteSession(sessionId: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { d1.deleteSession(sessionId) }.getOrDefault(false)
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
+        runCatching {
+            val req = Request.Builder().url("$base/v1/sessions/$sessionId")
+                .header("Authorization", "Bearer ${c.token}")
+                .delete()
+                .build()
+            client.newCall(req).execute().use { r -> r.isSuccessful }
+        }.getOrDefault(false)
     }
 
     /** Newest page for a session; the app calls this on open and on reconnect. */
     suspend fun latest(sessionId: String, limit: Int = 200): List<TurnRow> = turns(sessionId, 0, limit)
-    suspend fun turnsAfter(sessionId: String, afterSeq: Long, limit: Int = 200): List<TurnRow> =
-        runCatching { d1.turnsAfter(sessionId, afterSeq, limit) }.getOrDefault(emptyList())
+    suspend fun turnsAfter(sessionId: String, afterSeq: Long, limit: Int = 200): List<TurnRow> {
+        val rows = turns(sessionId, 0, 10000)
+        return if (afterSeq <= 0L) rows else rows.filter { it.seq > afterSeq }
+    }
 
-    /** One page of history, oldest-first, read straight from D1. */
+    /** One page of history, oldest-first, read from the daemon. */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {
-            runCatching { d1.turns(sessionId, beforeSeq, limit) }.getOrDefault(emptyList())
+            val c = settings.current()
+            val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+            runCatching {
+                val req = Request.Builder().url("$base/v1/sessions/$sessionId/turns")
+                    .header("Authorization", "Bearer ${c.token}")
+                    .header("Accept", "application/json")
+                    .get().build()
+                client.newCall(req).execute().use { r ->
+                    val text = r.body?.string().orEmpty()
+                    val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use emptyList()
+                    val arr = env.optJSONArray("turns") ?: return@use emptyList()
+                    val out = ArrayList<TurnRow>()
+                    for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
+                        out.add(TurnRow(
+                            seq = o.optLong("seq"),
+                            role = o.optString("role"),
+                            agent = o.optString("agent"),
+                            jobId = o.optString("job_id"),
+                            text = o.optString("text"),
+                            createdAt = o.optLong("created_at"),
+                            model = o.optString("model"),
+                            inputTokens = o.optInt("input_tokens"),
+                            outputTokens = o.optInt("output_tokens"),
+                            cacheRead = o.optInt("cache_read_tokens"),
+                            cacheWrite = o.optInt("cache_write_tokens"),
+                            reasoningTokens = o.optInt("reasoning_tokens"),
+                            reasoningContent = o.optString("reasoning_content"),
+                            inputIncludesCache = o.optInt("input_includes_cache") != 0,
+                            durationMs = o.optLong("duration_ms"),
+                            generationMs = o.optLong("generation_ms"),
+                            block = o.optString("block"),
+                        ))
+                    }
+                    // oldest-first ordering
+                    out.sortedBy { it.seq }
+                }
+            }.getOrDefault(emptyList()).let { list ->
+                if (beforeSeq <= 0L) list.take(limit) else list.filter { it.seq < beforeSeq }.takeLast(limit)
+            }
         }
 
     /**
@@ -487,7 +604,21 @@ class HistoryApi(private val settings: SettingsStore) {
     }
 
     /** Connectivity check for the Settings screen: session count, or throw. */
-    suspend fun ping(): Int = withContext(Dispatchers.IO) { d1.ping() }
+    suspend fun ping(): Int = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext 0
+        runCatching {
+            val req = Request.Builder().url("$base/v1/sessions")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use 0
+                env.optJSONArray("sessions")?.length() ?: 0
+            }
+        }.getOrDefault(0)
+    }
 
     // Uploads can be large and slow; the shared client's 150s call timeout would
     // cut a big video off halfway. This one waits, and streams the body.

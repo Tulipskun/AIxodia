@@ -186,11 +186,12 @@ class ChatRepository(
     }
 
     suspend fun createSession(title: String): String {
-        val id = "s" + System.currentTimeMillis().toString(36) +
-            java.util.UUID.randomUUID().toString().take(4)
+        // Engine is the source of truth now: ask it for an id, fall back to
+        // a local one only when the daemon is unreachable.
+        val engineId = try { history.createSession("", title.ifBlank { "New chat" }) } catch (_: Exception) { "" }
+        val id = engineId.ifBlank { "s" + System.currentTimeMillis().toString(36) +
+            java.util.UUID.randomUUID().toString().take(4) }
         db.sessions().upsert(SessionEntity(id = id, title = title.ifBlank { "New chat" }))
-        // Local-first: a cloud failure still leaves a usable local session.
-        try { history.createSession(id, title.ifBlank { "New chat" }) } catch (_: Exception) { }
         openSession(id)
         return id
     }
