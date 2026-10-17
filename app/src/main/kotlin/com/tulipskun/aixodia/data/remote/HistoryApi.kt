@@ -128,6 +128,27 @@ class HistoryApi(private val settings: SettingsStore) {
         d1ok || engineOk
     }
 
+    /** Recent engine log entries (newest first), for debugging. */
+    suspend fun fetchLogs(limit: Int = 200): List<JSONObject> = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+        runCatching {
+            val req = Request.Builder().url("$base/api/logs?limit=$limit")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            client.newCall(req).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use emptyList()
+                val arr = env.optJSONArray("logs") ?: return@use emptyList()
+                val out = ArrayList<JSONObject>()
+                for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { out.add(it) }
+                out
+            }
+        }.getOrDefault(emptyList())
+    }
+
     private fun absoluteUrl(raw: String): String? {
         val base = raw.trim().trimEnd('/')
         if (base.isEmpty()) return null
