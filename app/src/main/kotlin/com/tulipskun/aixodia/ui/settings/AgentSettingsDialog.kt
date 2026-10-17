@@ -21,13 +21,21 @@ fun AgentSettingsDialog(
     modelsByProvider: Map<String, List<com.tulipskun.aixodia.data.model.ModelView>>,
     mainRoute: AgentRoute,
     subRoute: AgentRoute,
+    mainGen: com.tulipskun.aixodia.data.model.GenerationSettings,
+    subGen: com.tulipskun.aixodia.data.model.GenerationSettings,
     onMainRoute: (AgentRoute) -> Unit,
     onSubRoute: (AgentRoute) -> Unit,
+    onMainGen: (com.tulipskun.aixodia.data.model.GenerationSettings) -> Unit,
+    onSubGen: (com.tulipskun.aixodia.data.model.GenerationSettings) -> Unit,
     onDismiss: () -> Unit,
-    onSave: (AgentRoute, AgentRoute) -> Unit,
+    onSave: (AgentRoute, AgentRoute, com.tulipskun.aixodia.data.model.GenerationSettings, com.tulipskun.aixodia.data.model.GenerationSettings) -> Unit,
 ) {
     var main by remember { mutableStateOf(mainRoute) }
     var sub by remember { mutableStateOf(subRoute) }
+    var mainG by remember { mutableStateOf(mainGen) }
+    var subG by remember { mutableStateOf(subGen) }
+    var expMainThink by remember { mutableStateOf(false) }
+    var expSubThink by remember { mutableStateOf(false) }
     var expandedMainProv by remember { mutableStateOf(false) }
     var expandedMainModel by remember { mutableStateOf(false) }
     var expandedSubProv by remember { mutableStateOf(false) }
@@ -79,6 +87,31 @@ fun AgentSettingsDialog(
                         }
                     }
                 }
+                // thinking level
+                ExposedDropdownMenuBox(expanded = expMainThink, onExpandedChange = { expMainThink = it }) {
+                    OutlinedTextField(
+                        value = mainG.thinkingLevel.ifBlank { "default" },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Thinking level") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expMainThink) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(expanded = expMainThink, onDismissRequest = { expMainThink = false }) {
+                        listOf("", "low", "medium", "high").forEach { lvl ->
+                            DropdownMenuItem(text = { Text(if (lvl.isBlank()) "Default" else lvl.replaceFirstChar { it.uppercase() }) }, onClick = {
+                                mainG = mainG.copy(thinkingLevel = lvl)
+                                expMainThink = false
+                            })
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = mainG.temperature?.toString() ?: "",
+                    onValueChange = { v -> mainG = mainG.copy(temperature = v.toDoubleOrNull()) },
+                    label = { Text("Temperature") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 // ---- sub column ----
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Sub agent", style = MaterialTheme.typography.titleSmall)
@@ -124,10 +157,34 @@ fun AgentSettingsDialog(
                         }
                     }
                 }
+                ExposedDropdownMenuBox(expanded = expSubThink, onExpandedChange = { expSubThink = it }) {
+                    OutlinedTextField(
+                        value = subG.thinkingLevel.ifBlank { "default" },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Thinking level") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expSubThink) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(expanded = expSubThink, onDismissRequest = { expSubThink = false }) {
+                        listOf("", "low", "medium", "high").forEach { lvl ->
+                            DropdownMenuItem(text = { Text(if (lvl.isBlank()) "Default" else lvl.replaceFirstChar { it.uppercase() }) }, onClick = {
+                                subG = subG.copy(thinkingLevel = lvl)
+                                expSubThink = false
+                            })
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = subG.temperature?.toString() ?: "",
+                    onValueChange = { v -> subG = subG.copy(temperature = v.toDoubleOrNull()) },
+                    label = { Text("Temperature") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(main, sub) }) { Text("Save") }
+            TextButton(onClick = { onSave(main, sub, mainG, subG) }) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

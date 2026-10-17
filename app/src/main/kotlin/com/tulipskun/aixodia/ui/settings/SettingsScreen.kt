@@ -518,12 +518,18 @@ fun SettingsScreen(
             modelsByProvider = modelsByProvider,
             mainRoute = mainRoute,
             subRoute = subRoute,
+            mainGen = mainGeneration,
+            subGen = subGeneration,
             onMainRoute = { mainRoute = it },
             onSubRoute = { subRoute = it },
+            onMainGen = { mainGeneration = it },
+            onSubGen = { subGeneration = it },
             onDismiss = { showAgentDialog = false },
-            onSave = { m, sub ->
+            onSave = { m, sub, mg, sg ->
                 mainRoute = m
                 subRoute = sub
+                mainGeneration = mg
+                subGeneration = sg
                 showAgentDialog = false
             },
         )
