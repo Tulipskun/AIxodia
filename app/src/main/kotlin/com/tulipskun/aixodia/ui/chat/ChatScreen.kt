@@ -238,6 +238,8 @@ fun ChatScreen(
     var showModelPicker by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf<ChatMessage?>(null) }
     var toast by remember { mutableStateOf("") }
+    var showPushNowDialog by remember { mutableStateOf(false) }
+    var pushNowBusy by remember { mutableStateOf(false) }
 
     if (showSettings) {
         SettingsScreen(
@@ -352,6 +354,30 @@ fun ChatScreen(
             onDismiss = { renameTarget = null },
         )
     }
+    if (showPushNowDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!pushNowBusy) showPushNowDialog = false },
+            title = { Text("สั่ง push now?") },
+            text = { Text("จะตั้งธงใน D1 และส่งสัญญาณให้ daemon เริ่ม handover ทันที (critical) — ยืนยันหรือไม่") },
+            confirmButton = {
+                TextButton(
+                    enabled = !pushNowBusy,
+                    onClick = {
+                        pushNowBusy = true
+                        scope.launch {
+                            val ok = history.pushNow()
+                            pushNowBusy = false
+                            showPushNowDialog = false
+                            toast = if (ok) "สั่ง push now แล้ว" else "push now ไม่สำเร็จ"
+                        }
+                    },
+                ) { Text(if (pushNowBusy) "กำลังส่ง…" else "ยืนยัน") }
+            },
+            dismissButton = {
+                TextButton(enabled = !pushNowBusy, onClick = { showPushNowDialog = false }) { Text("ยกเลิก") }
+            },
+        )
+    }
     if (deleting != null) {
         DeleteChatDialog(
             title = deleting!!.title,
@@ -445,8 +471,8 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { vm.refresh() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
+                        IconButton(onClick = { showPushNowDialog = true }) {
+                            Icon(Icons.Default.Send, contentDescription = "Push now")
                         }
                         // Status at a glance: a coloured dot and how long the
                         // daemon has been up. No words — the colour is the state.

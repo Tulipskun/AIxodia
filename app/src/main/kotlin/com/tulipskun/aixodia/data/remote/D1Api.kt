@@ -336,6 +336,18 @@ class D1Api(private val settings: SettingsStore) {
 
     private fun nowSeconds(): Long = System.currentTimeMillis() / 1000
 
+    /** Sets the push-now flag so the running session hands over promptly. */
+    suspend fun setPushNowFlag(): Boolean = try {
+        query(
+            "INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, unixepoch()) " +
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            listOf("kernel/push-now", "1"),
+        )
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     /**
      * One cheap query for the settings screen: how many chats this token can
      * read. It throws with a readable reason, so the screen can say why not.
