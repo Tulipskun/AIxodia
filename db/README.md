@@ -10,9 +10,6 @@ npx wrangler d1 create aixodia
 
 # apply the schema (safe to re-run: every statement is IF NOT EXISTS)
 npx wrangler d1 execute aixodia --file=db/schema.sql
-
-# databases created before AX-095 need the per-message footer columns
-npx wrangler d1 execute aixodia --file=db/migrations/0002_turn_footer.sql
 ```
 
 `CLOUDFLARE_API_TOKEN` must be in the shell for these commands, with Account →
@@ -21,10 +18,11 @@ account). The app authenticates with its own Cloudflare API token, typed in
 Settings; it resolves the account and database from that token, so the id above
 never has to be copied into the app.
 
-`schema.sql` mirrors `ai/sdk/session_db.go` (`sessions`, `turns`) and adds the
-transport tables:
+The daemon does not create tables itself; provisioning a fresh database means
+running `db/schema.sql` (or `migrate.py`, which creates tables if missing as a
+fallback). The current tables are:
 
-- `nodes` — the daemon's current quick-tunnel URL, rewritten by its heartbeat;
-- `state` — opaque JSON blobs (`config/*`, `sessions/<id>`) so `ai` can run
-  stateless;
-- `devices` — reserved for per-device tokens.
+- `chat_sessions` / `chat_turns` — history (sessions, turns);
+- `llm_providers` — provider keys and endpoints;
+- `system_state` — opaque JSON blobs and daemon keys (daemon/url, daemon/version,
+  daemon/heartbeat, kernel/*, sync/*, etc.).

@@ -11,9 +11,19 @@
   },
 
   "state_keys": {
-    "provider_config": "config/provider",
-    "system_config": "config/system",
-    "entry_config": "config/entry",
-    "session_prefix": "sessions/"
+    "_comment": "ยุคเดิม (เก่า) — ปัจจุบันใช้ชื่อใหม่:",
+    "engine_settings": "engine/settings",
+    "kernel_leader": "kernel/leader",
+    "daemon_ready": "daemon/ready",
+    "kernel_last_handover": "kernel/last-handover",
+    "kernel_push_now": "kernel/push-now",
+    "sync_hf_token": "sync/hf-token",
+    "sync_hf_last": "sync/hf-last",
+    "sync_apply_stage": "sync/apply-stage",
+    "sync_migrate": "sync/migrate",
+    "kernel_bootfail": "kernel/bootfail",
+    "daemon_url": "daemon/url",
+    "daemon_version": "daemon/version",
+    "daemon_heartbeat": "daemon/heartbeat"
   }
 }
