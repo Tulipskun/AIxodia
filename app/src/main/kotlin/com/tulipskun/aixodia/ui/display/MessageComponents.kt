@@ -589,7 +589,7 @@ private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
         color = scheme.surfaceContainerHigh,
         shape = shape,
         modifier = Modifier
-            .padding(top = 4.dp)
+            .padding(top = 2.dp)
             .fillMaxWidth()
             .clip(shape)
             .then(
@@ -1070,7 +1070,7 @@ fun ToolCallCard(
         color = scheme.surfaceContainerHigh,
         shape = shape,
         modifier = Modifier
-            .padding(top = 4.dp)
+            .padding(top = 2.dp)
             .fillMaxWidth()
             .clip(shape)
             .then(clickable),
