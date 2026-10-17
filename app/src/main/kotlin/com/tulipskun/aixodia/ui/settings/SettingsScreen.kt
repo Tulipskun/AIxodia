@@ -164,6 +164,7 @@ fun SettingsScreen(
     var clearedMain by remember { mutableStateOf<List<String>>(emptyList()) }
     var clearedSub by remember { mutableStateOf<List<String>>(emptyList()) }
     var picker by remember { mutableStateOf<Picker?>(null) }
+    var showAgentDialog by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
     var deleting by remember { mutableStateOf<ProviderStatus?>(null) }
@@ -370,6 +371,9 @@ fun SettingsScreen(
 
             if (page == SettingsPage.Agent) {
             SectionCard("Agent default models (global)", "") {
+                Button(onClick = { showAgentDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open agent model settings")
+                }
                 RouteCard(
                     title = "Global default — main agent",
                     route = mainRoute,
@@ -508,6 +512,22 @@ fun SettingsScreen(
         }
     }
 
+    if (showAgentDialog) {
+        AgentSettingsDialog(
+            providers = routable,
+            modelsByProvider = modelsByProvider,
+            mainRoute = mainRoute,
+            subRoute = subRoute,
+            onMainRoute = { mainRoute = it },
+            onSubRoute = { subRoute = it },
+            onDismiss = { showAgentDialog = false },
+            onSave = { m, sub ->
+                mainRoute = m
+                subRoute = sub
+                showAgentDialog = false
+            },
+        )
+    }
     if (picker != null) {
         val isProvider = picker == Picker.MainProvider || picker == Picker.SubProvider
         val isMain = picker == Picker.MainProvider || picker == Picker.MainModel
