@@ -614,16 +614,22 @@ private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
                 )
                 Spacer(Modifier.size(8.dp))
                 Text(
-                    if (thinkingMs > 0L) {
-                        stringResource(R.string.thought_for, formatSeconds(thinkingMs))
-                    } else {
-                        stringResource(R.string.thought)
-                    },
+                    stringResource(R.string.thought),
                     style = MaterialTheme.typography.labelMedium,
                     color = scheme.onSurfaceVariant,
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
                 )
+                if (thinkingMs > 0L) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        formatSeconds(thinkingMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
                 if (canOpen) {
                     Spacer(Modifier.size(6.dp))
                     Icon(
