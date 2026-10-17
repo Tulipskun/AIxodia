@@ -189,7 +189,7 @@ fun SettingsScreen(
                 probedIds = rows.filter { it.probed || it.lastError.isNotBlank() }.map { it.id }.toSet()
             }
         } else {
-            msg = "โหลด provider ไม่สำเร็จ: ${loaded.exceptionOrNull()?.message ?: "ไม่รู้สาเหตุ"}"
+            msg = "Failed to load providers: ${loaded.exceptionOrNull()?.message ?: "unknown"}"
         }
         runCatching { history.models() }.getOrNull()?.let { catalogue = it }
         runCatching { history.agentSettings() }.getOrNull()?.let {
@@ -225,16 +225,16 @@ fun SettingsScreen(
                 title = {
                     Text(
                         when (page) {
-                            SettingsPage.Main -> "ตั้งค่า"
-                            SettingsPage.Connection -> "การเชื่อมต่อ"
-                            SettingsPage.Agent -> "ค่าเริ่มต้นของ agent"
-                            SettingsPage.About -> "เกี่ยวกับแอป"
+                            SettingsPage.Main -> "Settings"
+                            SettingsPage.Connection -> "Connection"
+                            SettingsPage.Agent -> "Agent defaults"
+                            SettingsPage.About -> "About"
                         },
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = { if (page == SettingsPage.Main) onBack() else page = SettingsPage.Main }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
             )
@@ -254,14 +254,14 @@ fun SettingsScreen(
             if (msg.isNotBlank()) StatusBanner(msg)
 
             if (page == SettingsPage.Main) {
-                SettingsNavRow("การเชื่อมต่อ", "") { page = SettingsPage.Connection }
-                SettingsNavRow("ค่าเริ่มต้นของ agent", "") { page = SettingsPage.Agent }
-                SettingsNavRow("เกี่ยวกับแอป", "") { page = SettingsPage.About }
+                SettingsNavRow("Connection", "") { page = SettingsPage.Connection }
+                SettingsNavRow("Agent defaults", "") { page = SettingsPage.Agent }
+                SettingsNavRow("About", "") { page = SettingsPage.About }
             }
 
             if (page == SettingsPage.Connection) {
             SectionCard(
-                "การเชื่อมต่อ",
+                "Connection",
                 "",
             ) {
                 val clip = LocalClipboardManager.current
@@ -272,11 +272,11 @@ fun SettingsScreen(
                     trailing = {
                         IconButton(
                             onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
-                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "วางจากคลิปบอร์ด") }
+                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "Paste from clipboard") }
                         IconButton(onClick = { showToken = !showToken }) {
                             Icon(
                                 if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (showToken) "ซ่อน token" else "แสดง token",
+                                contentDescription = if (showToken) "Hide token" else "Show token",
                             )
                         }
                     },
@@ -290,33 +290,33 @@ fun SettingsScreen(
                                 val found = runCatching { history.discover() }
                                 val target = found.getOrNull()
                                 if (target == null) {
-                                    msg = "ค้นหา D1 ไม่สำเร็จ: " +
-                                        (found.exceptionOrNull()?.message ?: "ไม่รู้สาเหตุ")
+                                    msg = "D1 lookup failed: " +
+                                        (found.exceptionOrNull()?.message ?: "unknown")
                                 } else {
                                     val chats = runCatching { history.ping() }.getOrDefault(0)
-                                    msg = "ผ่าน — ${target.accountName}/${target.databaseName} · เจอ $chats เซสชัน"
+                                    msg = "OK — ${target.accountName}/${target.databaseName} · $chats sessions"
                                     load(false)
                                 }
                                 busy = false
                             }
                         },
                         enabled = !busy && token.isNotBlank(),
-                    ) { Text("บันทึกและค้นหา D1") }
+                    ) { Text("Save and find D1") }
                     OutlinedButton(
                         onClick = {
                             busy = true; msg = ""
                             scope.launch {
-                                msg = runCatching { "ผ่าน — เจอ ${history.ping()} เซสชัน" }
-                                    .getOrElse { "ไม่ผ่าน: ${it.message}" }
+                                msg = runCatching { "OK — ${history.ping()} sessions" }
+                                    .getOrElse { "Failed: ${it.message}" }
                                 busy = false
                             }
                         },
                         enabled = !busy && token.isNotBlank(),
-                    ) { Text("ทดสอบ") }
+                    ) { Text("Test") }
                 }
                 Text(
                     if (curAccount.isBlank() || curDatabase.isBlank()) {
-                        "D1: ยังไม่รู้ account/database — กดปุ่มบันทึกและค้นหา D1"
+                        "D1: account/database unknown — press Save and find D1"
                     } else {
                         "D1: account ${curAccount.take(8)}… · database ${curDatabase.take(8)}…"
                     },
@@ -327,7 +327,7 @@ fun SettingsScreen(
                 LabelledField(
                     value = address,
                     onValueChange = { address = it },
-                    label = "ที่อยู่ daemon (tunnel)",
+                    label = "Daemon address (tunnel)",
                     placeholder = "https://xxxx.trycloudflare.com",
                     hint = if (address.isBlank()) {
                         "เว้นว่างได้ — ประวัติยังอ่าน/เขียนจาก D1 ตรง · แชทสดจะต่อ wss://<host>/ws"
@@ -345,12 +345,12 @@ fun SettingsScreen(
                             busy = true; msg = ""
                             scope.launch {
                                 settings.saveDaemon(address)
-                                msg = "บันทึกที่อยู่ daemon แล้ว"
+                                msg = "Daemon address saved"
                                 busy = false
                             }
                         },
                         enabled = !busy,
-                    ) { Text("บันทึกที่อยู่") }
+                    ) { Text("Save address") }
                 }
                 HorizontalDivider()
                 NodeCard(
@@ -360,7 +360,7 @@ fun SettingsScreen(
                         scope.launch {
                             settings.saveDaemon(tunnel)
                             address = tunnel
-                            msg = "ใช้ URL ของ daemon แล้ว"
+                            msg = "Using daemon URL"
                         }
                     },
                 )
@@ -369,23 +369,23 @@ fun SettingsScreen(
             }
 
             if (page == SettingsPage.Agent) {
-            SectionCard("โมเดลค่าเริ่มต้นของ agent (สากล)", "") {
+            SectionCard("Agent default models (global)", "") {
                 RouteCard(
-                    title = "ค่าเริ่มต้นสากล — main agent",
+                    title = "Global default — main agent",
                     route = mainRoute,
                     modelCount = modelsByProvider[mainRoute.provider].orEmpty().size,
                     onPickProvider = { picker = Picker.MainProvider },
                     onPickModel = { picker = Picker.MainModel },
                 )
                 RouteCard(
-                    title = "ค่าเริ่มต้นสากล — sub agent",
+                    title = "Global default — sub agent",
                     route = subRoute,
                     modelCount = modelsByProvider[subRoute.provider].orEmpty().size,
                     onPickProvider = { picker = Picker.SubProvider },
                     onPickModel = { picker = Picker.SubModel },
                 )
                 HorizontalDivider()
-                Text("วิธีตอบของ main agent", style = MaterialTheme.typography.titleMedium)
+                Text("Main agent response style", style = MaterialTheme.typography.titleMedium)
                 // The capabilities are the ones the daemon reported for the model
                 // actually selected, so a knob this model would refuse is never
                 // offered rather than being offered and then dropped.
@@ -402,7 +402,7 @@ fun SettingsScreen(
                 }
                 if (subRoute.provider.isBlank() || subRoute.model.isBlank()) {
                     Text(
-                        "ยังไม่ได้เลือกของ sub agent — ถ้าปล่อยว่าง จะใช้ค่าเดียวกับ main",
+                        "No sub agent selected — if left blank, uses the main agent value",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -430,7 +430,7 @@ fun SettingsScreen(
                     },
                     enabled = !busy && mainRoute.provider.isNotBlank() && mainRoute.model.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("บันทึกโมเดลของ agent") }
+                ) { Text("Save agent models") }
             }
 
             SectionCard(
@@ -458,13 +458,13 @@ fun SettingsScreen(
                         onClick = {
                             val parsed = TokenField.parse(fieldSpec)
                             if (parsed.isEmpty()) {
-                                msg = "ไม่รู้จักชื่อฟิลด์ — ใช้ได้แค่: " +
+                                msg = "Unknown field name — allowed: " +
                                     TokenField.entries.joinToString(", ") { it.name }
                                 return@Button
                             }
                             scope.launch { settings.setTokenFields(TokenField.render(parsed)) }
                         },
-                    ) { Text("บันทึก") }
+                    ) { Text("Save") }
                     // A provider that reports no reasoning count should not show
                     // a reasoning field, so each one gets its own list.
                     TextButton(
@@ -477,7 +477,7 @@ fun SettingsScreen(
                             }
                         },
                         enabled = curEndpoint.isNotBlank(),
-                    ) { Text("ใช้กับ provider นี้เท่านั้น") }
+                    ) { Text("Use with this provider only") }
                 }
                 if (curEndpoint.isNotBlank()) {
                     Text(
@@ -492,12 +492,12 @@ fun SettingsScreen(
 
             if (page == SettingsPage.About) {
             SectionCard("แอป", when (conn) {
-                ConnState.ONLINE -> "ออนไลน์ ($curWs)"
-                ConnState.CONNECTING -> "กำลังต่อ…"
-                ConnState.OFFLINE -> "ออฟไลน์"
+                ConnState.ONLINE -> "Online ($curWs)"
+                ConnState.CONNECTING -> "Connecting…"
+                ConnState.OFFLINE -> "Offline"
             }) {
                 Text(
-                    "session: $curSession · แอป v${BuildConfig.VERSION_NAME}",
+                    "session: $curSession · App v${BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -581,7 +581,7 @@ fun SettingsScreen(
     pickingKeyFor?.let { p ->
         AlertDialog(
             onDismissRequest = { pickingKeyFor = null },
-            title = { Text("ลบ key ตัวไหนของ ${p.id}?") },
+            title = { Text("Delete which key of ${p.id}?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     repeat(p.keyCount) { index ->
@@ -589,12 +589,12 @@ fun SettingsScreen(
                         TextButton(
                             onClick = { confirmingRemove = p to position },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("ลบ key ตัวที่ $position") }
+                        ) { Text("Delete key #$position") }
                     }
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { pickingKeyFor = null }) { Text("ยกเลิก") } },
+            dismissButton = { TextButton(onClick = { pickingKeyFor = null }) { Text("Cancel") } },
         )
     }
 
@@ -604,7 +604,7 @@ fun SettingsScreen(
             title = { Text("ลบ key ตัวที่ $position ของ ${provider.id}?") },
             text = {
                 Text(
-                    "การลบย้อนกลับไม่ได้ และ daemon จะลืมผลทดสอบเดิมของ provider นี้ เลขลำดับนี้อ้างอิงตำแหน่งใน pool ปัจจุบัน ไม่ใช่ค่าของ key",
+                    "Deletion cannot be undone; the daemon will forget this provider's test results. The number refers to the current pool position, not the key value.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
@@ -616,17 +616,17 @@ fun SettingsScreen(
                         msg = history.changeKeys(provider.id, remove = listOf(position - 1))
                         load(false)
                     }
-                }) { Text("ลบ", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { confirmingRemove = null }) { Text("ยกเลิก") } },
+            dismissButton = { TextButton(onClick = { confirmingRemove = null }) { Text("Cancel") } },
         )
     }
 
     deleting?.let { p ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("ลบ provider ${p.id}?") },
-            text = { Text("key ทั้งหมดของ ${p.id} จะถูกลบออกจาก daemon และ D1 และเอาออกจากตัวเลือกของ agent") },
+            title = { Text("Delete provider ${p.id}?") },
+            text = { Text("All keys of ${p.id} will be removed from the daemon and D1 and from the agent options.") },
             confirmButton = {
                 TextButton(onClick = {
                     deleting = null
@@ -634,9 +634,9 @@ fun SettingsScreen(
                         msg = history.removeProvider(p.id)
                         load(false)
                     }
-                }) { Text("ลบ", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("ยกเลิก") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
         )
     }
 }
@@ -664,13 +664,13 @@ private fun ProviderCard(
                 StatusPill(provider, tested)
             }
             Text(
-                "${provider.adapter} · key ${provider.keyCount} · model ${provider.modelCount}",
+                "${provider.adapter} · ${provider.keyCount} keys · ${provider.modelCount} models",
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant,
             )
             if (provider.workingModel.isNotBlank()) {
                 Text(
-                    "ตอบได้จริง: ${provider.workingModel}",
+                    "Working model: ${provider.workingModel}",
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
                 )
@@ -698,19 +698,19 @@ private fun ProviderCard(
                 LabelledField(
                     value = key,
                     onValueChange = { key = it },
-                    label = "เพิ่ม API key",
+                    label = "Add API key",
                     modifier = Modifier.weight(1f),
                     trailing = {
                         IconButton(onClick = {
                             clip.getText()?.text?.let { if (it.isNotBlank()) key = it.trim() }
-                        }) { Icon(Icons.Default.ContentCopy, contentDescription = "วาง key จากคลิปบอร์ด") }
+                        }) { Icon(Icons.Default.ContentCopy, contentDescription = "Paste key from clipboard") }
                     },
                 )
                 FilledTonalIconButton(
                     onClick = { onAddKey(key.trim()); key = "" },
                     enabled = key.isNotBlank(),
                     modifier = Modifier.padding(start = 8.dp),
-                ) { Icon(Icons.Default.Key, contentDescription = "เพิ่ม key") }
+                ) { Icon(Icons.Default.Key, contentDescription = "Add key") }
             }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -718,17 +718,17 @@ private fun ProviderCard(
             ) {
                 TextButton(onClick = onTest, enabled = !testing) {
                     if (testing) {
-                        Text("กำลังทดสอบ…")
+                        Text("Testing…")
                     } else {
                         Icon(
                             Icons.Default.Refresh,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
                         )
-                        Text("  ทดสอบ")
+                        Text("  Test")
                     }
                 }
-                TextButton(onClick = onReplaceKeys) { Text("แทนที่ pool") }
+                TextButton(onClick = onReplaceKeys) { Text("Replace pool") }
                 TextButton(
                     onClick = onPickKeyToRemove,
                     enabled = provider.keyCount > 0,

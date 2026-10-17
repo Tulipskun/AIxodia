@@ -1,7 +1,7 @@
 package com.tulipskun.aixodia.ui.chat
 
 /**
- * Turns a raw error from the ai-engine daemon into a short Thai message the
+ * Turns a raw error from the ai-engine daemon into a short English message the
  * user can act on. The raw text is never shown: it is Go error output and
  * changes with every upstream provider. Pure function, no Android types, so it
  * is unit-tested on the JVM.
@@ -10,13 +10,13 @@ fun friendlyError(raw: String): String {
     val s = raw.lowercase()
     return when {
         raw.isBlank() ->
-            "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ ลองส่งอีกครั้ง"
+            "An unknown error occurred. Please try again."
 
         "insufficient" in s || "balance" in s || "credit" in s ->
-            "ผู้ให้บริการโมเดลนี้เครดิตหมด ลองเปลี่ยนไปใช้โมเดลอื่นในการตั้งค่า"
+            "This provider is out of credit. Try another model in Settings."
 
         "429" in s || "rate limit" in s || "capacity" in s || "too many" in s ->
-            "ผู้ให้บริการกำลังยุ่ง ระบบจะลองใหม่ให้ หรือกดส่งอีกครั้งในไม่กี่วินาที"
+            "The provider is busy. It will retry automatically, or send again in a few seconds."
 
         // OpenCode's free tier refuses a request it does not recognise as its
         // own client's — an x-opencode-request header is enough to turn an
@@ -25,27 +25,27 @@ fun friendlyError(raw: String): String {
         // was misread as a rejected key, the user went to check a key that was
         // never the problem.
         "free tier" in s || "can only be used from within" in s ->
-            "ผู้ให้บริการโหมดฟรีปฏิเสธคำขอ ไม่เกี่ยวกับคีย์ API ลองส่งอีกครั้งหรือเปลี่ยนโมเดล"
+            "The free-tier provider rejected the request; this is not an API key issue. Try again or switch models."
 
         "401" in s || "403" in s || "unauthorized" in s || "forbidden" in s || "invalid api key" in s ->
-            "ผู้ให้บริการปฏิเสธคีย์ API ตรวจสอบคีย์ในหน้าตั้งค่า"
+            "The provider rejected the API key. Check the key in Settings."
 
         "no api keys" in s ->
-            "ยังไม่ได้ใส่คีย์ API ของผู้ให้บริการนี้ เพิ่มคีย์ในหน้าตั้งค่า"
+            "No API key set for this provider. Add a key in Settings."
 
         "unknown model" in s || "model is required" in s || "unknown provider" in s ->
-            "ไม่พบโมเดลหรือผู้ให้บริการที่เลือก ตรวจสอบการตั้งค่าโมเดล"
+            "The selected model or provider was not found. Check the model settings."
 
         "deadline exceeded" in s || "timeout" in s || "timed out" in s ->
-            "ผู้ให้บริการตอบช้าเกินกำหนด ลองส่งอีกครั้ง"
+            "The provider took too long to respond. Please try again."
 
         "502" in s || "503" in s || "504" in s || "upstream" in s || "unavailable" in s ->
-            "ผู้ให้บริการไม่พร้อมใช้งานชั่วคราว ลองอีกครั้งในภายหลัง"
+            "The provider is temporarily unavailable. Try again later."
 
         "tunnel" in s || "connection refused" in s || "no such host" in s ->
-            "ติดต่อ daemon ไม่ได้ ตรวจว่าเครื่องที่รัน ai-engine ยังเปิดอยู่"
+            "Cannot reach the daemon. Check that the machine running ai-engine is still up."
 
         else ->
-            "ส่งข้อความไม่สำเร็จ ลองอีกครั้ง"
+            "Failed to send the message. Please try again."
     }
 }

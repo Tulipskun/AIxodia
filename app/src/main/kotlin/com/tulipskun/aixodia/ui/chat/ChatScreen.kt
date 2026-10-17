@@ -357,8 +357,8 @@ fun ChatScreen(
     if (showPushNowDialog) {
         AlertDialog(
             onDismissRequest = { if (!pushNowBusy) showPushNowDialog = false },
-            title = { Text("สั่ง push now?") },
-            text = { Text("จะตั้งธงใน D1 และส่งสัญญาณให้ daemon เริ่ม handover ทันที (critical) — ยืนยันหรือไม่") },
+            title = { Text("Push now?") },
+            text = { Text("Sets the D1 flag and signals the daemon to hand over immediately (critical). Confirm?") },
             confirmButton = {
                 TextButton(
                     enabled = !pushNowBusy,
@@ -368,13 +368,13 @@ fun ChatScreen(
                             val ok = history.pushNow()
                             pushNowBusy = false
                             showPushNowDialog = false
-                            toast = if (ok) "สั่ง push now แล้ว" else "push now ไม่สำเร็จ"
+                            toast = if (ok) "Push now requested" else "Push now failed"
                         }
                     },
-                ) { Text(if (pushNowBusy) "กำลังส่ง…" else "ยืนยัน") }
+                ) { Text(if (pushNowBusy) "Sending…" else "Confirm") }
             },
             dismissButton = {
-                TextButton(enabled = !pushNowBusy, onClick = { showPushNowDialog = false }) { Text("ยกเลิก") }
+                TextButton(enabled = !pushNowBusy, onClick = { showPushNowDialog = false }) { Text("Cancel") }
             },
         )
     }
@@ -472,7 +472,7 @@ fun ChatScreen(
                     },
                     actions = {
                         IconButton(onClick = { showPushNowDialog = true }) {
-                            Icon(Icons.Default.Send, contentDescription = "Push now")
+                            Icon(Icons.Default.Refresh, contentDescription = "Push now")
                         }
                         // Status at a glance: a coloured dot and how long the
                         // daemon has been up. No words — the colour is the state.
@@ -516,7 +516,7 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = 4.dp)
-                                    .semantics { contentDescription = "agent กำลังทำงาน" },
+                                    .semantics { contentDescription = "agent working" },
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                             )
@@ -737,10 +737,10 @@ private fun ChatModelSheet(
             // This chat's own model: the main agent it answers with. Titled for the main
             // agent because the section below is the sub agent's, and calling both
             // "Sub agent" left the main one looking like it had gone missing.
-            Text("โมเดลของแชตนี้", style = MaterialTheme.typography.titleMedium)
+            Text("Model for this chat", style = MaterialTheme.typography.titleMedium)
             if (providers.isEmpty()) {
                 Text(
-                    "ยังไม่มี provider — เพิ่มหรือทดสอบ provider ในหน้าตั้งค่าก่อน",
+                    "No provider yet — add or test a provider in Settings",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -761,13 +761,13 @@ private fun ChatModelSheet(
                 if (pickedProvider.isNotBlank()) {
                     Text(
                         when {
-                            currentStatus == null -> "ยังไม่มีสถานะ"
-                            !currentStatus.probed -> "ยังไม่ทดสอบ · key ${currentStatus.keyCount}"
+                            currentStatus == null -> "No status"
+                            !currentStatus.probed -> "Not tested · key ${currentStatus.keyCount}"
                             currentStatus.reachable -> buildString {
-                                append("ใช้ได้ · key ${currentStatus.keyCount}")
-                                if (currentStatus.workingModel.isNotBlank()) append(" · ตอบได้จริง ${currentStatus.workingModel}")
+                                append("OK · key ${currentStatus.keyCount}")
+                                if (currentStatus.workingModel.isNotBlank()) append(" · answers ${currentStatus.workingModel}")
                             }
-                            else -> "ใช้ไม่ได้" + (if (currentStatus.lastError.isNotBlank()) " · ${currentStatus.lastError}" else "")
+                            else -> "Unusable" + (if (currentStatus.lastError.isNotBlank()) " · ${currentStatus.lastError}" else "")
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -777,13 +777,13 @@ private fun ChatModelSheet(
                     value = query,
                     onValueChange = { query = it },
                     singleLine = true,
-                    label = { Text("ค้นหาโมเดล (${models.size})") },
+                    label = { Text("Search models (${models.size})") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (pickedProvider.isBlank()) {
                     Text(
-                        "เลือก provider ข้างบนก่อน",
+                        "Select a provider above first",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -813,7 +813,7 @@ private fun ChatModelSheet(
                             )
                             if (m.id == working) {
                                 Text(
-                                    "ตอบได้จริง",
+                                    "Answers",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(end = 8.dp),
@@ -834,29 +834,29 @@ private fun ChatModelSheet(
                 onClick = onSave,
                 enabled = pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("ใช้กับแชทนี้") }
+            ) { Text("Use for this chat") }
             TextButton(
                 onClick = onClear,
                 enabled = hasStoredRoute,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("ใช้ค่าของ agent (ล้างการล็อกแชทนี้)") }
+            ) { Text("Use agent default (clear this chat lock)") }
 
             // Per-session sub-agent settings (ACP session config pattern):
             // each chat may pin its own sub provider/model instead of
             // inheriting the global agent defaults.
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            Text("Sub agent (เฉพาะแชทนี้)", style = MaterialTheme.typography.titleSmall)
+            Text("Sub agent (this chat only)", style = MaterialTheme.typography.titleSmall)
             val subPickedProvider by vm.subAgentProvider.collectAsStateWithLifecycle()
             val subPickedModel by vm.subAgentModel.collectAsStateWithLifecycle()
             val subEnabled by vm.subAgentEnabled.collectAsStateWithLifecycle()
             val subPinned by vm.subAgentPinned.collectAsStateWithLifecycle()
             Text(
-                if (subPinned) "แชทนี้ล็อก sub agent ไว้แล้ว" else "ใช้ค่าของ agent (sub agent ทั่วไป)",
+                if (subPinned) "This chat has a pinned sub agent" else "Use agent default (general sub agent)",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("เปิด sub agent", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text("Enable sub agent", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 Switch(
                     checked = subEnabled,
                     onCheckedChange = { enabled -> vm.setSubAgent(subPickedProvider, subPickedModel, enabled) },
@@ -905,9 +905,9 @@ private fun ChatModelSheet(
                 onClick = { vm.setSubAgent(subPickedProvider, subPickedModel, subEnabled) },
                 enabled = subPickedProvider.isNotBlank() && subPickedModel.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("บันทึก sub agent ของแชทนี้") }
+            ) { Text("Save sub agent for this chat") }
             Text(
-                "เปิด/ปิดใช้ได้เลยโดยไม่ต้องเลือก provider — แชทนี้จะใช้ sub agent ของ agent",
+                "Toggle without picking a provider — this chat uses the agent sub agent",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -915,7 +915,7 @@ private fun ChatModelSheet(
                 onClick = { vm.clearSubAgent() },
                 enabled = subPinned,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("ใช้ค่าของ agent (ล้าง sub agent ของแชทนี้)") }
+            ) { Text("Use agent default (clear this chat sub agent)") }
         }
     }
 }
@@ -924,32 +924,32 @@ private fun ChatModelSheet(
 private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var msg by remember { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
+    var msg by remember { mutableStateOf("App v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
+        Text("App • $msg", style = MaterialTheme.typography.labelMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         FilledTonalButton(
             onClick = {
-                busy = true; msg = "กำลังตรวจ…"
+                busy = true; msg = "Checking…"
                 scope.launch {
                     try {
                         val up = UpdateManager.check()
                         if (up == null) {
-                            msg = "ล่าสุดแล้ว (v" + BuildConfig.VERSION_NAME + ")"
+                            msg = "Up to date (v" + BuildConfig.VERSION_NAME + ")"
                             return@launch
                         }
-                        msg = "พบ ${up.tag} กำลังโหลด…"
-                        val apk = UpdateManager.download(ctx, up) { p -> msg = "โหลด $p% (${up.tag})" }
-                        msg = "พร้อมติดตั้ง ${up.tag}"
+                        msg = "Found ${up.tag}, downloading…"
+                        val apk = UpdateManager.download(ctx, up) { p -> msg = "Loading $p% (${up.tag})" }
+                        msg = "Ready to install ${up.tag}"
                         UpdateManager.install(ctx, apk)
                     } catch (e: Exception) {
-                        msg = "อัปเดตล้มเหลว: ${e.message}"
+                        msg = "Update failed: ${e.message}"
                     } finally { busy = false }
                 }
             },
             enabled = !busy,
-        ) { Text("ตรวจอัปเดต") }
+        ) { Text("Check for updates") }
         IconButton(onClick = onSettings) {
             Icon(Icons.Default.Settings, contentDescription = "Settings")
         }

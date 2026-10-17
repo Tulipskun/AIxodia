@@ -96,9 +96,9 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ผู้ให้บริการ") },
+                title = { Text("Providers") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ") }
+                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
                     IconButton(
@@ -108,22 +108,22 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
                             scope.launch {
                                 val fresh = history.refreshProviders()
                                 if (fresh.isEmpty()) {
-                                    message = "daemon ไม่ได้ตอบ ตรวจว่า ai-engine ยังรันอยู่"
+                                    message = "Daemon did not respond; check that ai-engine is still running"
                                 } else {
                                     providers = fresh
                                     tested = fresh.map { it.id }.toSet()
-                                    message = "ทดสอบแล้ว ${fresh.count { it.reachable }} จาก ${fresh.size} ใช้ได้"
+                                    message = "Tested ${fresh.count { it.reachable }} of ${fresh.size} working"
                                 }
                                 busy = false
                             }
                         },
-                    ) { Icon(Icons.Default.Refresh, contentDescription = "ทดสอบทั้งหมด") }
+                    ) { Icon(Icons.Default.Refresh, contentDescription = "Test all") }
                 },
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { adding = true }) {
-                Icon(Icons.Default.Add, contentDescription = "เพิ่ม provider")
+                Icon(Icons.Default.Add, contentDescription = "Add provider")
             }
         },
     ) { pad ->
@@ -136,8 +136,8 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
 
             Text(
-                if (!loaded) "กำลังโหลด…"
-                else "${counts.all} ผู้ให้บริการ · ${providers.sumOf { it.keyCount }} key · ${counts.working} ใช้ได้",
+                if (!loaded) "Loading…"
+                else "${counts.all} providers · ${providers.sumOf { it.keyCount }} keys · ${counts.working} working",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 8.dp),
@@ -148,7 +148,7 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
                     value = query,
                     onValueChange = { query = it },
                     singleLine = true,
-                    placeholder = { Text("ค้นหาชื่อ, adapter หรือ endpoint") },
+                    placeholder = { Text("Search name, adapter or endpoint") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -160,10 +160,10 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 listOf(
-                    Triple(ProviderFilter.ALL, "ทั้งหมด", counts.all),
-                    Triple(ProviderFilter.WORKING, "ใช้ได้", counts.working),
-                    Triple(ProviderFilter.UNTESTED, "ยังไม่ทดสอบ", counts.untested),
-                    Triple(ProviderFilter.BROKEN, "ใช้ไม่ได้", counts.broken),
+                    Triple(ProviderFilter.ALL, "All", counts.all),
+                    Triple(ProviderFilter.WORKING, "Working", counts.working),
+                    Triple(ProviderFilter.UNTESTED, "Untested", counts.untested),
+                    Triple(ProviderFilter.BROKEN, "Broken", counts.broken),
                 ).forEach { (value, label, n) ->
                     FilterChip(
                         selected = filter == value,
@@ -186,9 +186,9 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
 
             when {
                 loaded && providers.isEmpty() -> EmptyState(
-                    "ยังไม่มีผู้ให้บริการ\nกด + เพื่อเพิ่ม หรือกดรีเฟรชเพื่อให้ daemon รายงาน",
+                    "No providers yet\nPress + to add, or refresh to let the daemon report",
                 )
-                loaded && visible.isEmpty() -> EmptyState("ไม่มีรายการที่ตรงกับตัวกรอง")
+                loaded && visible.isEmpty() -> EmptyState("No items match the filter")
             }
 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -255,10 +255,10 @@ private fun ProviderCard(p: ProviderStatus, tested: Boolean, onClick: () -> Unit
         else -> MaterialTheme.colorScheme.outline
     }
     val statusText = when {
-        working && p.workingModel.isNotBlank() -> "ใช้ได้ · ${p.workingModel}"
-        working -> "ใช้ได้ · ${p.modelCount} โมเดล"
-        broken -> "ใช้ไม่ได้ · ${p.lastError.ifBlank { "ไม่ทราบสาเหตุ" }}"
-        else -> "ยังไม่ทดสอบ"
+        working && p.workingModel.isNotBlank() -> "OK · ${p.workingModel}"
+        working -> "OK · ${p.modelCount} models"
+        broken -> "Broken · ${p.lastError.ifBlank { "unknown" }}"
+        else -> "Untested"
     }
     Card(
         onClick = onClick,
@@ -319,9 +319,9 @@ private fun ProviderDetailSheet(
                 Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             }
 
-            Text("key ${provider.keyCount} อัน", style = MaterialTheme.typography.titleSmall)
+            Text("${provider.keyCount} keys", style = MaterialTheme.typography.titleSmall)
             Text(
-                "key ถูกเก็บไว้ที่ daemon และอ่านกลับไม่ได้ ลบแล้วต้องใส่ใหม่",
+                "Keys are stored on the daemon and cannot be read back; deleting means re-entering them",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -334,7 +334,7 @@ private fun ProviderDetailSheet(
                             note = result
                             history.providers().firstOrNull { it.id == provider.id }?.let(onChanged)
                         }
-                    }) { Text("ลบ") }
+                    }) { Text("Delete") }
                 }
             }
 
@@ -342,7 +342,7 @@ private fun ProviderDetailSheet(
                 value = newKey,
                 onValueChange = { newKey = it },
                 singleLine = true,
-                label = { Text("เพิ่ม key") },
+                label = { Text("Add key") },
                 modifier = Modifier.fillMaxWidth(),
             )
             Button(
@@ -355,7 +355,7 @@ private fun ProviderDetailSheet(
                         history.providers().firstOrNull { it.id == provider.id }?.let(onChanged)
                     }
                 },
-            ) { Text("เพิ่ม key") }
+            ) { Text("Add key") }
 
             HorizontalDivider()
 
@@ -367,25 +367,25 @@ private fun ProviderDetailSheet(
                         val status = history.refreshProvider(provider.id)
                         testing = false
                         if (status == null) {
-                            note = "ทดสอบไม่สำเร็จ daemon ไม่ตอบ"
+                            note = "Test failed: daemon did not respond"
                         } else {
                             onChanged(status)
                             onTested()
-                            note = if (status.reachable) "ใช้ได้ ${status.modelCount} โมเดล" else "ใช้ไม่ได้: ${status.lastError}"
+                            note = if (status.reachable) "OK ${status.modelCount} models" else "Broken: ${status.lastError}"
                         }
                     }
                 },
-            ) { Text(if (testing) "กำลังทดสอบ…" else "ทดสอบ provider นี้") }
+            ) { Text(if (testing) "Testing…" else "Test this provider") }
 
-            OutlinedButton(onClick = { confirmDelete = true }) { Text("ลบ provider") }
+            OutlinedButton(onClick = { confirmDelete = true }) { Text("Delete provider") }
         }
     }
 
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("ลบ ${provider.id}?") },
-            text = { Text("ลบ provider และ key ทั้งหมดของมัน กู้คืนไม่ได้") },
+            title = { Text("Delete ${provider.id}?") },
+            text = { Text("Delete the provider and all its keys. Cannot be undone.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
@@ -394,9 +394,9 @@ private fun ProviderDetailSheet(
                         note = result
                         onRemoved()
                     }
-                }) { Text("ลบ") }
+                }) { Text("Delete") }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("ยกเลิก") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
 }
@@ -423,10 +423,10 @@ private fun AddProviderSheet(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("เพิ่ม provider", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("Add provider", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(value = id, onValueChange = { id = it }, singleLine = true,
-                label = { Text("ชื่อ (เช่น nousresearch)") }, modifier = Modifier.fillMaxWidth())
-            Text("รูปแบบ API", style = MaterialTheme.typography.labelLarge)
+                label = { Text("Name (e.g. nousresearch)") }, modifier = Modifier.fillMaxWidth())
+            Text("API format", style = MaterialTheme.typography.labelLarge)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 adapters.forEach { name ->
                     FilterChip(selected = adapter == name, onClick = { adapter = name }, label = { Text(name) })
@@ -447,10 +447,10 @@ private fun AddProviderSheet(
                         val result = history.addProvider(id.trim(), adapter, endpoint.trim(), listOf(key.trim()))
                         saving = false
                         val exists = history.providers().any { it.id == id.trim() }
-                        if (exists) onAdded("เพิ่ม ${id.trim()} แล้ว") else error = result
+                        if (exists) onAdded("Added ${id.trim()}") else error = result
                     }
                 },
-            ) { Text(if (saving) "กำลังบันทึก…" else "บันทึก") }
+            ) { Text(if (saving) "Saving…" else "Save") }
         }
     }
 }
