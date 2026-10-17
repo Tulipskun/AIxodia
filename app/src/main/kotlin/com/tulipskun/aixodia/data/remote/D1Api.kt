@@ -348,6 +348,43 @@ class D1Api(private val settings: SettingsStore) {
         false
     }
 
+    /** Turns with seq greater than [afterSeq], oldest-first (incremental pull). */
+    suspend fun turnsAfter(sessionId: String, afterSeq: Long, limit: Int = 200): List<TurnRow> {
+        if (afterSeq <= 0L) return turns(sessionId, 0, limit)
+        val capped = limit.coerceIn(1, 200).toString()
+        suspend fun page(columns: String): Rows = query(
+            "$columns WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
+            listOf(sessionId, afterSeq.toString(), capped),
+        )
+        val rows = try {
+            page(TURN_COLUMNS)
+        } catch (e: Exception) {
+            if (!e.message.orEmpty().contains("no such column", ignoreCase = true)) throw e
+            page(TURN_COLUMNS_LEGACY)
+        }
+        return rows.rows.map { row ->
+            TurnRow(
+                seq = row.optLong("seq"),
+                role = row.optString("role"),
+                agent = row.optString("agent"),
+                jobId = row.optString("job_id"),
+                text = row.optString("text"),
+                createdAt = row.optLong("created_at"),
+                model = row.optString("model"),
+                inputTokens = row.optInt("input_tokens"),
+                outputTokens = row.optInt("output_tokens"),
+                cacheRead = row.optInt("cache_read_tokens"),
+                cacheWrite = row.optInt("cache_write_tokens"),
+                reasoningTokens = row.optInt("reasoning_tokens"),
+                reasoningContent = row.optString("reasoning_content"),
+                inputIncludesCache = row.optInt("input_includes_cache") != 0,
+                durationMs = row.optLong("duration_ms"),
+                generationMs = row.optLong("generation_ms"),
+                block = row.optString("block"),
+            )
+        }
+    }
+
     /**
      * One cheap query for the settings screen: how many chats this token can
      * read. It throws with a readable reason, so the screen can say why not.

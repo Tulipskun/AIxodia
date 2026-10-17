@@ -190,6 +190,8 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** Newest page for a session; the app calls this on open and on reconnect. */
     suspend fun latest(sessionId: String, limit: Int = 200): List<TurnRow> = turns(sessionId, 0, limit)
+    suspend fun turnsAfter(sessionId: String, afterSeq: Long, limit: Int = 200): List<TurnRow> =
+        runCatching { d1.turnsAfter(sessionId, afterSeq, limit) }.getOrDefault(emptyList())
 
     /** One page of history, oldest-first, read straight from D1. */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =

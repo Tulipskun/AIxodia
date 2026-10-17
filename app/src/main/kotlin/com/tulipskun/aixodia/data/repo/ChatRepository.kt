@@ -75,8 +75,11 @@ class ChatRepository(
                 if (st == ConnState.ONLINE) {
                     if (connectedBefore && !wasOnline) {
                         // reconnect: pull whatever the agent finished while we
-                        // were away, then resend anything still queued.
+                        // were away (incremental, no full re-pull), verify
+                        // against D1 and repair only missing turns, then resend
+                        // anything still queued.
                         refreshLatest(_active.value)
+                        scope.launch { verify(_active.value) }
                     }
                     // The first ONLINE also repairs the chat list: settings can
                     // be written a moment after the screen is created, so an
@@ -176,6 +179,7 @@ class ChatRepository(
         db.sessions().clearUnread(sid)
         // One newest-page read on open; loadOlder backfills the rest on demand.
         refreshLatest(sid)
+        scope.launch { verify(sid) }
         socket.switchSession(sid)
         socket.open(sid, db.messages().maxSeq(sid))
         flushPending()
@@ -280,10 +284,15 @@ class ChatRepository(
     suspend fun clearSessionModel(sid: String): Boolean = history.clearSessionModel(sid)
 
     suspend fun refreshLatest(sid: String) {
-        val rows = try { history.latest(sid) } catch (_: Exception) { emptyList() }
+        // Incremental: only pull turns newer than what Room already has, so a
+        // reconnect does not re-download the whole history (Telegram/Discord style).
+        val localMax = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
+        val rows = if (localMax <= 0L) {
+            try { history.latest(sid) } catch (_: Exception) { emptyList() }
+        } else {
+            try { history.turnsAfter(sid, localMax) } catch (_: Exception) { emptyList() }
+        }
         if (rows.isEmpty()) return
-        // The whole page goes to reconcile, not just the rows past the local
-        // max: a row the old filter hid is healed instead of lost.
         reconcile(sid, rows)
         val last = rows.maxByOrNull { it.seq } ?: return
         val cur = db.sessions().get(sid)
@@ -294,6 +303,15 @@ class ChatRepository(
                 lastAt = if (last.createdAt > 0) last.createdAt * 1000 else System.currentTimeMillis(),
             )
         )
+    }
+
+    /** Verifies Room vs D1 and repairs only missing turns (no full re-pull). */
+    suspend fun verify(sid: String): Int {
+        val localMax = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
+        val remote = try { history.turnsAfter(sid, localMax) } catch (_: Exception) { emptyList() }
+        if (remote.isEmpty()) return 0
+        reconcile(sid, remote)
+        return remote.size
     }
 
     /** The highest stored seq, so a turn can stamp only the rows it created. */
