@@ -47,11 +47,11 @@ fun GenerationSettingsCard(
     modifier: Modifier = Modifier,
 ) {
     if (model == null) {
-        Note("เลือกโมเดลก่อน จึงจะเห็นว่าโมเดลนั้นปรับอะไรได้")
+        Note("Select a model first to see what it can be tuned for.")
         return
     }
     if (!model.supportsAnyGenerationKnob()) {
-        Note("โมเดลนี้ไม่มีการตั้งค่าการตอบให้ปรับ")
+        Note("This model has no adjustable response settings.")
         return
     }
 
@@ -61,10 +61,10 @@ fun GenerationSettingsCard(
     ) {
         if (model.supportsThinking) {
             ChoiceRow(
-                label = "ระดับการคิด",
-                help = "ให้โมเดลคิดก่อนตอบ ยิ่งสูงยิ่งใช้เวลาและ token มากขึ้น · ไม่บังคับคือให้ค่าเริ่มต้นของโมเดล",
+                label = "Reasoning effort",
+                help = "Let the model think before answering. Higher means more time and tokens. Blank uses the model default.",
                 options = GenerationSettings.thinkingLevels,
-                names = mapOf("" to "ไม่บังคับ", "low" to "ต่ำ", "medium" to "กลาง", "high" to "สูง"),
+                names = mapOf("" to "Default", "low" to "Low", "medium" to "Medium", "high" to "High"),
                 selected = settings.thinkingLevel,
                 onSelect = { onChange(settings.copy(thinkingLevel = it)) },
                 onClear = { onClear("thinking_level") },
@@ -73,7 +73,7 @@ fun GenerationSettingsCard(
         if (model.supportsTemperature) {
             NumberRow(
                 label = "temperature",
-                help = "ต่ำคือคำตอบตายตัว สูงคือหลากหลาย · ไม่ได้ตั้งคือให้โมเดลใช้ค่าของตัวเอง",
+                help = "Low means deterministic, high means varied. Blank uses the model default.",
                 value = settings.temperature,
                 range = 0f..2f,
                 steps = 19,
@@ -85,7 +85,7 @@ fun GenerationSettingsCard(
         if (model.supportsTopP) {
             NumberRow(
                 label = "top_p",
-                help = "ขอบเขตของคำที่พิจารณาต่อคำ ค่าต่ำคือเลือกแค่คำที่มั่นใจที่สุด",
+                help = "Token sampling cutoff. Lower means only the most confident tokens.",
                 value = settings.topP,
                 range = 0f..1f,
                 steps = 19,
@@ -97,7 +97,7 @@ fun GenerationSettingsCard(
         if (model.supportsTopK) {
             NumberRow(
                 label = "top_k",
-                help = "จำนวนคำที่พิจารณาต่อคำ ตัวเลขที่เล็กกว่า 1 เป็นสัดส่วนแทนจำนวน",
+                help = "Number of tokens considered per step. Values below 1 are a fraction.",
                 value = settings.topK,
                 range = 0f..64f,
                 steps = 63,
@@ -109,7 +109,7 @@ fun GenerationSettingsCard(
         if (model.supportsStopSequences) {
             TextRow(
                 label = "stop sequences",
-                help = "หนึ่งบรรทัดต่อหนึ่งคำที่ทำให้หยุด เว้นวรรคคือไม่ใช้ค่านี้",
+                help = "One stop sequence per line. Blank disables.",
                 value = settings.stopSequences?.joinToString("\n").orEmpty(),
                 singleLine = false,
                 onChange = { text ->
@@ -122,7 +122,7 @@ fun GenerationSettingsCard(
         if (model.supportsPresencePenalty) {
             NumberRow(
                 label = "presence penalty",
-                help = "ลดการพูดคำที่เคยพูดไปแล้ว ค่าติดลบคือยิ่งย้ำคำเดิม",
+                help = "Reduces repetition of already-used tokens. Negative values reinforce repeats.",
                 value = settings.presencePenalty,
                 range = -2f..2f,
                 steps = 31,
@@ -134,7 +134,7 @@ fun GenerationSettingsCard(
         if (model.supportsFrequencyPenalty) {
             NumberRow(
                 label = "frequency penalty",
-                help = "ลดการใช้คำบ่อย ๆ ค่าติดลบคือยิ่งย้ำคำที่ใช้บ่อย",
+                help = "Reduces frequent tokens. Negative values reinforce frequent tokens.",
                 value = settings.frequencyPenalty,
                 range = -2f..2f,
                 steps = 31,
@@ -146,7 +146,7 @@ fun GenerationSettingsCard(
         if (model.supportsSeed) {
             TextRow(
                 label = "seed",
-                help = "ใส่ตัวเลขเดิมแล้วคำตอบจะทำซ้ำได้ เว้นวรรคคือสุ่มใหม่ทุกครั้ง",
+                help = "Same seed reproduces the answer. Blank randomises each time.",
                 value = settings.seed?.toString().orEmpty(),
                 numeric = true,
                 onChange = { onChange(settings.copy(seed = it.trim().toLongOrNull())) },
@@ -154,7 +154,7 @@ fun GenerationSettingsCard(
         }
         TextRow(
             label = "max output tokens",
-            help = "เพดานความยาวคำตอบ 0 คือไม่จำกัด ให้โมเดลใช้ค่าของตัวเอง",
+            help = "Answer length cap. 0 means unlimited; blank uses the model default.",
             value = if (settings.maxOutputTokens == 0) "" else settings.maxOutputTokens.toString(),
             numeric = true,
             onChange = { onChange(settings.copy(maxOutputTokens = it.trim().toIntOrNull()?.takeIf { n -> n > 0 } ?: 0)) },
@@ -186,11 +186,11 @@ private fun ChoiceRow(
             Text(label, style = MaterialTheme.typography.titleSmall)
             if (selected.isNotBlank()) {
                 TextButton(onClick = onClear) {
-                    Text("ล้าง", style = MaterialTheme.typography.labelMedium)
+                    Text("Clear", style = MaterialTheme.typography.labelMedium)
                 }
             } else {
                 Text(
-                    "ค่าเริ่มต้นของโมเดล",
+                    "Model default",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -234,11 +234,11 @@ private fun NumberRow(
             Text(label, style = MaterialTheme.typography.titleSmall)
             if (value != null) {
                 TextButton(onClick = onClear) {
-                    Text("ล้าง", style = MaterialTheme.typography.labelMedium)
+                    Text("Clear", style = MaterialTheme.typography.labelMedium)
                 }
             } else {
                 Text(
-                    "ค่าเริ่มต้นของโมเดล",
+                    "Model default",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -252,14 +252,14 @@ private fun NumberRow(
             steps = steps,
             modifier = Modifier.semantics {
                 contentDescription = if (value == null) {
-                    "$label, ยังไม่ได้ตั้ง ลากเพื่อตั้งค่า"
+                    "$label, not set — drag to set"
                 } else {
-                    "$label ${display(current)}, ลากเพื่อเปลี่ยน"
+                    "$label ${display(current)} — drag to change"
                 }
             },
         )
         Text(
-            if (value == null) "ยังไม่ได้ตั้ง" else display(current),
+            if (value == null) "Not set" else display(current),
             style = MaterialTheme.typography.bodyMedium,
         )
         HorizontalDivider()

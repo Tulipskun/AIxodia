@@ -53,7 +53,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
     private val _state = MutableStateFlow(ConnState.OFFLINE)
     val state: StateFlow<ConnState> = _state
 
-    /** Human-readable reason for the current state (e.g. "401 token ไม่ผ่าน"). */
+    /** Human-readable reason for the current state (e.g. "401 token rejected"). */
     private val _lastError = MutableStateFlow(0)
     /** A string resource id, so the wording stays in strings.xml. */
     val lastError: StateFlow<Int> = _lastError
@@ -232,7 +232,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
                             _frames.tryEmit(
                                 AiOutput(
                                     kind = "error",
-                                    text = "frame ที่อ่านไม่ได้: ${text.take(120)}",
+                                    text = "unreadable frame: ${text.take(120)}",
                                 )
                             )
                         }

@@ -339,7 +339,7 @@ class HistoryApi(private val settings: SettingsStore) {
         id: String, adapter: String, endpoint: String, keys: List<String>,
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         val body = JSONObject()
             .put("id", id)
             .put("adapter", adapter)
@@ -353,9 +353,9 @@ class HistoryApi(private val settings: SettingsStore) {
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
-                failure("เพิ่ม $id แล้ว", r).let { if (r.isSuccessful) it else "เพิ่มไม่สำเร็จ: $it" }
+                failure("Added $id", r).let { if (r.isSuccessful) it else "Add failed: $it" }
             }
-        }.getOrDefault("เพิ่มไม่สำเร็จ")
+        }.getOrDefault("Add failed")
     }
 
     /** Edits one provider's key pool: add, remove by position, or replace wholesale. */
@@ -363,7 +363,7 @@ class HistoryApi(private val settings: SettingsStore) {
         providerId: String, add: List<String> = emptyList(), remove: List<Int> = emptyList(), replace: List<String> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         // Written by a JSON writer, never by string interpolation: a key with a
         // quote, a backslash or a newline must not corrupt the request.
         val body = JSONObject().apply {
@@ -378,21 +378,21 @@ class HistoryApi(private val settings: SettingsStore) {
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
-                failure("อัปเดต key ของ $providerId แล้ว", r).let { if (r.isSuccessful) it else "อัปเดตไม่สำเร็จ: $it" }
+                failure("Updated keys for $providerId", r).let { if (r.isSuccessful) it else "Update failed: $it" }
             }
-        }.getOrDefault("อัปเดตไม่สำเร็จ")
+        }.getOrDefault("Update failed")
     }
 
     suspend fun removeProvider(providerId: String): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId")
                 .header("Authorization", "Bearer ${c.token}").delete().build()
             client.newCall(req).execute().use { r ->
-                failure("ลบ $providerId แล้ว", r).let { if (r.isSuccessful) it else "ลบไม่สำเร็จ: $it" }
+                failure("Removed $providerId", r).let { if (r.isSuccessful) it else "Remove failed: $it" }
             }
-        }.getOrDefault("ลบไม่สำเร็จ")
+        }.getOrDefault("Remove failed")
     }
 
     /**
@@ -406,7 +406,7 @@ class HistoryApi(private val settings: SettingsStore) {
         clearSub: List<String> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         val body = JSONObject()
             .put("main", agentBody(settingsBody.main, clearMain))
             .put("sub", agentBody(settingsBody.sub, clearSub))
@@ -419,9 +419,9 @@ class HistoryApi(private val settings: SettingsStore) {
                 .put(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
-                failure("บันทึกการตั้งค่า agent แล้ว", r).let { if (r.isSuccessful) it else "บันทึกไม่สำเร็จ: $it" }
+                failure("Agent settings saved", r).let { if (r.isSuccessful) it else "Save failed: $it" }
             }
-        }.getOrDefault("บันทึกไม่สำเร็จ")
+        }.getOrDefault("Save failed")
     }
 
     /**
@@ -494,7 +494,7 @@ class HistoryApi(private val settings: SettingsStore) {
             val body = object : RequestBody() {
                 override fun contentType(): MediaType? = mime.toMediaTypeOrNull()
                 override fun writeTo(sink: BufferedSink) {
-                    val input = open() ?: throw java.io.IOException("เปิดไฟล์ไม่ได้")
+                    val input = open() ?: throw java.io.IOException("Cannot open file")
                     input.source().use { sink.writeAll(it) }
                 }
             }

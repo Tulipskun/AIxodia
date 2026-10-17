@@ -1196,10 +1196,10 @@ fun ToolCallCard(
 @Composable
 private fun AttachmentChip(file: AttachmentRef) {
     val kind = when {
-        file.mime.startsWith("image/") -> "รูปภาพ"
-        file.mime.startsWith("video/") -> "วิดีโอ"
-        file.mime.startsWith("audio/") -> "เสียง"
-        file.mime.startsWith("text/") -> "ข้อความ"
+        file.mime.startsWith("image/") -> "Image"
+        file.mime.startsWith("video/") -> "Video"
+        file.mime.startsWith("audio/") -> "Audio"
+        file.mime.startsWith("text/") -> "Text"
         file.mime.isBlank() -> ""
         else -> file.mime.substringBefore('/')
     }

@@ -282,7 +282,7 @@ class ChatViewModel(
                 sessionId = id
                 settings.saveSession(id)
             }.onFailure { err ->
-                notice.value = "เชื่อมต่อไม่ได้: ${err.message ?: err::class.simpleName}"
+                notice.value = "Cannot connect: ${err.message ?: err::class.simpleName}"
             }
             // The header shows the route this chat actually uses.
             runCatching { repo.sessionRoute(sessionId) }.getOrNull()?.let { (provider, model) ->
@@ -610,7 +610,7 @@ class ChatViewModel(
                 item
             }
         }
-        val note = if (block.isError) "${block.name} ล้มเหลว" else "${block.name} เสร็จแล้ว"
+        val note = if (block.isError) "${block.name} failed" else "${block.name} done"
         status.value = note
         traceNote(note)
     }
@@ -618,11 +618,11 @@ class ChatViewModel(
     private fun onTrace(f: AiOutput) {
         if (f.agent.isNotEmpty() && f.agent != "main") {
             val detail = when (f.stage) {
-                "tool_call", "tool_running" -> "กำลังใช้ ${f.toolCall?.name ?: "เครื่องมือ"}"
-                "tool_result" -> if (f.toolResult?.isError == true) "เครื่องมือล้มเหลว" else "เครื่องมือเสร็จแล้ว"
-                "request" -> "กำลังส่งงาน"
-                "response_text" -> "กำลังคิด"
-                "retry_wait" -> "รอสลองใหม่"
+                "tool_call", "tool_running" -> "Using ${f.toolCall?.name ?: "tool"}"
+                "tool_result" -> if (f.toolResult?.isError == true) "Tool failed" else "Tool done"
+                "request" -> "Sending request"
+                "response_text" -> "Thinking"
+                "retry_wait" -> "Retrying"
                 else -> f.text.ifEmpty { f.stage }
             }
             noteSubAgent(f, detail)
@@ -722,7 +722,7 @@ class ChatViewModel(
                         block
                     }
                 }
-                status.value = if (f.toolResult?.isError == true) "$name ล้มเหลว" else "$name เสร็จแล้ว"
+                status.value = if (f.toolResult?.isError == true) "$name failed" else "$name done"
                 traceNote(status.value)
                 // The result goes back to the provider and the next request
                 // starts: a new "Sending request to provider…" for the next
@@ -734,15 +734,15 @@ class ChatViewModel(
                 liveThinkingAgent.value = f.agent.ifEmpty { "main" }
                 traceNote(
                     if (f.reasoningMs > 0) {
-                        "กำลังคิด · " + String.format(Locale.US, "%.1fs", f.reasoningMs / 1000.0)
+                        "Thinking · " + String.format(Locale.US, "%.1fs", f.reasoningMs / 1000.0)
                     } else {
-                        "กำลังคิด…"
+                        "Thinking…"
                     },
                 )
             }
-            "retry_wait" -> traceNote("รอสลองใหม่…")
-            "request" -> traceNote("กำลังส่งให้ provider…")
-            "provider_ready" -> traceNote("provider รับแล้ว กำลังประมวลผล")
+            "retry_wait" -> traceNote("Retrying…")
+            "request" -> traceNote("Sending to provider…")
+            "provider_ready" -> traceNote("Provider accepted, processing")
             else -> traceNote(f.text.ifEmpty { f.stage })
         }
     }
@@ -756,9 +756,9 @@ class ChatViewModel(
             return
         }
         if (stage == "cancelled") {
-            notice.value = "หยุดการทำงานแล้ว"
+            notice.value = "Stopped"
         } else if (stage == "already_done") {
-            notice.value = "งานนั้นจบไปแล้ว"
+            notice.value = "That task already finished"
         }
         // The thinking was measured while the turn ran; its rows only just
         // arrived, so stamp the figure now while their seqs are known.
@@ -827,15 +827,15 @@ class ChatViewModel(
         when (frame.stage) {
             "subagent_stopping" -> {
                 subAgents.value = rows.map { if (it.jobId == jobId) it.copy(stopping = true) else it }
-                status.value = "กำลังหยุด sub agent…"
+                status.value = "Stopping sub agent…"
             }
             "subagent_not_found" -> {
                 subAgents.value = rows.filterNot { it.jobId == jobId }
-                notice.value = "ไม่พบ sub agent ที่หยุด — อาจจบไปแล้ว"
+                notice.value = "No sub agent to stop — may have finished"
             }
             "subagent_stop_failed" -> {
                 subAgents.value = rows.map { if (it.jobId == jobId) it.copy(stopping = false) else it }
-                notice.value = "หยุด sub agent ไม่สำเร็จ"
+                notice.value = "Failed to stop sub agent"
             }
             // The daemon says how each worker ended. A row that only ever saw
             // its own deltas would keep claiming it is still running.
@@ -847,9 +847,9 @@ class ChatViewModel(
                         running = false,
                         stopping = false,
                         detail = when (ended) {
-                            "stopped" -> "หยุดแล้ว"
-                            "failed" -> "ล้มเหลว"
-                            else -> "เสร็จแล้ว"
+                            "stopped" -> "Stopped"
+                            "failed" -> "Failed"
+                            else -> "Done"
                         },
                     )
                 }
@@ -865,11 +865,11 @@ class ChatViewModel(
     fun stopSubAgent(jobId: String) {
         if (jobId.isBlank()) return
         if (!repo.stopSubAgent(sessionId, jobId)) {
-            notice.value = "ส่งคำสั่งหยุด sub agent ไม่ได้ — socket ไม่ออนไลน์"
+            notice.value = "Cannot send stop to sub agent — socket offline"
             return
         }
         subAgents.value = subAgents.value.map { if (it.jobId == jobId) it.copy(stopping = true) else it }
-        status.value = "กำลังหยุด sub agent…"
+        status.value = "Stopping sub agent…"
     }
 
     /**
@@ -886,7 +886,7 @@ class ChatViewModel(
         val sent = repo.stopTurn(sessionId)
         clearLiveTurn()
         answerSettled = true
-        notice.value = if (sent) "หยุดการทำงานแล้ว" else "socket ไม่ออนไลน์ — ล้างสถานะที่ค้างอยู่แทน"
+        notice.value = if (sent) "Stopped" else "Socket offline — clearing stuck state instead"
     }
 
     /** Loads the catalogue the picker offers, once the daemon is online. */
@@ -930,14 +930,14 @@ class ChatViewModel(
         val provider = selectedProvider.value
         val model = selectedModel.value
         if (provider.isBlank() || model.isBlank()) {
-            notice.value = "เลือก provider และ model ก่อน"
+            notice.value = "Select a provider and model first"
             return
         }
         viewModelScope.launch {
             val ok = runCatching { repo.setSessionModel(sessionId, provider, model) }.getOrDefault(false)
             if (ok) {
                 hasStoredRoute.value = true
-                notice.value = "ใช้ $provider / $model กับแชทนี้แล้ว"
+                notice.value = "Using $provider / $model for this chat"
             } else {
                 notice.value = "บันทึก provider/model ไม่สำเร็จ"
             }

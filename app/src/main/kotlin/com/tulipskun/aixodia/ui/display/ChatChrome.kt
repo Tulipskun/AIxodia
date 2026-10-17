@@ -113,14 +113,14 @@ fun SetupNeeded(onOpen: () -> Unit) {
             tint = MaterialTheme.colorScheme.primary,
         )
         Text(
-            "ยินดีต้อนรับสู่ AIxodia",
+            "Welcome to AIxodia",
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.size(8.dp))
         Text(
-            "ใส่ Cloudflare API token ที่หน้าตั้งค่า — บัญชี ฐานข้อมูล และ URL ของ daemon\n" +
-                "ค้นหาให้เองหมด ไม่ต้องพิมพ์อะไรอีก (ประวัติแชทอ่านได้แม้ daemon หยุด)",
+            "Enter a Cloudflare API token in Settings — account, database and daemon URL\n" +
+                "are discovered automatically. (Chat history is readable even if the daemon is down.)",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -132,7 +132,7 @@ fun SetupNeeded(onOpen: () -> Unit) {
                 .padding(top = 20.dp)
                 .fillMaxWidth()
                 .widthIn(max = 360.dp),
-        ) { Text("เปิดหน้าตั้งค่า") }
+        ) { Text("Open Settings") }
     }
 }
 
@@ -255,7 +255,7 @@ fun ChatComposer(
                         trailingIcon = {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "เอา ${a.name} ออก",
+                                contentDescription = "Remove ${a.name}",
                                 modifier = Modifier.size(16.dp),
                             )
                         },

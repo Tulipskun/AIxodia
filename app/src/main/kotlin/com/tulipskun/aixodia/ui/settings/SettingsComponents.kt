@@ -92,11 +92,11 @@ fun RouteCard(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall)
-        PickerRow("provider", route.provider.ifBlank { "เลือก provider" }, onPick = onPickProvider)
+        PickerRow("provider", route.provider.ifBlank { "Select provider" }, onPick = onPickProvider)
         PickerRow(
             label = "model",
-            value = route.model.ifBlank { "เลือก model" },
-            hint = if (route.provider.isBlank()) "เลือก provider ก่อน" else "$modelCount โมเดลใน provider นี้",
+            value = route.model.ifBlank { "Select model" },
+            hint = if (route.provider.isBlank()) "Select a provider first" else "$modelCount models in this provider",
             onPick = onPickModel,
         )
     }

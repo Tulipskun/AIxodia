@@ -80,15 +80,15 @@ fun groupSessionsByDate(sessions: List<ChatSession>, nowMs: Long = System.curren
         }
     }
     return buildList {
-        if (today.isNotEmpty()) add(SessionGroup("วันนี้", today))
-        if (yesterday.isNotEmpty()) add(SessionGroup("เมื่อวาน", yesterday))
-        if (week.isNotEmpty()) add(SessionGroup("7 วันล่าสุด", week))
-        if (older.isNotEmpty()) add(SessionGroup("เก่ากว่า", older))
+        if (today.isNotEmpty()) add(SessionGroup("Today", today))
+        if (yesterday.isNotEmpty()) add(SessionGroup("Yesterday", yesterday))
+        if (week.isNotEmpty()) add(SessionGroup("Last 7 days", week))
+        if (older.isNotEmpty()) add(SessionGroup("Older", older))
     }
 }
 
 fun sessionTitle(sessions: List<ChatSession>, id: String): String =
-    sessions.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } ?: id.ifBlank { "แชทใหม่" }
+    sessions.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } ?: id.ifBlank { "New chat" }
 
 /**
  * Drawer content: search + new chat + date-grouped session list.
@@ -130,13 +130,13 @@ fun SessionDrawerContent(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    "แชท",
+                    "Chats",
                     modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 4.dp),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "${sessions.size} เซสชัน",
+                    "${sessions.size} sessions",
                     modifier = Modifier.padding(horizontal = 20.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -149,7 +149,7 @@ fun SessionDrawerContent(
                         .fillMaxWidth(),
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("  แชทใหม่")
+                    Text("  New chat")
                 }
 
                 OutlinedTextField(
@@ -158,7 +158,7 @@ fun SessionDrawerContent(
                     modifier = Modifier
                         .padding(horizontal = 16.dp)
                         .fillMaxWidth(),
-                    placeholder = { Text("ค้นหาแชท…") },
+                    placeholder = { Text("Search chats…") },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                     },
@@ -181,18 +181,18 @@ fun SessionDrawerContent(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            "ยังไม่มีแชท",
+                            "No chats yet",
                             style = MaterialTheme.typography.titleSmall,
                         )
                         Text(
-                            "กด “แชทใหม่” เพื่อเริ่มสนทนากับ agent",
+                            "Press \"New chat\" to start talking to the agent",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 } else if (groups.isEmpty()) {
                     Text(
-                        "ไม่พบแชทที่ตรงกับ “$query”",
+                        "No chats match \"$query\"",
                         Modifier.padding(20.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -263,7 +263,7 @@ fun SessionRow(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                s.lastSnippet.ifBlank { "ยังไม่มีข้อความ" },
+                s.lastSnippet.ifBlank { "No messages yet" },
                 maxLines = 1,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -288,20 +288,20 @@ fun ChatActionsSheet(
         text = {
             Column {
                 Text(
-                    if (session.lastSnippet.isBlank()) "ยังไม่มีข้อความ"
+                    if (session.lastSnippet.isBlank()) "No messages yet"
                     else session.lastSnippet.take(80),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onRename) { Text("เปลี่ยนชื่อ") } },
+        confirmButton = { TextButton(onClick = onRename) { Text("Rename") } },
         dismissButton = {
             Row {
                 TextButton(onClick = onDelete) {
-                    Text("ลบ", color = MaterialTheme.colorScheme.error)
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
-                TextButton(onClick = onDismiss) { Text("ปิด") }
+                TextButton(onClick = onDismiss) { Text("Close") }
             }
         },
     )
@@ -316,12 +316,12 @@ fun RenameChatDialog(
     var field by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("เปลี่ยนชื่อแชท") },
+        title = { Text("Rename chat") },
         text = {
             OutlinedTextField(
                 value = field,
                 onValueChange = { field = it },
-                label = { Text("ชื่อแชท") },
+                label = { Text("Chat name") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -349,7 +349,7 @@ fun DeleteChatDialog(
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("ลบ", color = MaterialTheme.colorScheme.error)
+                Text("Delete", color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {

@@ -68,7 +68,7 @@ class D1Api(private val settings: SettingsStore) {
                 val text = r.body?.string().orEmpty()
                 val env = runCatching { JSONObject(text) }.getOrNull()
                 if (r.code == 401 || r.code == 403) {
-                    throw IllegalStateException("$r.code token ไม่ผ่านหรือไม่มีสิทธิ์ D1")
+                    throw IllegalStateException("$r.code token rejected or no D1 permission")
                 }
                 if (env == null) throw IllegalStateException("HTTP ${r.code}")
                 if (!r.isSuccessful || !env.optBoolean("success")) {
@@ -98,7 +98,7 @@ class D1Api(private val settings: SettingsStore) {
             val text = r.body?.string().orEmpty()
             val env = runCatching { JSONObject(text) }.getOrNull()
             if (r.code == 401 || r.code == 403) {
-                throw IllegalStateException("$r.code token ไม่ผ่านหรือไม่มีสิทธิ์ที่ต้องการ")
+                throw IllegalStateException("$r.code token rejected or insufficient permission")
             }
             if (env == null) throw IllegalStateException("HTTP ${r.code}")
             if (!r.isSuccessful) throw IllegalStateException(failure(env, r.code))
@@ -132,16 +132,16 @@ class D1Api(private val settings: SettingsStore) {
     suspend fun discover(): Target {
         val stored = settings.current()
         val token = stored.token
-        if (token.isBlank()) throw IllegalStateException("ยังไม่ได้ใส่ Cloudflare API token")
+        if (token.isBlank()) throw IllegalStateException("Cloudflare API token not set")
 
         val verify = get(token, "/user/tokens/verify")
         val status = verify.optJSONObject("result")?.optString("status").orEmpty()
         if (status.isNotEmpty() && status != "active") {
-            throw IllegalStateException("token สถานะ $status")
+            throw IllegalStateException("token status $status")
         }
 
         val accounts = objects(get(token, "/accounts").optJSONArray("result"))
-        if (accounts.isEmpty()) throw IllegalStateException("token นี้มองไม่เห็น Cloudflare account")
+        if (accounts.isEmpty()) throw IllegalStateException("this token cannot see any Cloudflare account")
         val account = accounts.firstOrNull { it.optString("id") == stored.accountId }
             ?: accounts.firstOrNull { it.optString("name") == DEFAULT_DATABASE }
             ?: accounts.first()
@@ -150,7 +150,7 @@ class D1Api(private val settings: SettingsStore) {
             get(token, "/accounts/${account.optString("id")}/d1/database").optJSONArray("result"),
         )
         if (databases.isEmpty()) {
-            throw IllegalStateException("account นี้ไม่มี D1 database ที่ token มองเห็น")
+            throw IllegalStateException("this account has no D1 database visible to the token")
         }
         val database = databases.firstOrNull { it.optString("uuid") == stored.databaseId }
             ?: databases.firstOrNull { it.optString("name") == DEFAULT_DATABASE }
@@ -183,7 +183,7 @@ class D1Api(private val settings: SettingsStore) {
     /** One statement against the current token and database. */
     private suspend fun query(sql: String, params: List<String> = emptyList()): Rows {
         val token = settings.current().token
-        if (token.isBlank()) throw IllegalStateException("ยังไม่ได้ใส่ Cloudflare API token")
+        if (token.isBlank()) throw IllegalStateException("Cloudflare API token not set")
         return try {
             exec(token, target(token), sql, params)
         } catch (first: IllegalStateException) {

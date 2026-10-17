@@ -17,7 +17,7 @@ data class AttachmentRef(
 ) {
     /** "photo.jpg · 1.2 MB" for a chip or a footer. */
     fun label(): String = buildString {
-        append(name.ifBlank { "ไฟล์" })
+        append(name.ifBlank { "file" })
         if (size > 0) append(" · ").append(humanSize(size))
     }
 
@@ -42,7 +42,7 @@ data class UserMessageParts(val text: String, val attachments: List<AttachmentRe
  * stored turn (the agent needs it) and is lifted out here for display.
  */
 fun splitAttachmentNote(raw: String): UserMessageParts {
-    val marker = "[ไฟล์แนบ]"
+    val marker = "[attachment]"
     val at = raw.indexOf(marker)
     if (at < 0) return UserMessageParts(raw, emptyList())
     val head = raw.take(at).trimEnd()
