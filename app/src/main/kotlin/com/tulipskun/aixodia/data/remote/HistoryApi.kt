@@ -5,6 +5,7 @@ import com.squareup.moshi.JsonClass
 import org.json.JSONArray
 import org.json.JSONObject
 import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AgentSettings
@@ -98,6 +99,7 @@ class HistoryApi(private val settings: SettingsStore) {
         .build()
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
+    private val providerListAdapter = moshi.adapter<List<ProviderStatus>>(Types.newParameterizedType(List::class.java, ProviderStatus::class.java))
     private val providerAdapter = moshi.adapter(ProviderStatus::class.java)
     private val settingsAdapter = moshi.adapter(SettingsView::class.java)
     private val sessionAgentAdapter = moshi.adapter(SessionAgentConfig::class.java)
@@ -426,7 +428,7 @@ class HistoryApi(private val settings: SettingsStore) {
                 providersAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
             }
         }.getOrDefault(emptyList())
-        if (list.isNotEmpty()) runCatching { settings.saveProvidersCache(providersAdapter.toJson(list)) }
+        if (list.isNotEmpty()) runCatching { settings.saveProvidersCache(providerListAdapter.toJson(list)) }
         if (list.isNotEmpty()) list else cachedProviders()
     }
 
@@ -435,7 +437,7 @@ class HistoryApi(private val settings: SettingsStore) {
         runCatching {
             val raw = settings.providersCacheFlow.first()
             if (raw.isBlank()) emptyList()
-            else providersAdapter.fromJson(raw)?.providers ?: emptyList()
+            else providerListAdapter.fromJson(raw) ?: emptyList()
         }.getOrDefault(emptyList())
     }
 
