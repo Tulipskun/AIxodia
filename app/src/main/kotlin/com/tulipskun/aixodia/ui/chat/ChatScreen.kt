@@ -585,6 +585,7 @@ fun ChatScreen(
                                 liveBlocks.any { it !is LiveBlock.Think } ||
                                 stats.elapsedMs(nowMs) > 3_000L,
                             onSend = { vm.send(draft); draft = "" },
+                            connected = conn == ConnState.ONLINE,
                             onStop = { vm.stop() },
                             commands = composerCommands,
                             modelLabel = modelButtonLabel,

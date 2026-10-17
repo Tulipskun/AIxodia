@@ -997,8 +997,7 @@ fun ErrorCard(
         tonalElevation = 1.dp,
         modifier = Modifier
             .padding(top = 4.dp)
-            .widthIn(max = 760.dp)
-            .fillMaxWidth(0.94f),
+            .fillMaxWidth(),
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(

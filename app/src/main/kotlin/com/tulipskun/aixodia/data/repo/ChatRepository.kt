@@ -184,9 +184,9 @@ class ChatRepository(
     suspend fun createSession(title: String): String {
         val id = "s" + System.currentTimeMillis().toString(36) +
             java.util.UUID.randomUUID().toString().take(4)
-        db.sessions().upsert(SessionEntity(id = id, title = title.ifBlank { "แชตใหม่" }))
+        db.sessions().upsert(SessionEntity(id = id, title = title.ifBlank { "New chat" }))
         // Local-first: a cloud failure still leaves a usable local session.
-        try { history.createSession(id, title.ifBlank { "แชตใหม่" }) } catch (_: Exception) { }
+        try { history.createSession(id, title.ifBlank { "New chat" }) } catch (_: Exception) { }
         openSession(id)
         return id
     }

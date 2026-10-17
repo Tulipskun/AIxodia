@@ -330,9 +330,9 @@ fun SettingsScreen(
                     label = "Daemon address (tunnel)",
                     placeholder = "https://xxxx.trycloudflare.com",
                     hint = if (address.isBlank()) {
-                        "เว้นว่างได้ — ประวัติยังอ่าน/เขียนจาก D1 ตรง · แชทสดจะต่อ wss://<host>/ws"
+                        "Leave blank — history still reads/writes D1 directly · live chat connects to wss://<host>/ws"
                     } else {
-                        "แชทสดจะต่อ wss://<host>/ws · provider/model จะถาม daemon ที่นี่"
+                        "Live chat connects to wss://<host>/ws · provider/model is asked of the daemon here"
                     },
                     // A tunnel URL is long and has nowhere to break, so it wraps
                     // rather than ending mid-word at the field's edge.
@@ -491,7 +491,7 @@ fun SettingsScreen(
             }
 
             if (page == SettingsPage.About) {
-            SectionCard("แอป", when (conn) {
+            SectionCard("App", when (conn) {
                 ConnState.ONLINE -> "Online ($curWs)"
                 ConnState.CONNECTING -> "Connecting…"
                 ConnState.OFFLINE -> "Offline"
@@ -601,7 +601,7 @@ fun SettingsScreen(
     confirmingRemove?.let { (provider, position) ->
         AlertDialog(
             onDismissRequest = { confirmingRemove = null },
-            title = { Text("ลบ key ตัวที่ $position ของ ${provider.id}?") },
+            title = { Text("Delete key #$position of ${provider.id}?") },
             text = {
                 Text(
                     "Deletion cannot be undone; the daemon will forget this provider's test results. The number refers to the current pool position, not the key value.",
@@ -732,7 +732,7 @@ private fun ProviderCard(
                 TextButton(
                     onClick = onPickKeyToRemove,
                     enabled = provider.keyCount > 0,
-                ) { Text("ลบ key") }
+                ) { Text("Delete key") }
                 TextButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
@@ -740,11 +740,11 @@ private fun ProviderCard(
                         modifier = Modifier.size(16.dp),
                         tint = scheme.error,
                     )
-                    Text("  ลบ", color = scheme.error)
+                    Text("  Delete", color = scheme.error)
                 }
             }
             Text(
-                "key เดิมแก้ไขค่าตรง ๆ ไม่ได้ เพราะ daemon ไม่ส่งค่ากลับ — เพิ่ม key ใหม่ ลบตามลำดับ หรือแทนที่ทั้ง pool เท่านั้น",
+                "Keys cannot be edited in place because the daemon does not return values — add a new key, delete by position, or replace the whole pool",
                 style = MaterialTheme.typography.labelSmall,
                 color = scheme.onSurfaceVariant,
             )
@@ -757,16 +757,16 @@ private fun StatusPill(provider: ProviderStatus, tested: Boolean) {
     val scheme = MaterialTheme.colorScheme
     val (label, bg, fg) = when {
         !provider.probed && !tested -> Triple(
-            "ยังไม่ทดสอบ",
+            "Untested",
             scheme.surfaceVariant,
             scheme.onSurfaceVariant,
         )
         provider.reachable -> Triple(
-            "ใช้ได้ · ${provider.modelCount} model",
+            "OK · ${provider.modelCount} models",
             scheme.primaryContainer,
             scheme.onPrimaryContainer,
         )
-        else -> Triple("ใช้ไม่ได้", scheme.errorContainer, scheme.onErrorContainer)
+        else -> Triple("Broken", scheme.errorContainer, scheme.onErrorContainer)
     }
     Surface(color = bg, contentColor = fg, shape = MaterialTheme.shapes.extraSmall) {
         Text(
@@ -780,9 +780,9 @@ private fun StatusPill(provider: ProviderStatus, tested: Boolean) {
 
 /** The pill text a provider row or picker row shows for a status. */
 private fun ProviderStatus.statusLine(tested: Boolean = false): String = when {
-    !probed && !tested -> "ยังไม่ทดสอบ"
-    reachable -> "ใช้ได้"
-    else -> "ใช้ไม่ได้"
+    !probed && !tested -> "Untested"
+    reachable -> "OK"
+    else -> "Broken"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -809,18 +809,18 @@ private fun ProviderSheet(
                 LabelledField(
                     value = query,
                     onValueChange = { query = it },
-                    label = "ค้นหา provider",
+                    label = "Search providers",
                     leading = { Icon(Icons.Default.Search, contentDescription = null) },
                 )
                 Text(
-                    "${list.size} จาก ${providers.size} provider",
+                    "${list.size} of ${providers.size} providers",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             if (providers.isEmpty()) {
                 Text(
-                    "ยังไม่มี provider — เพิ่ม provider หรือกด “ทดสอบใหม่” ก่อน",
+                    "No providers yet — add a provider or press \"Test all\" first",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -846,7 +846,7 @@ private fun ProviderSheet(
                         )
                         Text(
                             p.statusLine(p.id in probedIds) + " · key ${p.keyCount} · model ${p.modelCount}" +
-                                if (p.workingModel.isNotBlank()) " · ตอบได้: ${p.workingModel}" else "",
+                                if (p.workingModel.isNotBlank()) " · answers: ${p.workingModel}" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -881,22 +881,22 @@ private fun ModelSheet(
             LabelledField(
                 value = query,
                 onValueChange = { query = it },
-                label = "ค้นหาโมเดล",
+                label = "Search models",
                 leading = { Icon(Icons.Default.Search, contentDescription = null) },
             )
             when {
                 provider.isBlank() -> Text(
-                    "เลือก provider ก่อน",
+                    "Select a provider first",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 models.isEmpty() -> Text(
-                    "provider นี้ยังไม่มีโมเดลที่ daemon ค้นพบ — กด “ทดสอบใหม่” เพื่อให้ค้นอีกครั้ง",
+                    "This provider has no models found by the daemon — press \"Test all\" to search again",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 filtered.isEmpty() -> Text(
-                    "ไม่พบโมเดลที่ตรงกับ “$query”",
+                    "No models match \"$query\"",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -980,7 +980,7 @@ private fun AddProviderDialog(
     var key by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("เพิ่ม provider") },
+        title = { Text("Add provider") },
         text = {
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
@@ -988,7 +988,7 @@ private fun AddProviderDialog(
             ) {
                 LabelledField(
                     value = id, onValueChange = { id = it },
-                    label = "ชื่อ", placeholder = "my-gateway",
+                    label = "Name", placeholder = "my-gateway",
                 )
                 LabelledField(
                     value = endpoint, onValueChange = { endpoint = it },
@@ -1016,9 +1016,9 @@ private fun AddProviderDialog(
             TextButton(
                 onClick = { onAdd(id.trim(), adapter, endpoint.trim(), key.trim()) },
                 enabled = id.isNotBlank() && endpoint.startsWith("https://") && key.isNotBlank(),
-            ) { Text("เพิ่ม") }
+            ) { Text("Add") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("ยกเลิก") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -1032,22 +1032,22 @@ private fun ReplaceKeysDialog(
     val keys = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("แทนที่ key ของ ${provider.id}") },
+        title = { Text("Replace keys of ${provider.id}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LabelledField(
                     value = text, onValueChange = { text = it },
                     label = "key",
-                    hint = "บรรทัดละ 1 · ตอนนี้ ${provider.keyCount} ตัว",
+                    hint = "One per line · currently ${provider.keyCount}",
                     singleLine = false, minLines = 3,
                     visualTransformation = PasswordVisualTransformation(),
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onReplace(keys) }, enabled = keys.isNotEmpty()) { Text("แทนที่") }
+            TextButton(onClick = { onReplace(keys) }, enabled = keys.isNotEmpty()) { Text("Replace") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("ยกเลิก") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -1072,23 +1072,23 @@ private fun NodeCard(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
         Text(
-            "ai daemon — ค้นหาอัตโนมัติจากแถว tunnel ใน D1",
+            "ai daemon — discovered automatically from the tunnel row in D1",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (discovery != null) {
             val (label, colour) = when (auto.phase) {
                 DiscoveryPhase.NO_TOKEN ->
-                    "○ ยังไม่ได้ใส่ Cloudflare token — ใส���แล้วจะค้นหาให้เอง" to
+                    "○ Cloudflare token not set — set it to discover automatically" to
                         MaterialTheme.colorScheme.onSurfaceVariant
                 DiscoveryPhase.CONNECTED ->
-                    "● ต่ออยู่ที่ ${auto.tunnelUrl} (heartbeat ${auto.ageS}s${if (auto.version.isNotBlank()) ", ${auto.version}" else ""})" to
+                    "● Connected at ${auto.tunnelUrl} (heartbeat ${auto.ageS}s${if (auto.version.isNotBlank()) ", ${auto.version}" else ""})" to
                         MaterialTheme.colorScheme.primary
                 DiscoveryPhase.IDLE ->
-                    "○ ยังไม่มี daemon ที่ heartbeat — สลับไปจะเจอเองถ้ามีรอบใหม่" to
+                    "○ No daemon heartbeat — will find it on the next round" to
                         MaterialTheme.colorScheme.onSurfaceVariant
                 DiscoveryPhase.UNREACHABLE ->
-                    "○ อ่าน D1 ไม่ได้${if (auto.error.isNotBlank()) ": ${auto.error}" else ""} — ใช้ URL ที่มีอยู่ต่อไป" to
+                    "○ Cannot read D1${if (auto.error.isNotBlank()) ": ${auto.error}" else ""} — keep using the existing URL" to
                         MaterialTheme.colorScheme.error
             }
             Text(
@@ -1105,24 +1105,24 @@ private fun NodeCard(
                         runCatching { history.node() }
                             .onSuccess { found ->
                                 node = found
-                                if (found == null) err = "ยังไม่มีแถว tunnel — daemon ยังไม่ heartbeat"
+                                if (found == null) err = "No tunnel row yet — daemon has not heartbeated"
                             }
                             .onFailure { err = it.message ?: "error" }
                         checking = false
                     }
                 },
                 enabled = !checking,
-            ) { Text(if (discovery != null) "ตรวจตอนนี้" else "ค้นหา") }
+            ) { Text(if (discovery != null) "Check now" else "Discover") }
             val usable = node?.takeIf { it.online }?.tunnelUrl
             if (usable != null) {
-                Button(onClick = { onUse(usable) }) { Text("ใช้ URL นี้") }
+                Button(onClick = { onUse(usable) }) { Text("Use this URL") }
             }
         }
         val n = node
         if (n != null && discovery == null) {
             Text(
                 if (n.online) "● daemon online (${n.tunnelUrl}, heartbeat ${n.ageS}s, ${n.version})"
-                else "● daemon ออฟไลน์ (heartbeat ขาดเกิน 90s) — ไปรัน ai ให้เปิด tunnel ก่อน",
+                else "● daemon offline (heartbeat missing over 90s) — run ai to open a tunnel first",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1137,31 +1137,31 @@ private fun NodeCard(
 private fun UpdateRow(settings: SettingsStore) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
-    var msg by rememberSaveable { mutableStateOf("แอป v" + BuildConfig.VERSION_NAME) }
+    var msg by rememberSaveable { mutableStateOf("App v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("แอป • $msg", style = MaterialTheme.typography.labelMedium)
+        Text("App • $msg", style = MaterialTheme.typography.labelMedium)
         FilledTonalButton(
             onClick = {
-                busy = true; msg = "กำลังตรวจ…"
+                busy = true; msg = "Checking…"
                 scope.launch {
                     try {
                         val up = UpdateManager.check()
                         if (up == null) {
-                            msg = "ล่าสุดแล้ว (v" + BuildConfig.VERSION_NAME + ")"
+                            msg = "Up to date (v" + BuildConfig.VERSION_NAME + ")"
                             return@launch
                         }
-                        msg = "พบ ${up.tag} กำลังโหลด…"
-                        val apk = UpdateManager.download(ctx, up) { p -> msg = "โหลด $p% (${up.tag})" }
-                        msg = "พร้อมติดตั้ง ${up.tag}"
+                        msg = "Found ${up.tag}, downloading…"
+                        val apk = UpdateManager.download(ctx, up) { p -> msg = "Loading $p% (${up.tag})" }
+                        msg = "Ready to install ${up.tag}"
                         UpdateManager.install(ctx, apk)
                     } catch (e: Exception) {
-                        msg = "อัปเดตล้มเหลว: ${e.message}"
+                        msg = "Update failed: ${e.message}"
                     } finally { busy = false }
                 }
             },
             enabled = !busy,
-        ) { Text("ตรวจอัปเดต") }
+        ) { Text("Check for updates") }
     }
 }
 

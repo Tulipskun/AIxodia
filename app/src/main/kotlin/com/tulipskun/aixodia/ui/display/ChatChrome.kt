@@ -210,6 +210,7 @@ fun ChatComposer(
     draft: String,
     onDraftChange: (String) -> Unit,
     busy: Boolean,
+    connected: Boolean = true,
     /** False while a sent turn waits for its first word back: send stays put, disabled. */
     activityStarted: Boolean = true,
     onSend: () -> Unit,
@@ -227,7 +228,7 @@ fun ChatComposer(
     val stopLabel = stringResource(R.string.stop)
     val sendLabel = stringResource(R.string.send)
     val card = MaterialTheme.shapes.extraLarge
-    val canSend = draft.isNotBlank() || attachments.isNotEmpty()
+    val canSend = (draft.isNotBlank() || attachments.isNotEmpty()) && connected
     var commandMenuOpen by remember { mutableStateOf(false) }
     Column(
         modifier

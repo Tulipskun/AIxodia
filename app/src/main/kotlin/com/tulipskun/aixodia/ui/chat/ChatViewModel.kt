@@ -939,7 +939,7 @@ class ChatViewModel(
                 hasStoredRoute.value = true
                 notice.value = "Using $provider / $model for this chat"
             } else {
-                notice.value = "บันทึก provider/model ไม่สำเร็จ"
+                notice.value = "Failed to save provider/model"
             }
         }
     }
@@ -947,7 +947,7 @@ class ChatViewModel(
     /** Returns the open chat to the global agent defaults and forgets its pin. */
     fun clearModel() {
         if (!hasStoredRoute.value) {
-            notice.value = "แชทนี้ใช้ค่าของ agent อยู่แล้ว"
+            notice.value = "This chat already uses the agent default"
             return
         }
         viewModelScope.launch {
@@ -956,9 +956,9 @@ class ChatViewModel(
                 selectedProvider.value = ""
                 selectedModel.value = ""
                 hasStoredRoute.value = false
-                notice.value = "ยกเลิกการล็อกโมเดลของแชทนี้แล้ว — ใช้ค่าของ agent"
+                notice.value = "Cleared this chat model lock — using agent default"
             } else {
-                notice.value = "ยกเลิกการล็อกโมเดลไม่สำเร็จ"
+                notice.value = "Failed to clear the model lock"
             }
         }
     }
@@ -993,7 +993,7 @@ class ChatViewModel(
                 if (ref == null) failed++ else pendingAttachments.value = pendingAttachments.value + ref
             }
             if (failed > 0) {
-                notice.value = "อัปโหลดไม่สำเร็จ $failed จาก ${uris.size} ไฟล์"
+                notice.value = "Upload failed for $failed of ${uris.size} files"
             }
             uploading.value = false
         }
@@ -1004,6 +1004,10 @@ class ChatViewModel(
     }
 
     fun send(text: String) {
+        if (conn.value != ConnState.ONLINE) {
+            notice.value = "Not connected to the daemon"
+            return
+        }
         val attachments = pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
         answerSettled = false
@@ -1029,12 +1033,12 @@ class ChatViewModel(
         // printing whatever route happens to be current later would put another
         // turn's model next to this turn's tokens.
         // The live footer has to read like the settled one, so it names the
-        // model rather than "ตามค่าของ agent" and carries a clock. A pinned chat
+        // model rather than "agent default" and carries a clock. A pinned chat
         // knows its model; otherwise the daemon's default is the one that will
         // answer, and it is already in the catalogue.
         val modelLabel = selectedModel.value.ifBlank {
             providers.value.firstOrNull()?.defaultModel.orEmpty()
-        }.ifBlank { "ตามค่าของ agent" }
+        }.ifBlank { "agent default" }
         turnStats.value = TurnStats(
             model = modelLabel,
             startedAtMs = SystemClock.elapsedRealtime(),
@@ -1044,7 +1048,7 @@ class ChatViewModel(
             turnBaseSeq = repo.maxSeq(sessionId)
             val fresh = repo.send(sessionId, text.trim(), attachments)
             pendingAttachments.value = emptyList()
-            if (!fresh) notice.value = "ส่งไปแล้ว กำลังรอการตอบกลับ"
+            if (!fresh) notice.value = "Already sent, waiting for reply"
         }
     }
 
@@ -1055,7 +1059,7 @@ class ChatViewModel(
         send(lastSentText)
     }
 
-    /** "แชทใหม่" — the only session action that needs no argument. */
+    /** "New chat" — the only session action that needs no argument. */
     fun newChat() {
         viewModelScope.launch {
             runCatching { repo.createSession("") }
@@ -1066,7 +1070,7 @@ class ChatViewModel(
                     hasStoredRoute.value = false
                     settings.saveSession(it)
                 }
-                .onFailure { notice.value = "สร้างแชทใหม่ไม่สำเร็จ: ${it.message}" }
+                .onFailure { notice.value = "Failed to create a new chat: ${it.message}" }
         }
     }
 
@@ -1115,7 +1119,7 @@ class ChatViewModel(
         viewModelScope.launch {
             refreshDaemonStart()
             runCatching { repo.refreshLatest(sessionId) }
-                .onFailure { notice.value = "ดึงข้อมูลล่าสุดไม่สำเร็จ: ${it.message}" }
+                .onFailure { notice.value = "Failed to fetch latest: ${it.message}" }
         }
     }
 
@@ -1138,7 +1142,7 @@ class ChatViewModel(
     fun loadOlder() {
         viewModelScope.launch {
             runCatching { repo.loadOlder(sessionId) }
-                .onFailure { notice.value = "โหลดประวัติเก่าไม่สำเร็จ: ${it.message}" }
+                .onFailure { notice.value = "Failed to load older history: ${it.message}" }
         }
     }
 
@@ -1178,12 +1182,12 @@ class ChatViewModel(
                 notice.value = if (subAgentPinned.value) {
                     "Sub agent: $provider / $model"
                 } else if (enabled) {
-                    "เปิด sub agent ด้วยค่าของ agent"
+                    "Enable sub agent using the agent default"
                 } else {
-                    "ปิด sub agent ของแชทนี้"
+                    "Disable sub agent for this chat"
                 }
             } else {
-                notice.value = "บันทึก sub agent ไม่สำเร็จ"
+                notice.value = "Failed to save sub agent"
             }
         }
     }
@@ -1200,9 +1204,9 @@ class ChatViewModel(
                 // Re-read the effective values so the toggle shows what the
                 // agent's global sub-agent is, not the flag the chat had.
                 loadSubAgentConfig()
-                notice.value = "Sub agent ใช้ค่าของ agent แล้ว"
+                notice.value = "Sub agent now uses the agent default"
             } else {
-                notice.value = "ล้างค่า sub agent ไม่สำเร็จ"
+                notice.value = "Failed to clear sub agent"
             }
         }
     }

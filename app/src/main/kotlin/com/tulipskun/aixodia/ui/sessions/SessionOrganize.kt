@@ -327,10 +327,10 @@ fun RenameChatDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(field) }) { Text("บันทึก") }
+            TextButton(onClick = { onConfirm(field) }) { Text("Save") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("ยกเลิก") }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
 }
@@ -343,9 +343,9 @@ fun DeleteChatDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("ลบแชทนี้?") },
+        title = { Text("Delete this chat?") },
         text = {
-            Text("แชท “$title” และประวัติทั้งหมดจะถูกลบทั้งในเครื่องและบน D1")
+            Text("Chat \"$title\" and all its history will be deleted locally and on D1")
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
@@ -353,7 +353,7 @@ fun DeleteChatDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("ยกเลิก") }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
 }
