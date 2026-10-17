@@ -40,6 +40,7 @@ class SettingsStore(private val ctx: Context) {
     private val tokenFields = stringPreferencesKey("token_fields")
     private val tokenFieldsByProvider =
         stringPreferencesKey("token_fields_by_provider")
+    private val providersCache = stringPreferencesKey("providers_cache")
 
     /** The footer format for a provider, falling back to the shared default. */
     fun tokenFieldsFlow(provider: String) = ctx.ds.data.map { prefs ->
@@ -73,6 +74,7 @@ class SettingsStore(private val ctx: Context) {
     val accountIdFlow: Flow<String> = ctx.ds.data.map { it[accountId] ?: "" }
     val databaseIdFlow: Flow<String> = ctx.ds.data.map { it[databaseId] ?: "" }
     val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "" }
+    val providersCacheFlow: Flow<String> = ctx.ds.data.map { it[providersCache] ?: "" }
 
     /** The cached daemon start time (unix second), 0 when never seen. */
     val daemonStartedAtFlow: Flow<Long> =
@@ -107,6 +109,10 @@ class SettingsStore(private val ctx: Context) {
             it[accountId] = accountValue
             it[databaseId] = databaseValue
         }
+    }
+
+    suspend fun saveProvidersCache(json: String) {
+        ctx.ds.edit { it[providersCache] = json }
     }
 
     /**

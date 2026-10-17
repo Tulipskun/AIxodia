@@ -83,7 +83,12 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
     var tested by remember { mutableStateOf(setOf<String>()) }
 
     LaunchedEffect(Unit) {
-        providers = history.providers()
+        // Show cached list immediately so the screen is not empty while the
+        // daemon is unreachable; then refresh from the daemon.
+        val cached = history.cachedProviders()
+        if (cached.isNotEmpty()) { providers = cached; loaded = true }
+        val fresh = history.providers()
+        if (fresh.isNotEmpty()) providers = fresh
         loaded = true
     }
 

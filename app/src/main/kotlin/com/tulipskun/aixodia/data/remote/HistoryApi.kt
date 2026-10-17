@@ -16,6 +16,7 @@ import com.tulipskun.aixodia.data.model.ProvidersPage
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType
@@ -416,14 +417,25 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** Every configured provider with its reachability and last error. */
     suspend fun providers(): List<ProviderStatus> = withContext(Dispatchers.IO) {
-        val base = absoluteUrl(settings.current().daemonUrl) ?: return@withContext emptyList()
-        runCatching {
+        val base = absoluteUrl(settings.current().daemonUrl) ?: return@withContext cachedProviders()
+        val list = runCatching {
             val req = Request.Builder().url("$base/api/providers")
                 .header("Authorization", "Bearer ${settings.current().token}").get().build()
             client.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) return@use emptyList()
                 providersAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
             }
+        }.getOrDefault(emptyList())
+        if (list.isNotEmpty()) runCatching { settings.saveProvidersCache(providersAdapter.toJson(list)) }
+        if (list.isNotEmpty()) list else cachedProviders()
+    }
+
+    /** Last providers list cached locally, so the screen is not empty offline. */
+    suspend fun cachedProviders(): List<ProviderStatus> = withContext(Dispatchers.IO) {
+        runCatching {
+            val raw = settings.providersCacheFlow.first()
+            if (raw.isBlank()) emptyList()
+            else providersAdapter.fromJson(raw)?.providers ?: emptyList()
         }.getOrDefault(emptyList())
     }
 
