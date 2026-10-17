@@ -98,7 +98,6 @@ data class ProviderStatus(
     @Json(name = "id") val id: String = "",
     @Json(name = "adapter") val adapter: String = "",
     @Json(name = "endpoint") val endpoint: String = "",
-    @Json(name = "free_only") val freeOnly: Boolean = false,
     @Json(name = "key_count") val keyCount: Int = 0,
     @Json(name = "model_count") val modelCount: Int = 0,
     @Json(name = "reachable") val reachable: Boolean = false,

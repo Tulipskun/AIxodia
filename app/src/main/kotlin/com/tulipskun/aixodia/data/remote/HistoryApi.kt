@@ -315,7 +315,7 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** Adds a provider. The key travels once, in this request, and is never read back. */
     suspend fun addProvider(
-        id: String, adapter: String, endpoint: String, keys: List<String>, freeOnly: Boolean,
+        id: String, adapter: String, endpoint: String, keys: List<String>,
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "ยังตั้งค่า URL ไม่ครบ"
@@ -323,7 +323,6 @@ class HistoryApi(private val settings: SettingsStore) {
             .put("id", id)
             .put("adapter", adapter)
             .put("endpoint", endpoint)
-            .put("free_only", freeOnly)
             .put("keys", JSONArray(keys))
             .toString()
         runCatching {

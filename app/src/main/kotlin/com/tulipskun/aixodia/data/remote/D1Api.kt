@@ -203,7 +203,7 @@ class D1Api(private val settings: SettingsStore) {
 
     /** The session list, newest first. */
     suspend fun sessions(): List<SessionRow> = query(
-        "SELECT id, title, provider, model, created_at, updated_at FROM sessions " +
+        "SELECT id, title, provider, model, created_at, updated_at FROM chat_sessions " +
             "ORDER BY updated_at DESC LIMIT 200",
     ).rows.map {
         SessionRow(
@@ -218,7 +218,7 @@ class D1Api(private val settings: SettingsStore) {
     /** Creates the chat in D1 too, so the drawer and the daemon agree. */
     suspend fun createSession(id: String, title: String): Boolean {
         query(
-            "INSERT OR IGNORE INTO sessions(id, title, model, created_at, updated_at) " +
+            "INSERT OR IGNORE INTO chat_sessions(id, title, model, created_at, updated_at) " +
                 "VALUES(?, ?, '', unixepoch(), unixepoch())",
             listOf(id, title),
         )
@@ -227,7 +227,7 @@ class D1Api(private val settings: SettingsStore) {
 
     /** Renames a chat, the way Gemini/ChatGPT let you retitle a conversation. */
     suspend fun renameSession(sessionId: String, title: String): Boolean = query(
-        "UPDATE sessions SET title = ?, updated_at = unixepoch() WHERE id = ?",
+        "UPDATE chat_sessions SET title = ?, updated_at = unixepoch() WHERE id = ?",
         listOf(title, sessionId),
     ).changes > 0
 
@@ -236,9 +236,8 @@ class D1Api(private val settings: SettingsStore) {
      * Worker used to run, one statement at a time so a failure names itself.
      */
     suspend fun deleteSession(sessionId: String): Boolean {
-        query("DELETE FROM turns WHERE session_id = ?", listOf(sessionId))
-        query("DELETE FROM state WHERE key = ?", listOf("sessions/$sessionId"))
-        return query("DELETE FROM sessions WHERE id = ?", listOf(sessionId)).changes > 0
+        query("DELETE FROM chat_turns WHERE session_id = ?", listOf(sessionId))
+        return query("DELETE FROM chat_sessions WHERE id = ?", listOf(sessionId)).changes > 0
     }
 
     /** One page of history, oldest-first, the way the thread renders. */
@@ -296,13 +295,32 @@ class D1Api(private val settings: SettingsStore) {
      * separate nodes table.
      */
     suspend fun node(): NodeInfo? {
-        val row = query("SELECT url, version, heartbeat FROM tunnel LIMIT 1")
-            .rows.firstOrNull() ?: return null
-        val url = row.optString("url").trim().trimEnd('/')
+        // New schema: daemon keys live in system_state. Fall back to the old
+        // tunnel row when the database predates the rename (or the keys are absent).
+        val triple = try {
+            val url = query("SELECT value FROM system_state WHERE key = ?", listOf("daemon/url"))
+                .rows.firstOrNull()?.optString("value")?.trim().orEmpty()
+            if (url.isBlank()) null
+            else Triple(
+                url,
+                query("SELECT value FROM system_state WHERE key = ?", listOf("daemon/version"))
+                    .rows.firstOrNull()?.optString("value").orEmpty(),
+                query("SELECT value FROM system_state WHERE key = ?", listOf("daemon/heartbeat"))
+                    .rows.firstOrNull()?.optString("value").orEmpty(),
+            )
+        } catch (e: Exception) {
+            if (!e.message.orEmpty().contains("no such table", ignoreCase = true)) throw e
+            null
+        }
+        val (urlRaw, version, heartbeatStr) = if (triple != null) triple else {
+            val row = query("SELECT url, version, heartbeat FROM tunnel LIMIT 1")
+                .rows.firstOrNull() ?: return null
+            Triple(row.optString("url"), row.optString("version"), row.optString("heartbeat"))
+        }
+        val url = urlRaw.trim().trimEnd('/')
         if (url.isBlank()) return null
-        val version = row.optString("version")
         val started = Regex("started=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-        val heartbeat = row.optLong("heartbeat")
+        val heartbeat = heartbeatStr.toLongOrNull() ?: 0L
         val ageS = if (heartbeat > 0L) nowSeconds() - heartbeat else -1L
         return NodeInfo(
             tunnelUrl = url,
@@ -323,7 +341,7 @@ class D1Api(private val settings: SettingsStore) {
      * read. It throws with a readable reason, so the screen can say why not.
      */
     suspend fun ping(): Int =
-        query("SELECT COUNT(*) AS n FROM sessions").rows.firstOrNull()?.optInt("n") ?: 0
+        query("SELECT COUNT(*) AS n FROM chat_sessions").rows.firstOrNull()?.optInt("n") ?: 0
 
     companion object {
         /** The one Cloudflare endpoint every call is addressed with. */
@@ -336,13 +354,13 @@ class D1Api(private val settings: SettingsStore) {
             "SELECT seq, role, agent, job_id, text, created_at, model, " +
                 "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, " +
                 "reasoning_tokens, reasoning_content, " +
-                "duration_ms, generation_ms, block FROM turns"
+                "duration_ms, generation_ms, block FROM chat_turns"
 
         /** The same page for a database whose daemon never wrote blocks. */
         private const val TURN_COLUMNS_LEGACY =
             "SELECT seq, role, agent, job_id, text, created_at, model, " +
                 "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, " +
                 "reasoning_tokens, reasoning_content, " +
-                "duration_ms, generation_ms FROM turns"
+                "duration_ms, generation_ms FROM chat_turns"
     }
 }
