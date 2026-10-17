@@ -393,7 +393,10 @@ class ChatViewModel(
             return
         }
         recordUsage(frame)
-        if (pendingThinkingMs == 0L && turnStats.value.startedAtMs > 0L) {
+        // The whole turn's time, from send to the answer arriving (includes
+        // tool execution): one figure for every pill in this turn, not a
+        // per-request sum.
+        if (turnStats.value.startedAtMs > 0L) {
             pendingThinkingMs = (SystemClock.elapsedRealtime() - turnStats.value.startedAtMs).coerceAtLeast(0L)
         }
         if (text.isBlank()) return
@@ -764,6 +767,11 @@ class ChatViewModel(
         // arrived, so stamp the figure now while their seqs are known.
         val sid = frame.sessionId.ifBlank { sessionId }
         val baseSeq = turnBaseSeq
+        // Use the full turn duration (send -> end of loop) for every pill,
+        // so they all show one consistent time.
+        if (turnStats.value.startedAtMs > 0L) {
+            pendingThinkingMs = (SystemClock.elapsedRealtime() - turnStats.value.startedAtMs).coerceAtLeast(0L)
+        }
         val thinkingMs = pendingThinkingMs
         clearLiveTurn()
         answerSettled = false

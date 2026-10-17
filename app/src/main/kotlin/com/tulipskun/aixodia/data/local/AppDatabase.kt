@@ -129,7 +129,7 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE sessionId = :sid")
     suspend fun deleteSession(sid: String)
 
-    @Query("UPDATE messages SET thinkingMs = :ms WHERE sessionId = :sid AND seq > :afterSeq AND thinkingMs = 0 AND (role = 'model' OR role = 'assistant')")
+    @Query("UPDATE messages SET thinkingMs = :ms WHERE sessionId = :sid AND seq > :afterSeq AND (role = 'model' OR role = 'assistant')")
     suspend fun stampThinking(sid: String, afterSeq: Long, ms: Long)
 }
 

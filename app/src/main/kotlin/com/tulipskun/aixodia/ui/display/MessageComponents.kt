@@ -287,7 +287,7 @@ fun MessageBlock(
             // whole block.
             val thought = m.reasoningContent.ifBlank { block.text }
             if (thought.isNotBlank()) {
-                ThoughtPill(block.thinkingMs, thought)
+                ThoughtPill(if (block.thinkingMs > 0L) block.thinkingMs else m.thinkingMs, thought)
             }
         } else if (block != null && !block.known) {
             // A kind of content this app has never seen: the plain card, so
