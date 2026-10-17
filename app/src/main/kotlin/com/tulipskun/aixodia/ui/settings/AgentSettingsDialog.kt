@@ -6,7 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.AgentRoute
-import com.tulipskun.aixodia.data.model.ProviderView
+import com.tulipskun.aixodia.data.model.ProviderStatus
 
 /**
  * Popup for agent model settings: two columns (main / sub), each with dropdowns
@@ -17,7 +17,7 @@ import com.tulipskun.aixodia.data.model.ProviderView
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentSettingsDialog(
-    providers: List<ProviderView>,
+    providers: List<ProviderStatus>,
     modelsByProvider: Map<String, List<com.tulipskun.aixodia.data.model.ModelView>>,
     mainRoute: AgentRoute,
     subRoute: AgentRoute,
