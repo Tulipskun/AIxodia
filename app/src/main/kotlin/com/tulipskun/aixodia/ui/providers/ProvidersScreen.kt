@@ -271,7 +271,7 @@ private fun ProviderCard(p: ProviderStatus, tested: Boolean, onClick: () -> Unit
             Column(Modifier.weight(1f)) {
                 Text(p.id, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${p.adapter} · ${p.keyCount} key" + if (p.freeOnly) " · ฟรี" else "",
+                    "${p.adapter} · ${p.keyCount} key",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -413,7 +413,6 @@ private fun AddProviderSheet(
     var adapter by rememberSaveable { mutableStateOf(adapters.first()) }
     var endpoint by rememberSaveable { mutableStateOf("") }
     var key by rememberSaveable { mutableStateOf("") }
-    var freeOnly by rememberSaveable { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
@@ -437,10 +436,6 @@ private fun AddProviderSheet(
                 label = { Text("Endpoint (https://…)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = key, onValueChange = { key = it }, singleLine = true,
                 label = { Text("API key") }, modifier = Modifier.fillMaxWidth())
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("ใช้เฉพาะโมเดลฟรี", modifier = Modifier.weight(1f))
-                Switch(checked = freeOnly, onCheckedChange = { freeOnly = it })
-            }
             if (error.isNotBlank()) {
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
@@ -449,7 +444,7 @@ private fun AddProviderSheet(
                 onClick = {
                     saving = true
                     scope.launch {
-                        val result = history.addProvider(id.trim(), adapter, endpoint.trim(), listOf(key.trim()), freeOnly)
+                        val result = history.addProvider(id.trim(), adapter, endpoint.trim(), listOf(key.trim()))
                         saving = false
                         val exists = history.providers().any { it.id == id.trim() }
                         if (exists) onAdded("เพิ่ม ${id.trim()} แล้ว") else error = result

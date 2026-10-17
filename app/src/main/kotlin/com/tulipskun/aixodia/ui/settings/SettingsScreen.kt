@@ -554,10 +554,10 @@ fun SettingsScreen(
     if (adding) {
         AddProviderDialog(
             onDismiss = { adding = false },
-            onAdd = { id, adapter, endpoint, key, freeOnly ->
+            onAdd = { id, adapter, endpoint, key ->
                 adding = false
                 scope.launch {
-                    msg = history.addProvider(id, adapter, endpoint, listOf(key), freeOnly)
+                    msg = history.addProvider(id, adapter, endpoint, listOf(key))
                     load(true)
                 }
             },
@@ -972,13 +972,12 @@ private fun selectedModel(
 @Composable
 private fun AddProviderDialog(
     onDismiss: () -> Unit,
-    onAdd: (String, String, String, String, Boolean) -> Unit,
+    onAdd: (String, String, String, String) -> Unit,
 ) {
     var id by rememberSaveable { mutableStateOf("") }
     var adapter by rememberSaveable { mutableStateOf("openai") }
     var endpoint by rememberSaveable { mutableStateOf("") }
     var key by rememberSaveable { mutableStateOf("") }
-    var freeOnly by rememberSaveable { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("เพิ่ม provider") },
@@ -1011,15 +1010,11 @@ private fun AddProviderDialog(
                         )
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = freeOnly, onCheckedChange = { freeOnly = it })
-                    Text("  ใช้เฉพาะโมเดลฟรี", style = MaterialTheme.typography.bodyMedium)
-                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onAdd(id.trim(), adapter, endpoint.trim(), key.trim(), freeOnly) },
+                onClick = { onAdd(id.trim(), adapter, endpoint.trim(), key.trim()) },
                 enabled = id.isNotBlank() && endpoint.startsWith("https://") && key.isNotBlank(),
             ) { Text("เพิ่ม") }
         },
