@@ -5,10 +5,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.tulipskun.aixodia.data.model.AgentRoute
 import com.tulipskun.aixodia.data.model.ProviderView
-import com.tulipskun.aixodia.data.remote.AgentRoute
-import com.tulipskun.aixodia.data.remote.AgentSettings
-import com.tulipskun.aixodia.data.remote.SettingsView
 
 /**
  * Popup for agent model settings: two columns (main / sub), each with dropdowns
@@ -16,6 +14,7 @@ import com.tulipskun.aixodia.data.remote.SettingsView
  * Sub agent reuses the same session/agent system as main (falls back to main
  * when left blank), so no parallel machinery is needed.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentSettingsDialog(
     providers: List<ProviderView>,
