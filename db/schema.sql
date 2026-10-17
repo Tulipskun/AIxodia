@@ -16,10 +16,3 @@ CREATE TABLE IF NOT EXISTS system_state (
 );
 
 
-CREATE TABLE IF NOT EXISTS engine_logs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  level TEXT NOT NULL DEFAULT 'info',
-  message TEXT NOT NULL DEFAULT '',
-  at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-CREATE INDEX IF NOT EXISTS idx_engine_logs_at ON engine_logs(at);
