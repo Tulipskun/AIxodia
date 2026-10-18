@@ -102,7 +102,13 @@ class TerminalSocket(private val settings: SettingsStore) {
 
     /** Dials the terminal, if it is not already dialing or up. */
     fun open() {
-        if (ws != null) return
+        // A socket left over from a previous session that died silently (app
+        // backgrounded, Doze, dropped Wi-Fi) would make this return without
+        // reconnecting, leaving the terminal stuck on a dead connection. Only
+        // skip dialing when the socket is genuinely open.
+        if (ws != null && _state.value == TermState.OPEN) return
+        // Clear any stale reference so dial() starts fresh.
+        ws = null
         closing = false
         _error.value = 0
         _state.value = TermState.CONNECTING
@@ -151,13 +157,33 @@ class TerminalSocket(private val settings: SettingsStore) {
         resizeAdapter.toJson(ResizeFrame(type = "resize", cols = cols, rows = rows))
 
     private suspend fun dial() {
-        val c = try {
+        // When the app is reopened the daemon address may not have been
+        // discovered yet (wsUrl is still blank). Wait briefly for discovery
+        // instead of failing immediately, so the terminal can connect once the
+        // address lands.
+        val deadline = System.currentTimeMillis() + 15_000
+        var c = try {
             settings.current()
         } catch (t: Throwable) {
             Log.w(TAG, "settings unreadable", t)
             _error.value = R.string.terminal_no_address
             _state.value = TermState.CLOSED
             return
+        }
+        while (terminalUrlFor(c.wsUrl).isBlank() || c.token.isBlank()) {
+            if (System.currentTimeMillis() >= deadline) {
+                _error.value = R.string.terminal_no_address
+                _state.value = TermState.CLOSED
+                return
+            }
+            kotlinx.coroutines.delay(500)
+            c = try {
+                settings.current()
+            } catch (t: Throwable) {
+                _error.value = R.string.terminal_no_address
+                _state.value = TermState.CLOSED
+                return
+            }
         }
         val url = terminalUrlFor(c.wsUrl)
         if (url.isBlank() || c.token.isBlank()) {
