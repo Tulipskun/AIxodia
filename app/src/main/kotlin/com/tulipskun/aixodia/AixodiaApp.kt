@@ -5,6 +5,7 @@ import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.remote.TerminalSocket
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,7 @@ class AppContainer(app: Application) {
     val settings = SettingsStore(app)
     val historyApi = HistoryApi(settings)
     val socket = AiDirectSocket(settings)
+    val terminal = TerminalSocket(settings)
     val repo = ChatRepository(db, historyApi, socket)
     val discovery = DaemonDiscovery(settings, historyApi, socket, scope)
 }

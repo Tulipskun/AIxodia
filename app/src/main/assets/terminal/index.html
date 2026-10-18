@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+  The terminal page. xterm.js is vendored next to this file (xterm.js,
+  xterm.css, addon-fit.js from @xterm/xterm 5.5.0 and @xterm/addon-fit 0.10.0)
+  so the terminal works with no network at all.
+
+  The two sides talk in base64 on purpose: a shell's output is arbitrary bytes
+  (ANSI escapes, partial UTF-8), and passing them as a JS string literal would
+  need escaping that gets it wrong. Bytes go out as base64, come back as base64,
+  and are written to xterm as bytes so xterm does the UTF-8 decoding.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0f14; }
+  #term { position: absolute; inset: 0; padding: 4px 0 2px 6px; }
+  /* The app paints the background, so the viewport must not paint its own over it. */
+  .xterm .xterm-viewport { background: transparent !important; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script>
+(function () {
+  var term = new Terminal({
+    cursorBlink: true,
+    scrollback: 2000,
+    fontSize: 14,
+    fontFamily: 'monospace',
+    theme: {
+      background: '#0b0f14',
+      foreground: '#d7e0ea',
+      cursor: '#d7e0ea',
+      selectionBackground: '#2c3a4a'
+    }
+  });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('term'));
+
+  function toBase64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  var lastCols = 0, lastRows = 0;
+  function fitNow() {
+    try { fit.fit(); } catch (e) { return; }
+    // Only report a real change: the app turns each report into a control frame
+    // and a SIGWINCH, and redrawing a full-screen program for nothing is rude.
+    if (term.cols !== lastCols || term.rows !== lastRows) {
+      lastCols = term.cols;
+      lastRows = term.rows;
+      if (window.aixodia) window.aixodia.resize(term.cols, term.rows);
+    }
+  }
+
+  // Keystrokes, including control characters: Ctrl-C arrives as 0x03 and is
+  // passed straight through as a byte.
+  term.onData(function (data) {
+    if (window.aixodia) window.aixodia.send(toBase64(new TextEncoder().encode(data)));
+  });
+
+  window.aixodiaWrite = function (b64) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    term.write(bytes);
+  };
+  window.aixodiaReset = function () { term.reset(); };
+  window.aixodiaFocus = function () { term.focus(); };
+  window.aixodiaFit = function () { fitNow(); };
+
+  window.addEventListener('resize', fitNow);
+  if (window.ResizeObserver) new ResizeObserver(fitNow).observe(document.getElementById('term'));
+
+  // Tell the app the page can render, then let it size the terminal. The first
+  // output can arrive before this point; the app holds it until then.
+  setTimeout(function () {
+    if (window.aixodia) window.aixodia.ready();
+    fitNow();
+    term.focus();
+  }, 50);
+})();
+</script>
+</body>
+</html>

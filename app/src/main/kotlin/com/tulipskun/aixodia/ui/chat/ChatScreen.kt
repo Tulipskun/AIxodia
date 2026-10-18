@@ -111,6 +111,7 @@ import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.remote.TerminalSocket
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.chat.ChatViewModel.LiveBlock
 import com.tulipskun.aixodia.ui.display.AttachSheet
@@ -138,6 +139,7 @@ import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
 import com.tulipskun.aixodia.ui.sessions.sessionTitle
 import com.tulipskun.aixodia.ui.providers.ProvidersScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
+import com.tulipskun.aixodia.ui.terminal.TerminalWindow
 import com.tulipskun.aixodia.update.UpdateManager
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -153,6 +155,7 @@ fun ChatScreen(
     settings: SettingsStore,
     history: HistoryApi,
     socket: AiDirectSocket,
+    terminal: TerminalSocket,
     discovery: DaemonDiscovery? = null,
 ) {
     val token by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
@@ -182,11 +185,13 @@ fun ChatScreen(
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     var showSettings by remember { mutableStateOf(false) }
     var showProviders by remember { mutableStateOf(false) }
+    var showTerminal by remember { mutableStateOf(false) }
 
     // Settings is a screen branch of the chat, not a separate Android route: the
     // system back button has to return here, not leave the app.
     BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showProviders) { showProviders = false }
+    BackHandler(enabled = showTerminal) { showTerminal = false }
 
     // Unconfigured installs stop here — before the ViewModel exists — so a
     // first launch cannot reach the network layer and crash. The settings
@@ -204,6 +209,16 @@ fun ChatScreen(
             onSubmit = { value -> configuredScope.launch { settings.saveD1(value) } },
             onOpenSettings = { showSettings = true },
         )
+        return
+    }
+
+    // The terminal is a branch of the chat like Settings, so the system back
+    // button closes the window instead of leaving the app — and it is the whole
+    // screen, because a shell that shares a screen with a chat composer is a
+    // shell in a letterbox. It needs no session and no view model: it talks to
+    // the machine, not to the chat.
+    if (showTerminal) {
+        TerminalWindow(socket = terminal, onClose = { showTerminal = false })
         return
     }
 
@@ -600,6 +615,7 @@ fun ChatScreen(
                                 vm.loadProviders()
                                 showModelPicker = true
                             },
+                            onTerminal = { showTerminal = true },
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                             attachments = pendingAttachments,
                             uploading = uploading,

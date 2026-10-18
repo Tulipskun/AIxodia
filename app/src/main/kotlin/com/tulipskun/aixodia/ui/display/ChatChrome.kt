@@ -307,6 +307,8 @@ fun ChatComposer(
     commands: List<ComposerCommand>,
     modelLabel: String,
     onModel: () -> Unit,
+    /** Opens the terminal window: the shell on the machine the engine runs on. */
+    onTerminal: () -> Unit = {},
     modifier: Modifier = Modifier,
     attachments: List<AttachmentRef> = emptyList(),
     uploading: Boolean = false,
@@ -410,6 +412,21 @@ fun ChatComposer(
                 PillControl(label = modelLabel, onClick = onModel)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // The terminal is a glyph, not a word: `>_` is what a prompt
+                // looks like, and it sits with the slash because both open
+                // something rather than send something.
+                DiscControl(
+                    label = stringResource(R.string.terminal),
+                    onClick = onTerminal,
+                    outlined = true,
+                ) {
+                    Text(
+                        ">_",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(Modifier.size(6.dp))
                 // The command menu is the slash: a slash at the start of a line
                 // is what it does, so the button can say it with one glyph and no
                 // word at all. It keeps the ring its neighbours do not wear, which

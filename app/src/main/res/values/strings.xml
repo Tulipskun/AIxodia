@@ -100,4 +100,12 @@
     <string name="login_hide">Hide</string>
     <string name="login_continue">Continue</string>
     <string name="login_advanced">Advanced settings</string>
+    <string name="terminal">เทอร์มินัล</string>
+    <string name="terminal_close">ปิดเทอร์มินัล</string>
+    <string name="terminal_open_new">เปิดเชลล์ใหม่</string>
+    <string name="terminal_connecting">กำลังเชื่อมต่อ…</string>
+    <string name="terminal_no_address">ยังไม่มีที่อยู่ของ daemon — รอให้แอพเจอเครื่องก่อน</string>
+    <string name="terminal_closed">การเชื่อมต่อปิดลง</string>
+    <string name="terminal_ended">เชลล์จบแล้ว (exit %1$d)</string>
+    <string name="terminal_failed">เทอร์มินัลผิดพลาด: %1$s</string>
 </resources>
