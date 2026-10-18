@@ -89,15 +89,16 @@
     <string name="token_fields_help">คั่นด้วยจุลภาค เรียงตามลำดับที่อยากเห็น\nใส่ได้: in out rate model time\nค่าเริ่มต้น: model,rate,time\n(in/out ของแต่ละเทิร์นปิดไว้ เพราะยอดรวมอยู่ในแถบเหนือช่องพิมพ์แล้ว)</string>
 
     <!-- First-launch sign-in. The token is the one credential, so this is a
-         login form rather than a pointer into Settings. English like the rest of
-         the shared vocabulary. -->
+         login form rather than a pointer into Settings. Plain, one-line copy
+         like any ordinary app's sign-in screen. -->
     <string name="login_title">Welcome to AIxodia</string>
-    <string name="login_subtitle">Sign in with your Cloudflare API token. Account, database and daemon URL are discovered automatically — chat history stays readable even when the daemon is down.</string>
+    <string name="login_subtitle">Enter your Cloudflare API token to get started.</string>
     <string name="login_token_label">Cloudflare API token</string>
-    <string name="login_token_placeholder">Paste your token</string>
-    <string name="login_paste">Paste from clipboard</string>
-    <string name="login_show">Show token</string>
-    <string name="login_hide">Hide token</string>
+    <string name="login_token_placeholder">Paste your token here</string>
+    <string name="login_token_hint">Your chats and settings are set up automatically.</string>
+    <string name="login_paste">Paste</string>
+    <string name="login_show">Show</string>
+    <string name="login_hide">Hide</string>
     <string name="login_continue">Continue</string>
     <string name="login_advanced">Advanced settings</string>
 </resources>
