@@ -508,7 +508,7 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault("Add failed")
     }
 
-    /** Edits one provider's key pool: add, remove by position, or replace wholesale. */
+    /** Edits one provider's keys: add, remove by position, or replace wholesale. */
     suspend fun changeKeys(
         providerId: String, add: List<String> = emptyList(), remove: List<Int> = emptyList(), replace: List<String> = emptyList(),
     ): String = withContext(Dispatchers.IO) {

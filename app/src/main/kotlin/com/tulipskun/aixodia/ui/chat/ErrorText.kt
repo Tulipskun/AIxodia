@@ -25,13 +25,13 @@ fun friendlyError(raw: String): String {
         // was misread as a rejected key, the user went to check a key that was
         // never the problem.
         "free tier" in s || "can only be used from within" in s ->
-            "The free-tier provider rejected the request; this is not an API key issue. Try again or switch models."
+            "The free-tier provider rejected the request; this is not a key issue. Try again or switch models."
 
         "401" in s || "403" in s || "unauthorized" in s || "forbidden" in s || "invalid api key" in s ->
-            "The provider rejected the API key. Check the key in Settings."
+            "The provider rejected the key. Check the key in Settings."
 
         "no api keys" in s ->
-            "No API key set for this provider. Add a key in Settings."
+            "No key set for this provider. Add a key in Settings."
 
         "unknown model" in s || "model is required" in s || "unknown provider" in s ->
             "The selected model or provider was not found. Check the model settings."

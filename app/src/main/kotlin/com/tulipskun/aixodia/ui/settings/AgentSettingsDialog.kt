@@ -10,7 +10,7 @@ import com.tulipskun.aixodia.data.model.ProviderStatus
 
 /**
  * Popup for agent model settings: two columns (main / sub), each with dropdowns
- * for provider, model, thinking level and temperature, plus an API-pool note.
+ * for provider, model, thinking level and temperature.
  * Sub agent reuses the same session/agent system as main (falls back to main
  * when left blank), so no parallel machinery is needed.
  */

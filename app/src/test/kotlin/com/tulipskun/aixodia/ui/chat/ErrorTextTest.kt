@@ -21,13 +21,13 @@ class ErrorTextTest {
 
     @Test fun missingKeyPointsToSettings() =
         assertEquals(
-            "No API key set for this provider. Add a key in Settings.",
+            "No key set for this provider. Add a key in Settings.",
             friendlyError("provider Zen has no API keys"),
         )
 
     @Test fun freeTierRefusalIsNotAKeyProblem() =
         assertEquals(
-            "The free-tier provider rejected the request; this is not an API key issue. Try again or switch models.",
+            "The free-tier provider rejected the request; this is not a key issue. Try again or switch models.",
             friendlyError(
                 "upstream_error: OpenCode's free tier can only be used from within OpenCode. " +
                     "Download it at https://opencode.ai and keep building.",

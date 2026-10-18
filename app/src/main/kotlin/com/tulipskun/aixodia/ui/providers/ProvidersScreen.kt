@@ -442,7 +442,7 @@ private fun AddProviderSheet(
             OutlinedTextField(value = endpoint, onValueChange = { endpoint = it }, singleLine = true,
                 label = { Text("Endpoint (https://…)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = key, onValueChange = { key = it }, singleLine = true,
-                label = { Text(if (adapter == "opencode") "API key (ไม่บังคับ — โหมดไม่ต้อง login)" else "API key") },
+                label = { Text(if (adapter == "opencode") "Key (ไม่บังคับ — โหมดไม่ต้อง login)" else "Key") },
                 modifier = Modifier.fillMaxWidth())
             if (error.isNotBlank()) {
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

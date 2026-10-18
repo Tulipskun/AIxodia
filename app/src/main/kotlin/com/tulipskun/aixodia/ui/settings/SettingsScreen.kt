@@ -621,7 +621,7 @@ fun SettingsScreen(
             title = { Text("Delete key #$position of ${provider.id}?") },
             text = {
                 Text(
-                    "Deletion cannot be undone; the daemon will forget this provider's test results. The number refers to the current pool position, not the key value.",
+                    "Deletion cannot be undone; the daemon will forget this provider's test results. The number refers to the key's position in the list, not the key value.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
@@ -715,7 +715,7 @@ private fun ProviderCard(
                 LabelledField(
                     value = key,
                     onValueChange = { key = it },
-                    label = "Add API key",
+                    label = "Add key",
                     modifier = Modifier.weight(1f),
                     trailing = {
                         IconButton(onClick = {
@@ -745,7 +745,7 @@ private fun ProviderCard(
                         Text("  Test")
                     }
                 }
-                TextButton(onClick = onReplaceKeys) { Text("Replace pool") }
+                TextButton(onClick = onReplaceKeys) { Text("Replace keys") }
                 TextButton(
                     onClick = onPickKeyToRemove,
                     enabled = provider.keyCount > 0,
@@ -761,7 +761,7 @@ private fun ProviderCard(
                 }
             }
             Text(
-                "Keys cannot be edited in place because the daemon does not return values — add a new key, delete by position, or replace the whole pool",
+                "Keys cannot be edited in place because the daemon does not return values — add a new key, delete by position, or replace all keys",
                 style = MaterialTheme.typography.labelSmall,
                 color = scheme.onSurfaceVariant,
             )
@@ -1014,7 +1014,7 @@ private fun AddProviderDialog(
                 )
                 LabelledField(
                     value = key, onValueChange = { key = it },
-                    label = "API key",
+                    label = "Key",
                     visualTransformation = PasswordVisualTransformation(),
                 )
                 Text("adapter", style = MaterialTheme.typography.labelMedium)
