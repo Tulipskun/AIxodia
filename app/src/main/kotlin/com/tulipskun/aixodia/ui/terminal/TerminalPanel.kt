@@ -35,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -79,6 +80,7 @@ private val InkDim = Color(0xFF8CA0B3)
 fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val state by socket.state.collectAsStateWithLifecycle()
     val errorRes by socket.error.collectAsStateWithLifecycle()
+    val detail by socket.detail.collectAsStateWithLifecycle()
     var ready by remember { mutableStateOf<TermEvent.Ready?>(null) }
     var ended by remember { mutableStateOf<TermEvent?>(null) }
     val page = remember { mutableStateOf<WebView?>(null) }
@@ -196,6 +198,17 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     },
                     onClose = { leaving = true },
                 )
+                if (detail.isNotBlank()) {
+                    Text(
+                        text = detail,
+                        color = Color(0xFF8899AA),
+                        fontSize = 11.sp,
+                        maxLines = 3,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                    )
+                }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     TerminalPage(
                         page = page,

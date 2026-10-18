@@ -86,6 +86,10 @@ class TerminalSocket(private val settings: SettingsStore) {
     private val _error = MutableStateFlow(0)
     val error: StateFlow<Int> = _error
 
+    /** Detailed, English, human-readable status for the panel — no logcat needed. */
+    private val _detail = MutableStateFlow("")
+    val detail: StateFlow<String> = _detail
+
     // A channel, not a StateFlow: terminal output is a stream, and a dropped
     // frame would leave the screen showing something the shell never printed.
     // Nothing is consumed until the page can render it, so a shell that answers
@@ -233,6 +237,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                 // hiccup, and a stored address may simply not have been read yet.
                 // Retry rather than showing a dead end the user cannot clear.
                 Log.w(TAG, "settings unreadable", t)
+                _detail.value = "settings.current() threw: ${t.message}"
                 delay(RETRY_MS)
                 continue
             }
@@ -242,6 +247,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                 // That is a real, actionable state, not discovery being slow.
                 _error.value = R.string.terminal_no_address
                 _state.value = TermState.CLOSED
+                _detail.value = "token blank in settings"
                 return
             }
             if (url.isBlank()) {
@@ -251,6 +257,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                 // the terminal saying "no daemon address" while the chat, which
                 // waits the same way, was already up. dial() re-reads settings on
                 // every pass, so it connects the moment the address lands.
+                _detail.value = "wsUrl empty (raw=${c.wsUrl}); waiting for discovery"
                 delay(RETRY_MS)
                 continue
             }
@@ -260,6 +267,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                 .header("Authorization", "Bearer ${c.token}")
                 .build()
             val outcome = CompletableDeferred<DialOutcome>()
+            _detail.value = "dialing $url"
             // Completed once an OPEN socket goes away: true when the shell ended
             // on its own (exit or error frame), false when the link dropped. That
             // is the difference between "show the result" and "dial again".
@@ -277,6 +285,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                     if (stale(w)) return
                     _state.value = TermState.OPEN
                     _error.value = 0
+                    _detail.value = "connected $url"
                     // The size the page already reported, now that there is a
                     // shell to tell it to.
                     pendingSize?.let { (cols, rows) -> w.send(resizeFrame(cols, rows)) }
@@ -315,6 +324,7 @@ class TerminalSocket(private val settings: SettingsStore) {
 
                 override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
                     Log.w(TAG, "terminal socket failure", t)
+                    _detail.value = "onFailure: ${t::class.simpleName}: ${t.message}; HTTP=${r?.code}"
                     // Complete first: the dialing coroutine is waiting on these
                     // even for a socket that is already stale. A token the daemon
                     // refuses cannot be fixed by trying again; anything else (a
@@ -332,6 +342,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                     // reconnects while the window is still open, or stops because
                     // close() set closing. Setting ENDED here is what used to leave
                     // a backgrounded app stuck on "the connection closed".
+                    _detail.value = "onClosed: code=$code reason=$reason"
                     outcome.complete(DialOutcome.RETRY)
                     ended.complete(false)
                     if (stale(w)) return
@@ -367,6 +378,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                     if (closing) return
                     _state.value = TermState.ENDED
                     _error.value = R.string.offline_token_rejected
+                    _detail.value = "token rejected (401)"
                     return
                 }
 
