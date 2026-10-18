@@ -131,7 +131,11 @@ fun SetupNeeded(
     var token by rememberSaveable { mutableStateOf("") }
     var showToken by remember { mutableStateOf(false) }
     val clip = LocalClipboardManager.current
-    Box(Modifier.fillMaxSize().imePadding()) {
+    // Edge-to-edge: the screen owns the whole window, so it has to keep its own
+    // content clear of the system bars. The navigation-bar inset is what keeps
+    // the version line at the bottom-right out from under the gesture bar; the
+    // IME inset lifts the whole form (and that line) above the keyboard.
+    Box(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
         Column(
             Modifier
                 .fillMaxSize()
