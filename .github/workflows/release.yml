@@ -101,3 +101,18 @@ jobs:
             --title "AIxodia ${{ steps.version.outputs.tag }}" \
             --target "${{ github.sha }}" \
             --generate-notes
+
+      # Only the newest release is kept. Every run deletes whatever it
+      # superseded (tag included), so the operator never prunes by hand and an
+      # install always has exactly one valid APK to find.
+      - name: Prune older releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          keep="${{ steps.version.outputs.tag }}"
+          gh release list --limit 1000 --json tagName --jq '.[].tagName' \
+            | while read -r tag; do
+                [ "$tag" = "$keep" ] && continue
+                echo "deleting superseded release $tag"
+                gh release delete "$tag" --yes --cleanup-tag
+              done
