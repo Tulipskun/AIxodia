@@ -25,10 +25,10 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -106,15 +106,17 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val altOn = remember { mutableStateOf(false) }
     val atBottom = remember { mutableStateOf(true) }
 
-    // Switching sessions must not leave the previous shell's bytes on screen:
-    // reset xterm so the new session (and its replayed ring buffer) renders
-    // cleanly instead of being appended to stale output.
+    // Switching session starts the page over rather than resetting it in place:
+    // a plain reset keeps the renderer and the scroll position, so the new
+    // shell's replayed screen can land on top of the old one. A reload is a cold
+    // xterm, and the page reports ready again once it is up.
     val lastSession = remember { mutableStateOf<String?>(null) }
     LaunchedEffect(activeSessionId) {
         if (lastSession.value != null && activeSessionId != lastSession.value && page.value != null) {
-            page.value?.evaluateJavascript("aixodiaReset()", null)
             ended = null
             ready = null
+            pageReady.value = false
+            page.value?.reload()
         }
         if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
     }
@@ -223,7 +225,12 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
             Column(
                 Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
+                    // The screen is the whole width and reaches the bottom edge;
+                    // only the status bar and the keyboard take room away. A
+                    // nav-bar inset here is what left a dead strip under the
+                    // composer, and horizontal insets left one at each side.
+                    .statusBarsPadding()
+                    .imePadding(),
             ) {
                 if (!imeVisible) {
                     TerminalHeader(
@@ -459,22 +466,24 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 2.dp),
+            // A little room under the field so it clears the gesture pill now
+            // that the nav-bar inset no longer lifts the whole panel.
+            .padding(start = 10.dp, end = 10.dp, top = 2.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
             value = text,
             onValueChange = { value ->
                 // A newline means the line is finished: send every completed line
-                // and keep only what is still being typed.
+                // and keep only what is still being typed. An empty line is not
+                // dropped — pressing return on a bare prompt sends the newline
+                // the shell is waiting for, exactly as it would from the screen.
                 var rest = value
                 var nl = rest.indexOf('\n')
                 while (nl >= 0) {
                     val line = rest.substring(0, nl)
-                    if (line.isNotEmpty()) {
-                        socket.send((line + "\n").toByteArray())
-                        onSend()
-                    }
+                    socket.send((line + "\n").toByteArray())
+                    onSend()
                     rest = rest.substring(nl + 1)
                     nl = rest.indexOf('\n')
                 }
@@ -607,6 +616,10 @@ private fun TerminalPage(
                 overScrollMode = View.OVER_SCROLL_NEVER
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = false
+                // The page is a local asset that must never come from a cache:
+                // a stale copy of the renderer is invisible and would survive
+                // every reload otherwise.
+                settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                 // The page is a local asset and has no reason to navigate; this
                 // also keeps a stray link from turning the terminal into a browser.
                 webViewClient = WebViewClient()
