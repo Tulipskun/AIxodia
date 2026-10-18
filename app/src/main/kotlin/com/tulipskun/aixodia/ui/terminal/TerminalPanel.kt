@@ -88,10 +88,26 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val state by socket.state.collectAsStateWithLifecycle()
     val errorRes by socket.error.collectAsStateWithLifecycle()
     val detail by socket.detail.collectAsStateWithLifecycle()
+    val activeSessionId by socket.activeSessionId.collectAsStateWithLifecycle()
+    val sessions by socket.sessions.collectAsStateWithLifecycle()
+
     var ready by remember { mutableStateOf<TermEvent.Ready?>(null) }
     var ended by remember { mutableStateOf<TermEvent?>(null) }
     val page = remember { mutableStateOf<WebView?>(null) }
     val pageReady = remember { mutableStateOf(false) }
+
+    // Switching sessions must not leave the previous shell's bytes on screen:
+    // reset xterm so the new session (and its replayed ring buffer) renders
+    // cleanly instead of being appended to stale output.
+    val lastSession = remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(activeSessionId) {
+        if (lastSession.value != null && activeSessionId != lastSession.value && page.value != null) {
+            page.value?.evaluateJavascript("aixodiaReset()", null)
+            ended = null
+            ready = null
+        }
+        if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
+    }
     var leaving by remember { mutableStateOf(false) }
     var appeared by remember { mutableStateOf(false) }
 
