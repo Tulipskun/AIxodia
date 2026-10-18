@@ -34,5 +34,5 @@ class AppContainer(app: Application) {
     val socket = AiDirectSocket(settings)
     val terminal = TerminalSocket(settings)
     val repo = ChatRepository(db, historyApi, socket)
-    val discovery = DaemonDiscovery(settings, historyApi, socket, scope)
+    val discovery = DaemonDiscovery(settings, historyApi, socket, terminal, scope)
 }

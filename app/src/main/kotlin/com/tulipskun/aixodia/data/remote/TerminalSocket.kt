@@ -29,9 +29,6 @@ import okio.ByteString
 
 private const val TAG = "TerminalSocket"
 
-/** How long to keep trying to open before giving up and telling the user. */
-private const val MAX_OPEN_ATTEMPTS = 30
-
 /** The gap between open attempts. Discovery polls every 30s, so this covers it. */
 private const val RETRY_MS = 1_500L
 
@@ -108,6 +105,12 @@ class TerminalSocket(private val settings: SettingsStore) {
     // against the new session.
     private var dialJob: Job? = null
 
+    // Whether the window wants a terminal. open() sets it, close() clears it.
+    // Unlike [isLive] it stays true while dial() is still waiting for the daemon
+    // address, which is the state a fresh sign-in starts in.
+    @Volatile
+    private var wanted = false
+
     // Touched from the socket's own callback thread as well as the UI's, so the
     // two flags that decide what a close means have to be visible across threads.
     @Volatile
@@ -119,15 +122,16 @@ class TerminalSocket(private val settings: SettingsStore) {
 
     /** Dials the terminal, if it is not already dialing or up. */
     fun open() {
+        wanted = true
         // A socket left over from a previous session that died silently (app
         // backgrounded, Doze, dropped Wi-Fi) would make this return without
         // reconnecting, leaving the terminal stuck on a dead connection. Only
         // skip dialing when the socket is genuinely open.
         if (ws != null && _state.value == TermState.OPEN) return
-        // Clear any stale reference so dial() starts fresh, and stop the previous
-        // dialing coroutine before it can act on its own socket's teardown.
+        // Stop the previous dialing coroutine and drop any socket it owned, so a
+        // replaced socket can never race its successor back to life.
         dialJob?.cancel()
-        ws = null
+        ws?.let { ws = null; it.cancel() }
         closing = false
         _error.value = 0
         // Events from the session that just ended are still sitting in the
@@ -136,6 +140,25 @@ class TerminalSocket(private val settings: SettingsStore) {
         // reopened window from instantly showing the previous run's exit.
         drainEvents()
         drainOutput()
+        _state.value = TermState.CONNECTING
+        dialJob = scope.launch { dial() }
+    }
+
+    /**
+     * Re-dials now, without waiting for the current link to fail. Used when
+     * discovery has just moved the daemon address: the socket is pointed at the
+     * old one and would otherwise sit there until its own retry.
+     */
+    fun reconnect() {
+        if (!wanted) return
+        reconnectLocked()
+    }
+
+    private fun reconnectLocked() {
+        dialJob?.cancel()
+        ws?.let { ws = null; it.cancel() }
+        closing = false
+        _error.value = 0
         _state.value = TermState.CONNECTING
         dialJob = scope.launch { dial() }
     }
@@ -160,6 +183,7 @@ class TerminalSocket(private val settings: SettingsStore) {
 
     /** Hangs up. The engine kills that shell; nothing is left running. */
     fun close() {
+        wanted = false
         closing = true
         dialJob?.cancel()
         dialJob = null
@@ -174,7 +198,7 @@ class TerminalSocket(private val settings: SettingsStore) {
      * foreground, where a socket that has quietly died should be redialed.
      */
     fun isLive(): Boolean =
-        ws != null && (_state.value == TermState.OPEN || _state.value == TermState.CONNECTING)
+        wanted && (_state.value == TermState.OPEN || _state.value == TermState.CONNECTING)
 
     /**
      * Keystrokes to the shell, exactly as typed: control characters are bytes,
@@ -200,16 +224,17 @@ class TerminalSocket(private val settings: SettingsStore) {
         resizeAdapter.toJson(ResizeFrame(type = "resize", cols = cols, rows = rows))
 
     private suspend fun dial() {
-        var attempt = 0
         var backoff = RETRY_MS
         while (!closing) {
             val c = try {
                 settings.current()
             } catch (t: Throwable) {
+                // A read that fails is not "there is no daemon": DataStore can
+                // hiccup, and a stored address may simply not have been read yet.
+                // Retry rather than showing a dead end the user cannot clear.
                 Log.w(TAG, "settings unreadable", t)
-                _error.value = R.string.terminal_no_address
-                _state.value = TermState.CLOSED
-                return
+                delay(RETRY_MS)
+                continue
             }
             val url = terminalUrlFor(c.wsUrl)
             if (c.token.isBlank()) {
@@ -332,7 +357,6 @@ class TerminalSocket(private val settings: SettingsStore) {
                     // was backgrounded, the daemon moved, Wi-Fi changed. Reconnect
                     // instead of leaving the panel on a dead connection. This is
                     // what makes returning to the app work.
-                    attempt = 0
                     backoff = RETRY_MS
                     _state.value = TermState.CONNECTING
                     _error.value = 0
@@ -348,12 +372,11 @@ class TerminalSocket(private val settings: SettingsStore) {
 
                 DialOutcome.RETRY -> {
                     if (closing) return
-                    attempt++
-                    if (attempt >= MAX_OPEN_ATTEMPTS) {
-                        _state.value = TermState.ENDED
-                        _error.value = R.string.terminal_closed
-                        return
-                    }
+                    // Keep retrying while the window wants a shell: the daemon may
+                    // be mid-restart and its address may be about to change. There
+                    // is no give-up here — calling it quits after a fixed number of
+                    // tries is what left the terminal on "no daemon address" while
+                    // the chat, which waits the same way, was already connected.
                     delay(backoff)
                     backoff = minOf(backoff * 2, 10_000L)
                 }

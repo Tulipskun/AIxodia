@@ -49,8 +49,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.remote.TermEvent
@@ -107,12 +105,10 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     }
 
     LaunchedEffect(Unit) { appeared = true }
-    // Coming back from the background is the moment a shell is most likely to
-    // have died quietly (Doze, a network switch, the daemon restarting). Redial
-    // if nothing is live, so the user is not left on "the connection closed".
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (!socket.isLive()) socket.open()
-    }
+    // The socket reconnects on its own when the link drops or the daemon moves,
+    // including while the app is in the background, so there is nothing to poke
+    // when it comes back. Keeping a reconnect here would only restart a shell
+    // that finished on purpose.
     LaunchedEffect(leaving) {
         if (leaving) {
             delay(240)

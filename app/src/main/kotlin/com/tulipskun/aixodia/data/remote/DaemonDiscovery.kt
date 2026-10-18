@@ -49,6 +49,7 @@ class DaemonDiscovery(
     private val settings: SettingsStore,
     private val history: HistoryApi,
     private val socket: AiDirectSocket,
+    private val terminal: TerminalSocket,
     private val scope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow(DiscoveryState())
@@ -82,8 +83,11 @@ class DaemonDiscovery(
                         settings.saveDaemon(action.url)
                         // The socket is pointed at the old address and would sit
                         // there until its own retry; a redeploy is exactly when
-                        // it should move now.
+                        // it should move now. The terminal is told too, so an
+                        // open window follows the daemon without waiting for its
+                        // old link to fail first.
                         socket.reconnect()
+                        terminal.reconnect()
                         _state.value = DiscoveryState(
                             phase = DiscoveryPhase.CONNECTED,
                             tunnelUrl = action.url,
