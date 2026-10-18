@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -66,21 +66,6 @@ jobs:
           echo "versionName=${next#v}" >> "$GITHUB_OUTPUT"
           echo "versionCode=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Set APK version
-        env:
-          VERSION_NAME: ${{ steps.version.outputs.versionName }}
-          VERSION_CODE: ${{ steps.version.outputs.versionCode }}
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import os, re
-          p = Path("app/build.gradle.kts")
-          s = p.read_text()
-          s = re.sub(r'versionCode = \d+', 'versionCode = ' + os.environ["VERSION_CODE"], s)
-          s = re.sub(r'versionName = "[^"]+"', 'versionName = "' + os.environ["VERSION_NAME"] + '"', s)
-          p.write_text(s)
-          PY
-
       # Re-recording the Paparazzi snapshots renders every composable on screen
       # and is the slowest task in the build. It only has to happen when the UI
       # itself changed, so a change to the data layer or the engine skips it.
@@ -95,10 +80,14 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # One Gradle invocation, not three: each separate invocation re-starts the
-      # daemon, re-configures every project and re-reads the task graph.
+      # CI builds and verifies, it does not publish. Releases are cut from a
+      # workstation with the same stable key (scripts/release.sh): one writer of
+      # release tags, so the two can never race for the same versionCode.
       - name: Build only (fast path)
-        run: gradle assembleDebug --console=plain
+        run: |
+          gradle assembleDebug --console=plain \
+            -PaixodiaVersionCode="${{ steps.version.outputs.versionCode }}" \
+            -PaixodiaVersionName="${{ steps.version.outputs.versionName }}"
 
       - name: Run checks (PR only)
         if: github.event_name == 'pull_request'
@@ -128,8 +117,8 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk AIxodia.apk
 
-      # Available as soon as the build finishes, without waiting for the release
-      # bookkeeping below.
+      # The signed artifact is for a reviewer to install by hand; publishing to a
+      # Release is scripts/release.sh, run from a workstation.
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -145,15 +134,3 @@ jobs:
       - name: Verify APK 16 KB alignment
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 AIxodia.apk
-
-      # NOTE: intentionally NO delete step (unlike Droid-SSH): every build
-      # publishes a new v0.1.<run> tag and keeps all previous releases,
-      # so users can always roll back. Same applicationId + same stable
-      # signature + higher versionCode = installs OVER the old APK,
-      # Room cache and settings are preserved, no uninstall needed.
-      - name: Publish GitHub Release (keep all previous releases)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          gh release create "$RELEASE_TAG" AIxodia.apk --title "AIxodia $RELEASE_TAG" --generate-notes

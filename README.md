@@ -68,8 +68,18 @@ without approval; the daemon owns no credential of its own.
 - The token used for `wrangler` stays in the shell (`CLOUDFLARE_API_TOKEN`); the
   repo contains config (`config/aixodia.example.json`) and no secrets. It needs
   Account → **D1: Edit**, which is what the app and the daemon both use it for.
-- A fresh app install has empty settings and shows a setup screen instead of
-  silently pointing somewhere.
+- A fresh app install has empty settings and opens a sign-in screen that asks
+  for the Cloudflare API token instead of silently pointing somewhere.
+
+## Releasing
+
+CI (`.github/workflows/android.yml`) builds and verifies but does not publish.
+A release is cut from a workstation with `scripts/release.sh`: it numbers the
+build one past the latest release, signs the APK with the stable key
+(`app/aixodia-debug.keystore`, kept as the `AIXODIA_KEYSTORE_B64` repository
+secret), checks the signature is that key, and creates the `v0.1.<n>` GitHub
+Release. Every release is kept, and the shared key plus a rising versionCode
+means an install updates over the previous APK — no uninstall, cache kept.
 
 ## Test it right now
 

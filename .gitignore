@@ -9,6 +9,7 @@ app/*.keystore
 app/aixodia-debug.keystore.b64
 *.jks
 local.env.json
+AIxodia.apk
 
 # runtime config + secrets (never commit)
 config/aixodia.json
