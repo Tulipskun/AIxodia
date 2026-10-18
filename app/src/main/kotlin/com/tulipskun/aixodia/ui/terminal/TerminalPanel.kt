@@ -220,6 +220,13 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                         page.value?.requestFocus()
                         socket.newSession()
                     },
+                    onCloseSession = {
+                        ended = null
+                        ready = null
+                        page.value?.evaluateJavascript("aixodiaReset()", null)
+                        page.value?.requestFocus()
+                        socket.closeSession()
+                    },
                     onClose = { leaving = true },
                 )
                 TerminalSessionBar(socket = socket)
@@ -250,6 +257,7 @@ private fun TerminalHeader(
     status: String,
     canRestart: Boolean,
     onRestart: () -> Unit,
+    onCloseSession: () -> Unit,
     onClose: () -> Unit,
 ) {
     Row(
@@ -282,6 +290,13 @@ private fun TerminalHeader(
                     tint = InkDim,
                 )
             }
+        }
+        IconButton(onClick = onCloseSession) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "Close session",
+                tint = InkDim,
+            )
         }
         IconButton(onClick = onClose) {
             Icon(
@@ -468,9 +483,8 @@ private fun TerminalPage(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 setBackgroundColor(0xFF0B0F14.toInt())
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                isVerticalScrollBarEnabled = false
-                overScrollMode = View.OVER_SCROLL_NEVER
+                isVerticalScrollBarEnabled = true
+                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = false
                 // The page is a local asset and has no reason to navigate; this

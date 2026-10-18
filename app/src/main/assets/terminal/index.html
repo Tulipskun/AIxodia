@@ -18,7 +18,7 @@
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0f14; }
   #term { position: absolute; inset: 0; padding: 4px 0 2px 6px; }
   /* The app paints the background, so the viewport must not paint its own over it. */
-  .xterm .xterm-viewport { background: transparent !important; }
+  .xterm .xterm-viewport { background: transparent !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
 </style>
 </head>
 <body>

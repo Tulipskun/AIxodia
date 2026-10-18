@@ -203,15 +203,23 @@ class TerminalSocket(private val settings: SettingsStore) {
     }
 
     /**
-     * Starts a brand-new shell on the engine, dropping any reattach id so the
-     * old (possibly still running) shell is left behind. Used by "open new shell".
+     * Kills the current shell and forgets its id, so the next dial asks the
+     * engine for a brand-new session. Used by the "close session" button.
      */
-    fun newSession() {
+    fun closeSession() {
+        val id = _activeSessionId.value
         scope.launch {
-            settings.clearTerminalSessionId()
-            close()
-            open()
+            if (id.isNotBlank()) {
+                val ids = settings.currentTerminalSessionIds().toMutableList()
+                ids.remove(id)
+                settings.saveTerminalSessionIds(ids)
+                settings.clearTerminalSessionId()
+            }
+            _sessions.value = settings.currentTerminalSessionIds()
+            _activeSessionId.value = ""
         }
+        close()
+        open()
     }
 
     /** Hangs up. The engine kills that shell; nothing is left running. */
@@ -223,6 +231,18 @@ class TerminalSocket(private val settings: SettingsStore) {
         ws?.close(1000, "window closed")
         ws = null
         _state.value = TermState.CLOSED
+    }
+
+    /**
+     * Starts a brand-new shell on the engine, dropping any reattach id so the
+     * old (possibly still running) shell is left behind. Used by "open new shell".
+     */
+    fun newSession() {
+        scope.launch {
+            settings.clearTerminalSessionId()
+            close()
+            open()
+        }
     }
 
     /**
