@@ -43,7 +43,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -51,7 +50,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -701,6 +703,11 @@ fun ChatScreen(
     }
 }
 
+/** How a thinking level reads in the picker: blank is the model's own default. */
+private fun thinkingLabel(level: String): String =
+    if (level.isBlank()) "Default" else level.replaceFirstChar { it.uppercase() }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatModelSheet(
     vm: ChatViewModel,
@@ -715,15 +722,23 @@ private fun ChatModelSheet(
     onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
+    var providerMenu by remember { mutableStateOf(false) }
+    var modelMenu by remember { mutableStateOf(false) }
+    var modelQuery by rememberSaveable { mutableStateOf("") }
+    var thinkingMenu by remember { mutableStateOf(false) }
+    var thinkingLevel by rememberSaveable { mutableStateOf("") }
     val provider = providers.firstOrNull { it.id == pickedProvider }
     val models = provider?.models.orEmpty()
     // The daemon's default model is the one a health check actually got an
     // answer from, so it leads the list: a catalogue of twenty models says
     // nothing about which one this key can use.
     val working = provider?.defaultModel.orEmpty()
-    val filtered = remember(models, query, working) {
-        val searched = if (query.isBlank()) models else models.filter { it.id.contains(query, true) || it.name.contains(query, true) }
+    // Thinking levels come from the daemon for the picked model, not from a
+    // fixed list here. An empty list means the model has nothing to choose, so
+    // the control is not shown at all rather than offered empty.
+    val thinkingOptions = models.firstOrNull { it.id == pickedModel }?.thinkingLevels.orEmpty()
+    val filtered = remember(models, modelQuery, working) {
+        val searched = if (modelQuery.isBlank()) models else models.filter { it.id.contains(modelQuery, true) || it.name.contains(modelQuery, true) }
         if (working.isBlank() || searched.none { it.id == working }) searched
         else listOf(searched.first { it.id == working }) + searched.filter { it.id != working }
     }
@@ -744,10 +759,10 @@ private fun ChatModelSheet(
                 .padding(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // This chat's own model: the main agent it answers with. Titled for the main
-            // agent because the section below is the sub agent's, and calling both
-            // "Sub agent" left the main one looking like it had gone missing.
-            Text("Model for this chat", style = MaterialTheme.typography.titleMedium)
+            // This chat's own model: the main agent it answers with. The provider
+            // is a drop-down rather than a row of chips so a long provider list
+            // opens over the dialog instead of pushing the model list off screen.
+            Text("Model", style = MaterialTheme.typography.titleMedium)
             if (providers.isEmpty()) {
                 Text(
                     "No provider yet — add or test a provider in Settings",
@@ -755,16 +770,30 @@ private fun ChatModelSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ExposedDropdownMenuBox(
+                    expanded = providerMenu,
+                    onExpandedChange = { providerMenu = it },
                 ) {
-                    providers.forEach { p ->
-                        FilterChip(
-                            selected = p.id == pickedProvider,
-                            onClick = { onProvider(p.id) },
-                            label = { Text(p.id) },
-                        )
+                    OutlinedTextField(
+                        value = pickedProvider,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Provider") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu)
+                        },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = providerMenu,
+                        onDismissRequest = { providerMenu = false },
+                    ) {
+                        providers.forEach { p ->
+                            DropdownMenuItem(
+                                text = { Text(p.id) },
+                                onClick = { onProvider(p.id); providerMenu = false },
+                            )
+                        }
                     }
                 }
                 val currentStatus = statuses[pickedProvider]
@@ -783,14 +812,6 @@ private fun ChatModelSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    label = { Text("Search models (${models.size})") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
                 if (pickedProvider.isBlank()) {
                     Text(
                         "Select a provider above first",
@@ -798,44 +819,97 @@ private fun ChatModelSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                // The list takes what is left of the sheet, so every model is
-                // reachable above the navigation bar instead of the first one
-                // hiding under it.
-                LazyColumn(Modifier.heightIn(max = 200.dp).fillMaxWidth()) {
-                    items(filtered) { m ->
-                        val selected = m.id == pickedModel
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(MaterialTheme.shapes.small)
-                                .background(
-                                    if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                                )
-                                .clickable { onModel(m.id) }
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                m.id,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (selected || m.id == working) FontWeight.SemiBold else FontWeight.Normal,
-                                modifier = Modifier.weight(1f),
+                // The model is the picked provider's catalogue, so it is already
+                // filtered by provider; typing narrows it further. A drop-down
+                // rather than a visible list keeps the dialog from scrolling.
+                ExposedDropdownMenuBox(
+                    expanded = modelMenu,
+                    onExpandedChange = { modelMenu = it },
+                ) {
+                    OutlinedTextField(
+                        value = if (modelMenu) modelQuery else pickedModel,
+                        onValueChange = { modelQuery = it; modelMenu = true },
+                        singleLine = true,
+                        label = { Text("Model (${models.size})") },
+                        placeholder = {
+                            Text(if (modelMenu) "Type to search" else "Select a model")
+                        },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu)
+                        },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = modelMenu,
+                        onDismissRequest = { modelMenu = false },
+                    ) {
+                        if (filtered.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No matching model") },
+                                onClick = {},
+                                enabled = false,
                             )
-                            if (m.id == working) {
-                                Text(
-                                    "Answers",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(end = 8.dp),
+                        } else {
+                            filtered.forEach { m ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            m.id,
+                                            fontWeight = if (m.id == pickedModel || m.id == working) {
+                                                FontWeight.SemiBold
+                                            } else {
+                                                FontWeight.Normal
+                                            },
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (m.id == working) {
+                                            Text(
+                                                "Answers",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        onModel(m.id)
+                                        modelQuery = ""
+                                        modelMenu = false
+                                    },
                                 )
                             }
-                            if (m.supportsStreaming) {
-                                Text(
-                                    "stream",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                        }
+                    }
+                }
+            }
+            // Chat-level thinking level, offered only when the daemon says this
+            // model has levels to pick. Persisting the choice per session still
+            // waits on the daemon's settings endpoint, so the value lives in
+            // local state for now and does not change what the agent sends.
+            if (thinkingOptions.isNotEmpty()) {
+                ExposedDropdownMenuBox(
+                    expanded = thinkingMenu,
+                    onExpandedChange = { thinkingMenu = it },
+                ) {
+                    OutlinedTextField(
+                        value = thinkingLabel(thinkingLevel),
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Thinking level") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = thinkingMenu)
+                        },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = thinkingMenu,
+                        onDismissRequest = { thinkingMenu = false },
+                    ) {
+                        (listOf("") + thinkingOptions).forEach { lvl ->
+                            DropdownMenuItem(
+                                text = { Text(thinkingLabel(lvl)) },
+                                onClick = { thinkingLevel = lvl; thinkingMenu = false },
+                            )
                         }
                     }
                 }

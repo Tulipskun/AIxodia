@@ -49,6 +49,10 @@ data class ModelView(
     // only two of it.
     @Json(name = "supports_temperature") val supportsTemperature: Boolean = false,
     @Json(name = "supports_thinking") val supportsThinking: Boolean = false,
+    // The thinking levels this model actually accepts, as the daemon reports
+    // them. Not a fixed list here on purpose: the allowed set is the provider's
+    // answer, so the picker offers exactly those and nothing invented.
+    @Json(name = "thinking_levels") val thinkingLevels: List<String> = emptyList(),
     @Json(name = "supports_top_p") val supportsTopP: Boolean = false,
     @Json(name = "supports_top_k") val supportsTopK: Boolean = false,
     @Json(name = "supports_stop_sequences") val supportsStopSequences: Boolean = false,
