@@ -11,8 +11,10 @@ import javax.net.SocketFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +28,15 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 
 private const val TAG = "TerminalSocket"
+
+/** How long to keep trying to open before giving up and telling the user. */
+private const val MAX_OPEN_ATTEMPTS = 30
+
+/** The gap between open attempts. Discovery polls every 30s, so this covers it. */
+private const val RETRY_MS = 1_500L
+
+/** How one dial ended, so the loop knows whether to retry. */
+private enum class DialOutcome { OPEN, RETRY, TOKEN_REJECTED }
 
 /** Where the terminal window stands, for the header line. */
 enum class TermState { CLOSED, CONNECTING, OPEN, ENDED }
@@ -91,6 +102,12 @@ class TerminalSocket(private val settings: SettingsStore) {
     @Volatile
     private var ws: WebSocket? = null
 
+    // The one dialing coroutine. open() and close() cancel it before starting a
+    // new one, so a socket that is being replaced can never race its successor
+    // back to life — the previous design let an old dial's late callbacks run
+    // against the new session.
+    private var dialJob: Job? = null
+
     // Touched from the socket's own callback thread as well as the UI's, so the
     // two flags that decide what a close means have to be visible across threads.
     @Volatile
@@ -107,12 +124,28 @@ class TerminalSocket(private val settings: SettingsStore) {
         // reconnecting, leaving the terminal stuck on a dead connection. Only
         // skip dialing when the socket is genuinely open.
         if (ws != null && _state.value == TermState.OPEN) return
-        // Clear any stale reference so dial() starts fresh.
+        // Clear any stale reference so dial() starts fresh, and stop the previous
+        // dialing coroutine before it can act on its own socket's teardown.
+        dialJob?.cancel()
         ws = null
         closing = false
         _error.value = 0
+        // Events from the session that just ended are still sitting in the
+        // unbounded channel if nobody was collecting when they arrived (the
+        // panel was already disposed). Draining them here is what keeps a
+        // reopened window from instantly showing the previous run's exit.
+        drainEvents()
+        drainOutput()
         _state.value = TermState.CONNECTING
-        scope.launch { dial() }
+        dialJob = scope.launch { dial() }
+    }
+
+    private fun drainEvents() {
+        while (_events.tryReceive().isSuccess) { /* drop stale events */ }
+    }
+
+    private fun drainOutput() {
+        while (_output.tryReceive().isSuccess) { /* drop stale bytes */ }
     }
 
     /**
@@ -128,10 +161,20 @@ class TerminalSocket(private val settings: SettingsStore) {
     /** Hangs up. The engine kills that shell; nothing is left running. */
     fun close() {
         closing = true
+        dialJob?.cancel()
+        dialJob = null
         ws?.close(1000, "window closed")
         ws = null
         _state.value = TermState.CLOSED
     }
+
+    /**
+     * True while a dial is in flight or a shell is up — the terminal is doing
+     * something and does not need to be poked. Used when the app returns to the
+     * foreground, where a socket that has quietly died should be redialed.
+     */
+    fun isLive(): Boolean =
+        ws != null && (_state.value == TermState.OPEN || _state.value == TermState.CONNECTING)
 
     /**
      * Keystrokes to the shell, exactly as typed: control characters are bytes,
@@ -157,110 +200,162 @@ class TerminalSocket(private val settings: SettingsStore) {
         resizeAdapter.toJson(ResizeFrame(type = "resize", cols = cols, rows = rows))
 
     private suspend fun dial() {
-        // When the app is reopened the daemon address may not have been
-        // discovered yet (wsUrl is still blank). Wait briefly for discovery
-        // instead of failing immediately, so the terminal can connect once the
-        // address lands.
-        val deadline = System.currentTimeMillis() + 15_000
-        var c = try {
-            settings.current()
-        } catch (t: Throwable) {
-            Log.w(TAG, "settings unreadable", t)
-            _error.value = R.string.terminal_no_address
-            _state.value = TermState.CLOSED
-            return
-        }
-        while (terminalUrlFor(c.wsUrl).isBlank() || c.token.isBlank()) {
-            if (System.currentTimeMillis() >= deadline) {
-                _error.value = R.string.terminal_no_address
-                _state.value = TermState.CLOSED
-                return
-            }
-            kotlinx.coroutines.delay(500)
-            c = try {
+        var attempt = 0
+        var backoff = RETRY_MS
+        while (!closing) {
+            val c = try {
                 settings.current()
             } catch (t: Throwable) {
+                Log.w(TAG, "settings unreadable", t)
                 _error.value = R.string.terminal_no_address
                 _state.value = TermState.CLOSED
                 return
             }
-        }
-        val url = terminalUrlFor(c.wsUrl)
-        if (url.isBlank() || c.token.isBlank()) {
-            // Same rule as the chat socket: a fresh install has no address yet,
-            // and the terminal waits quietly for discovery instead of dialing
-            // something that was never configured.
-            _error.value = R.string.terminal_no_address
-            _state.value = TermState.CLOSED
-            return
-        }
-        val req = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer ${c.token}")
-            .build()
-        val settled = CompletableDeferred<Unit>()
-        ws = client.newWebSocket(req, object : WebSocketListener() {
-            override fun onOpen(w: WebSocket, r: Response) {
-                _state.value = TermState.OPEN
-                // The size the page already reported, now that there is a shell
-                // to tell it to.
-                pendingSize?.let { (cols, rows) -> w.send(resizeFrame(cols, rows)) }
-                settled.complete(Unit)
-            }
-
-            override fun onMessage(w: WebSocket, bytes: ByteString) {
-                _output.trySend(bytes.toByteArray())
-            }
-
-            override fun onMessage(w: WebSocket, text: String) {
-                when (val ev = parseEvent(text)) {
-                    is TermEvent.Exit -> {
-                        _state.value = TermState.ENDED
-                        _events.trySend(ev)
-                    }
-
-                    is TermEvent.Failed -> {
-                        _state.value = TermState.ENDED
-                        _events.trySend(ev)
-                    }
-
-                    is TermEvent.Ready -> _events.trySend(ev)
-
-                    // An unreadable control frame is not worth ending a working
-                    // shell over; the bytes keep flowing either way.
-                    null -> Log.w(TAG, "unreadable control frame: ${text.take(120)}")
+            val url = terminalUrlFor(c.wsUrl)
+            if (url.isBlank() || c.token.isBlank()) {
+                // A fresh install has no address, and right after a reopen the
+                // stored one may still be the previous boot's while discovery
+                // fetches the current one. Wait for it rather than declaring the
+                // terminal dead on the spot.
+                if (attempt >= MAX_OPEN_ATTEMPTS) {
+                    _error.value = R.string.terminal_no_address
+                    _state.value = TermState.CLOSED
+                    return
                 }
+                attempt++
+                delay(RETRY_MS)
+                continue
             }
 
-            override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
-                Log.w(TAG, "terminal socket failure", t)
-                settled.complete(Unit)
-                ws = null
-                if (closing) return
-                _state.value = TermState.ENDED
-                _error.value = when (r?.code) {
-                    401 -> R.string.offline_token_rejected
-                    else -> R.string.terminal_closed
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer ${c.token}")
+                .build()
+            val outcome = CompletableDeferred<DialOutcome>()
+            // Completed once an OPEN socket goes away: true when the shell ended
+            // on its own (exit or error frame), false when the link dropped. That
+            // is the difference between "show the result" and "dial again".
+            val ended = CompletableDeferred<Boolean>()
+            ws = client.newWebSocket(req, object : WebSocketListener() {
+                // A socket that is no longer the current one must not touch shared
+                // state. When the window is reopened the previous socket's
+                // teardown callbacks arrive after the new dial has begun (or even
+                // after it is OPEN); without this guard they would slam the fresh
+                // session to ENDED and print "the connection closed" over a live
+                // terminal.
+                private fun stale(w: WebSocket): Boolean = ws !== w
+
+                override fun onOpen(w: WebSocket, r: Response) {
+                    if (stale(w)) return
+                    _state.value = TermState.OPEN
+                    _error.value = 0
+                    // The size the page already reported, now that there is a
+                    // shell to tell it to.
+                    pendingSize?.let { (cols, rows) -> w.send(resizeFrame(cols, rows)) }
+                    outcome.complete(DialOutcome.OPEN)
                 }
-            }
 
-            override fun onClosed(w: WebSocket, code: Int, reason: String) {
-                settled.complete(Unit)
-                ws = null
-                if (closing) return
-                if (_state.value == TermState.OPEN) {
-                    // The engine hung up without an exit frame: the shell is
-                    // gone either way, so say so rather than spinners forever.
+                override fun onMessage(w: WebSocket, bytes: ByteString) {
+                    if (stale(w)) return
+                    _output.trySend(bytes.toByteArray())
+                }
+
+                override fun onMessage(w: WebSocket, text: String) {
+                    if (stale(w)) return
+                    when (val ev = parseEvent(text)) {
+                        is TermEvent.Exit -> {
+                            // The shell finished. This is an outcome to show, not
+                            // something to retry, so dial() stops here.
+                            _state.value = TermState.ENDED
+                            _events.trySend(ev)
+                            ended.complete(true)
+                        }
+
+                        is TermEvent.Failed -> {
+                            _state.value = TermState.ENDED
+                            _events.trySend(ev)
+                            ended.complete(true)
+                        }
+
+                        is TermEvent.Ready -> _events.trySend(ev)
+
+                        // An unreadable control frame is not worth ending a
+                        // working shell over; the bytes keep flowing either way.
+                        null -> Log.w(TAG, "unreadable control frame: ${text.take(120)}")
+                    }
+                }
+
+                override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
+                    Log.w(TAG, "terminal socket failure", t)
+                    // Complete first: the dialing coroutine is waiting on these
+                    // even for a socket that is already stale. A token the daemon
+                    // refuses cannot be fixed by trying again; anything else (a
+                    // dropped network, a moved daemon) is worth another dial.
+                    outcome.complete(
+                        if (r?.code == 401) DialOutcome.TOKEN_REJECTED else DialOutcome.RETRY
+                    )
+                    ended.complete(false)
+                    if (stale(w)) return
+                    ws = null
+                }
+
+                override fun onClosed(w: WebSocket, code: Int, reason: String) {
+                    // Nothing is decided here: dial() reads ended == false and
+                    // reconnects while the window is still open, or stops because
+                    // close() set closing. Setting ENDED here is what used to leave
+                    // a backgrounded app stuck on "the connection closed".
+                    outcome.complete(DialOutcome.RETRY)
+                    ended.complete(false)
+                    if (stale(w)) return
+                    ws = null
+                }
+
+                override fun onClosing(w: WebSocket, code: Int, reason: String) {
+                    w.close(code, reason)
+                }
+            })
+
+            when (outcome.await()) {
+                DialOutcome.OPEN -> {
+                    // Up. Wait for it to go away before deciding what comes next.
+                    val shellEnded = ended.await()
+                    if (closing) return
+                    if (shellEnded) {
+                        // Exit/error frame already set the header; the restart
+                        // button is how the user asks for another shell.
+                        return
+                    }
+                    // The link dropped under a window that is still open — the app
+                    // was backgrounded, the daemon moved, Wi-Fi changed. Reconnect
+                    // instead of leaving the panel on a dead connection. This is
+                    // what makes returning to the app work.
+                    attempt = 0
+                    backoff = RETRY_MS
+                    _state.value = TermState.CONNECTING
+                    _error.value = 0
+                    delay(RETRY_MS)
+                }
+
+                DialOutcome.TOKEN_REJECTED -> {
+                    if (closing) return
                     _state.value = TermState.ENDED
-                    _error.value = R.string.terminal_closed
+                    _error.value = R.string.offline_token_rejected
+                    return
+                }
+
+                DialOutcome.RETRY -> {
+                    if (closing) return
+                    attempt++
+                    if (attempt >= MAX_OPEN_ATTEMPTS) {
+                        _state.value = TermState.ENDED
+                        _error.value = R.string.terminal_closed
+                        return
+                    }
+                    delay(backoff)
+                    backoff = minOf(backoff * 2, 10_000L)
                 }
             }
-
-            override fun onClosing(w: WebSocket, code: Int, reason: String) {
-                w.close(code, reason)
-            }
-        })
-        settled.await()
+        }
     }
 
     companion object {

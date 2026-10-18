@@ -209,7 +209,17 @@ class AiDirectSocket(private val settings: SettingsStore) {
                     .build()
                 val ready = CompletableDeferred<Unit>()
                 ws = client.newWebSocket(req, object : WebSocketListener() {
+                    // A socket that has been replaced must not touch shared state.
+                    // reconnect() cancels the old socket and the loop dials a new
+                    // one at once, so the old socket's onFailure/onClosed arrive
+                    // after the new one is already CONNECTING or ONLINE. Without
+                    // this guard they would slam the fresh link to OFFLINE, show
+                    // its error banner, and make the loop redial — the chat looks
+                    // dropped the moment the daemon moves.
+                    private fun stale(w: WebSocket): Boolean = ws !== w
+
                     override fun onOpen(w: WebSocket, r: Response) {
+                        if (stale(w)) return
                         _lastError.value = 0
                         val hello = inAdapter.toJson(
                             AiInput(
@@ -225,6 +235,7 @@ class AiDirectSocket(private val settings: SettingsStore) {
                     }
 
                     override fun onMessage(w: WebSocket, text: String) {
+                        if (stale(w)) return
                         try {
                             val f = outAdapter.fromJson(text) ?: return
                             _frames.tryEmit(f)
@@ -239,12 +250,17 @@ class AiDirectSocket(private val settings: SettingsStore) {
                     }
 
                     override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
+                        // Complete first: the dialing coroutine is waiting on this
+                        // even for a socket that is already stale.
                         if (!ready.isCompleted) ready.complete(Unit)
+                        if (stale(w)) return
                         _state.value = ConnState.OFFLINE
                         _lastError.value = describe(r, t)
                     }
 
                     override fun onClosed(w: WebSocket, code: Int, reason: String) {
+                        if (!ready.isCompleted) ready.complete(Unit)
+                        if (stale(w)) return
                         _state.value = ConnState.OFFLINE
                         if (code == 1008 || reason.isNotEmpty()) {
                             _lastError.value = R.string.offline_closed
