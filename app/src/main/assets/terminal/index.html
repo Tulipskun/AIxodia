@@ -17,10 +17,17 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0f14; }
   #term { position: absolute; inset: 0; padding: 4px 0 2px 6px; }
-  /* The app paints the background, so the viewport must not paint its own over it.
-     The screen does not scroll locally: a swipe is turned into Page Up/Down below,
-     so the shell redraws the screen itself the way Termux does. */
-  .xterm .xterm-viewport { background: transparent !important; overflow-y: hidden !important; touch-action: none; }
+  /* The app paints the background, so the viewport must not paint its own over
+     it. The viewport keeps xterm's own overflow (it must not be hidden):
+     xterm turns a finger drag into a scroll of this element, so the scrollback
+     follows the finger the way a phone terminal's does, instead of a swipe
+     being converted into Page Up/Down one step at a time. */
+  .xterm .xterm-viewport {
+    background: transparent !important;
+    overscroll-behavior: contain;
+  }
+  /* No scrollbar gutter: the screen is the whole width, as on a phone terminal. */
+  .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
 </style>
 </head>
 <body>
@@ -31,9 +38,12 @@
 (function () {
   var term = new Terminal({
     cursorBlink: true,
-    scrollback: 2000,
-    fontSize: 14,
+    scrollback: 5000,
+    fontSize: 13,
     fontFamily: 'monospace',
+    // New output pulls the view back to the bottom while the user is typing,
+    // and only stops doing so once they have scrolled up to read something.
+    scrollOnUserInput: true,
     theme: {
       background: '#0b0f14',
       foreground: '#d7e0ea',
@@ -64,37 +74,12 @@
   }
 
   // Keystrokes, including control characters: Ctrl-C arrives as 0x03 and is
-  // passed straight through as a byte.
+  // passed straight through as a byte. Typing straight into the screen is the
+  // terminal's own input path; the app's command field is a second way in, for
+  // when the phone keyboard is awkward, and it sends a finished line at once.
   term.onData(function (data) {
     if (window.aixodia) window.aixodia.send(toBase64(new TextEncoder().encode(data)));
   });
-
-  // Swiping the screen is Page Up / Page Down, the way a phone terminal scrolls
-  // a full-screen program: drag down for Page Up (older), drag up for Page Down
-  // (newer). The viewport does not scroll on its own (touch-action: none), so the
-  // key reaches the shell and the shell redraws.
-  var PAGE_UP = '\u001b[5~', PAGE_DOWN = '\u001b[6~', PAGE_STEP = 48;
-  var touchY = null, touchAccum = 0;
-  function sendPage(seq) {
-    if (window.aixodia) window.aixodia.send(toBase64(new TextEncoder().encode(seq)));
-  }
-  var pageScreen = document.getElementById('term');
-  pageScreen.addEventListener('touchstart', function (e) {
-    if (e.touches.length !== 1) { touchY = null; return; }
-    touchY = e.touches[0].clientY;
-    touchAccum = 0;
-  }, { passive: true });
-  pageScreen.addEventListener('touchmove', function (e) {
-    if (touchY === null || e.touches.length !== 1) return;
-    var y = e.touches[0].clientY;
-    touchAccum += (y - touchY);
-    touchY = y;
-    if (e.cancelable) e.preventDefault();
-    while (touchAccum <= -PAGE_STEP) { sendPage(PAGE_DOWN); touchAccum += PAGE_STEP; }
-    while (touchAccum >= PAGE_STEP) { sendPage(PAGE_UP); touchAccum -= PAGE_STEP; }
-  }, { passive: false });
-  pageScreen.addEventListener('touchend', function () { touchY = null; touchAccum = 0; }, { passive: true });
-  pageScreen.addEventListener('touchcancel', function () { touchY = null; touchAccum = 0; }, { passive: true });
 
   window.aixodiaWrite = function (b64) {
     var bin = atob(b64);
@@ -103,10 +88,13 @@
     term.write(bytes);
   };
   window.aixodiaReset = function () { term.reset(); };
-  window.aixodiaFocus = function () { term.focus(); };
+  window.aixodiaFocus = function () { term.focus(); term.scrollToBottom(); };
   window.aixodiaFit = function () { fitNow(); };
 
   window.addEventListener('resize', fitNow);
+  // The keyboard and the rotation both change the usable height; refit after the
+  // OS has settled so the shell's size matches what is on screen.
+  window.addEventListener('orientationchange', function () { setTimeout(fitNow, 200); });
   if (window.ResizeObserver) new ResizeObserver(fitNow).observe(document.getElementById('term'));
 
   // Tell the app the page can render, then let it size the terminal. The first

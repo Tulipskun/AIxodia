@@ -14,18 +14,20 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -48,9 +50,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -197,6 +199,12 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         }
     }
 
+    // While the soft keyboard is up the title and the session tabs step aside:
+    // they are the least useful chrome exactly when the screen is at its
+    // scarcest, and the terminal — the thing being typed into — gets the room
+    // instead. A full-screen program like opencode then fills what is left.
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
     AnimatedVisibility(
         visible = appeared && !leaving,
         enter = slideInHorizontally(animationSpec = tween(220), initialOffsetX = { it }),
@@ -208,27 +216,29 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
-                TerminalHeader(
-                    status = statusLine(state, errorRes, ready, ended) +
-                        (if (detail.isNotBlank()) "  ·  $detail" else ""),
-                    canRestart = state == TermState.CLOSED || state == TermState.ENDED,
-                    onRestart = {
-                        ended = null
-                        ready = null
-                        page.value?.evaluateJavascript("aixodiaReset()", null)
-                        page.value?.requestFocus()
-                        socket.newSession()
-                    },
-                    onCloseSession = {
-                        ended = null
-                        ready = null
-                        page.value?.evaluateJavascript("aixodiaReset()", null)
-                        page.value?.requestFocus()
-                        socket.closeSession()
-                    },
-                    onClose = { leaving = true },
-                )
-                TerminalSessionBar(socket = socket)
+                if (!imeVisible) {
+                    TerminalHeader(
+                        status = statusLine(state, errorRes, ready, ended) +
+                            (if (detail.isNotBlank()) "  ·  $detail" else ""),
+                        canRestart = state == TermState.CLOSED || state == TermState.ENDED,
+                        onRestart = {
+                            ended = null
+                            ready = null
+                            page.value?.evaluateJavascript("aixodiaReset()", null)
+                            page.value?.requestFocus()
+                            socket.newSession()
+                        },
+                        onCloseSession = {
+                            ended = null
+                            ready = null
+                            page.value?.evaluateJavascript("aixodiaReset()", null)
+                            page.value?.requestFocus()
+                            socket.closeSession()
+                        },
+                        onClose = { leaving = true },
+                    )
+                    TerminalSessionBar(socket = socket)
+                }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     TerminalPage(
                         page = page,
@@ -262,13 +272,13 @@ private fun TerminalHeader(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 6.dp),
+            .padding(start = 14.dp, end = 2.dp, top = 6.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 stringResource(R.string.terminal),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 color = InkText,
             )
             if (status.isNotBlank()) {
@@ -311,6 +321,7 @@ private fun TerminalHeader(
  * The keys a phone keyboard does not have. A shell without Ctrl-C cannot stop
  * anything, so these are not extras: they are what makes the terminal usable.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
     val keys = listOf(
@@ -327,12 +338,14 @@ private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
         "PgUp" to "\u001b[5~".toByteArray(),
         "PgDn" to "\u001b[6~".toByteArray(),
     )
-    Row(
+    // The keys wrap instead of scrolling sideways: a row that has to be dragged
+    // left and right hides the key you want behind the edge of the screen.
+    FlowRow(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         keys.forEach { (label, bytes) ->
             Surface(
@@ -340,21 +353,28 @@ private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.clickable { onKey(bytes) },
             ) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = InkText,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+                Box(
+                    Modifier
+                        .defaultMinSize(minWidth = 46.dp, minHeight = 34.dp)
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = InkText,
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Type a line and send it to the shell as one chunk (with a trailing newline so
- * it actually runs). Useful when the on-screen keyboard is awkward or when a
- * long command is easier to edit before sending.
+ * A line the phone keyboard can type into. Enter is the ordinary return key, not
+ * an IME "send" key: the newline that ends a line belongs to the shell, so the
+ * field never keeps one and pressing return runs what was typed, the way it does
+ * in any terminal.
  */
 @Composable
 private fun TerminalComposer(socket: TerminalSocket) {
@@ -362,39 +382,44 @@ private fun TerminalComposer(socket: TerminalSocket) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = { value ->
+                // A newline means the line is finished: send every completed line
+                // and keep only what is still being typed.
+                var rest = value
+                var nl = rest.indexOf('\n')
+                while (nl >= 0) {
+                    val line = rest.substring(0, nl)
+                    if (line.isNotEmpty()) socket.send((line + "\n").toByteArray())
+                    rest = rest.substring(nl + 1)
+                    nl = rest.indexOf('\n')
+                }
+                text = rest
+            },
             modifier = Modifier.weight(1f),
             placeholder = { Text("Type a command…", color = InkDim) },
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = InkText),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = {
-                if (text.isNotBlank()) {
-                    socket.send((text + "\n").toByteArray())
-                    text = ""
-                }
-            }),
+            maxLines = 3,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Default),
         )
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TerminalSessionBar(socket: TerminalSocket) {
     val sessions by socket.sessions.collectAsStateWithLifecycle()
     val active by socket.activeSessionId.collectAsStateWithLifecycle()
-    Row(
+    FlowRow(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         sessions.forEachIndexed { i, id ->
             val label = "Shell ${i + 1}"
@@ -473,8 +498,13 @@ private fun TerminalPage(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 setBackgroundColor(0xFF0B0F14.toInt())
-                // The screen never scrolls locally (a swipe is Page Up/Down in
-                // the page), so no scroll bar and no over-scroll glow.
+                // Tap the screen to type: the WebView has to be able to take
+                // focus, or the soft keyboard has nothing to appear for.
+                isFocusable = true
+                isFocusableInTouchMode = true
+                // The page itself never scrolls (the document is exactly one
+                // screen tall; the scrollback scrolls inside xterm), so the
+                // WebView gets no scroll bar and no over-scroll glow.
                 isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 settings.javaScriptEnabled = true
