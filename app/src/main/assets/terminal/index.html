@@ -17,8 +17,10 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0f14; }
   #term { position: absolute; inset: 0; padding: 4px 0 2px 6px; }
-  /* The app paints the background, so the viewport must not paint its own over it. */
-  .xterm .xterm-viewport { background: transparent !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  /* The app paints the background, so the viewport must not paint its own over it.
+     The screen does not scroll locally: a swipe is turned into Page Up/Down below,
+     so the shell redraws the screen itself the way Termux does. */
+  .xterm .xterm-viewport { background: transparent !important; overflow-y: hidden !important; touch-action: none; }
 </style>
 </head>
 <body>
@@ -66,6 +68,33 @@
   term.onData(function (data) {
     if (window.aixodia) window.aixodia.send(toBase64(new TextEncoder().encode(data)));
   });
+
+  // Swiping the screen is Page Up / Page Down, the way a phone terminal scrolls
+  // a full-screen program: drag down for Page Up (older), drag up for Page Down
+  // (newer). The viewport does not scroll on its own (touch-action: none), so the
+  // key reaches the shell and the shell redraws.
+  var PAGE_UP = '\u001b[5~', PAGE_DOWN = '\u001b[6~', PAGE_STEP = 48;
+  var touchY = null, touchAccum = 0;
+  function sendPage(seq) {
+    if (window.aixodia) window.aixodia.send(toBase64(new TextEncoder().encode(seq)));
+  }
+  var pageScreen = document.getElementById('term');
+  pageScreen.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) { touchY = null; return; }
+    touchY = e.touches[0].clientY;
+    touchAccum = 0;
+  }, { passive: true });
+  pageScreen.addEventListener('touchmove', function (e) {
+    if (touchY === null || e.touches.length !== 1) return;
+    var y = e.touches[0].clientY;
+    touchAccum += (y - touchY);
+    touchY = y;
+    if (e.cancelable) e.preventDefault();
+    while (touchAccum <= -PAGE_STEP) { sendPage(PAGE_DOWN); touchAccum += PAGE_STEP; }
+    while (touchAccum >= PAGE_STEP) { sendPage(PAGE_UP); touchAccum -= PAGE_STEP; }
+  }, { passive: false });
+  pageScreen.addEventListener('touchend', function () { touchY = null; touchAccum = 0; }, { passive: true });
+  pageScreen.addEventListener('touchcancel', function () { touchY = null; touchAccum = 0; }, { passive: true });
 
   window.aixodiaWrite = function (b64) {
     var bin = atob(b64);

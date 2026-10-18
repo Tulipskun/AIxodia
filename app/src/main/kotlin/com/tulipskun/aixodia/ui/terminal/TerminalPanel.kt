@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -382,15 +381,6 @@ private fun TerminalComposer(socket: TerminalSocket) {
                 }
             }),
         )
-        Button(
-            onClick = {
-                if (text.isNotBlank()) {
-                    socket.send((text + "\n").toByteArray())
-                    text = ""
-                }
-            },
-            enabled = text.isNotBlank(),
-        ) { Text("Send") }
     }
 }
 
@@ -483,8 +473,10 @@ private fun TerminalPage(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 setBackgroundColor(0xFF0B0F14.toInt())
-                isVerticalScrollBarEnabled = true
-                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                // The screen never scrolls locally (a swipe is Page Up/Down in
+                // the page), so no scroll bar and no over-scroll glow.
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = false
                 // The page is a local asset and has no reason to navigate; this

@@ -203,8 +203,11 @@ class TerminalSocket(private val settings: SettingsStore) {
     }
 
     /**
-     * Kills the current shell and forgets its id, so the next dial asks the
-     * engine for a brand-new session. Used by the "close session" button.
+     * Kills the current shell and forgets its id, then leaves the panel closed.
+     * Used by the "close session" button: it drops the tab and hangs up, and
+     * nothing dials again until the user asks for a shell (the header's
+     * open-new button) — a close that immediately opened a fresh shell is what
+     * made the session look like it came back on its own.
      */
     fun closeSession() {
         val id = _activeSessionId.value
@@ -219,7 +222,10 @@ class TerminalSocket(private val settings: SettingsStore) {
             _activeSessionId.value = ""
         }
         close()
-        open()
+        // Show it as finished, not as the brief CLOSED of a window that is about
+        // to dial: the header then reads "Connection closed" and offers the
+        // open-new button.
+        _state.value = TermState.ENDED
     }
 
     /** Hangs up. The engine kills that shell; nothing is left running. */
