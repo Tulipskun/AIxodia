@@ -41,7 +41,7 @@ enum class TermState { CLOSED, CONNECTING, OPEN, ENDED }
  */
 sealed interface TermEvent {
     /** The shell is up: what it is and where it starts. */
-    data class Ready(val shell: String, val cwd: String, val cols: Int, val rows: Int) : TermEvent
+    data class Ready(val shell: String, val cwd: String, val cols: Int, val rows: Int, val id: String = "") : TermEvent
 
     /** The shell ended on its own, with this exit code. The socket closes after. */
     data class Exit(val code: Int) : TermEvent
@@ -177,6 +177,18 @@ class TerminalSocket(private val settings: SettingsStore) {
         open()
     }
 
+    /**
+     * Starts a brand-new shell on the engine, dropping any reattach id so the
+     * old (possibly still running) shell is left behind. Used by "open new shell".
+     */
+    fun newSession() {
+        scope.launch {
+            settings.clearTerminalSessionId()
+            close()
+            open()
+        }
+    }
+
     /** Hangs up. The engine kills that shell; nothing is left running. */
     fun close() {
         wanted = false
@@ -233,7 +245,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                 delay(RETRY_MS)
                 continue
             }
-            val url = terminalUrlFor(c.wsUrl)
+            val urlBase = terminalUrlFor(c.wsUrl)
             if (c.token.isBlank()) {
                 // Nothing to connect with: the sign-in gate has not been passed.
                 // That is a real, actionable state, not discovery being slow.
@@ -242,7 +254,7 @@ class TerminalSocket(private val settings: SettingsStore) {
                 _detail.value = "token blank in settings"
                 return
             }
-            if (url.isBlank()) {
+            if (urlBase.isBlank()) {
                 // The token is set but the daemon address is not known yet: the
                 // app opened before discovery finished reading D1. Keep waiting
                 // for as long as the window is open — giving up here is what left
@@ -253,6 +265,12 @@ class TerminalSocket(private val settings: SettingsStore) {
                 delay(RETRY_MS)
                 continue
             }
+
+            // Reattach to a surviving shell when we have its id; otherwise ask the
+            // engine for a fresh one. The id is persisted so a killed-and-reopened
+            // app comes back to the same shell.
+            val sessionId = settings.currentTerminalSessionId()
+            val url = if (sessionId.isNotBlank()) "$urlBase?id=$sessionId" else urlBase
 
             val req = Request.Builder()
                 .url(url)
@@ -306,7 +324,12 @@ class TerminalSocket(private val settings: SettingsStore) {
                             ended.complete(true)
                         }
 
-                        is TermEvent.Ready -> _events.trySend(ev)
+                        is TermEvent.Ready -> {
+                            if (ev.id.isNotBlank()) {
+                                scope.launch { settings.saveTerminalSessionId(ev.id) }
+                            }
+                            _events.trySend(ev)
+                        }
 
                         // An unreadable control frame is not worth ending a
                         // working shell over; the bytes keep flowing either way.
@@ -421,7 +444,7 @@ internal fun parseEvent(text: String): TermEvent? {
         null
     } ?: return null
     return when (f.type) {
-        "ready" -> TermEvent.Ready(f.shell.orEmpty(), f.cwd.orEmpty(), f.cols ?: 0, f.rows ?: 0)
+        "ready" -> TermEvent.Ready(f.shell.orEmpty(), f.cwd.orEmpty(), f.cols ?: 0, f.rows ?: 0, f.id.orEmpty())
         "exit" -> TermEvent.Exit(f.code ?: 0)
         "error" -> TermEvent.Failed(f.error.orEmpty())
         else -> null
@@ -441,6 +464,7 @@ internal data class ControlFrame(
     val rows: Int?,
     val code: Int?,
     val error: String?,
+    val id: String?,
 )
 
 /** `{"type":"resize","cols":100,"rows":30}` — both sizes are always sent. */

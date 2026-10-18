@@ -30,6 +30,7 @@ class SettingsStore(private val ctx: Context) {
     private val accountId = stringPreferencesKey("account_id")
     private val databaseId = stringPreferencesKey("database_id")
     private val sessionId = stringPreferencesKey("session_id")
+    private val terminalSessionId = stringPreferencesKey("terminal_session_id")
     // The daemon's start time, kept so the header's uptime counter has a number
     // the moment the app opens — the D1 query that confirms it has not landed yet.
     private val daemonStartedAt = stringPreferencesKey("daemon_started_at")
@@ -77,6 +78,7 @@ class SettingsStore(private val ctx: Context) {
     val providersCacheFlow: Flow<String> = ctx.ds.data.map { it[providersCache] ?: "" }
 
     /** The cached daemon start time (unix second), 0 when never seen. */
+    val terminalSessionIdFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionId] ?: "" }
     val daemonStartedAtFlow: Flow<Long> =
         ctx.ds.data.map { it[daemonStartedAt]?.toLongOrNull() ?: 0L }
 
@@ -131,6 +133,20 @@ class SettingsStore(private val ctx: Context) {
     /** Switch session only — never touches connection settings. */
     suspend fun saveSession(sess: String) {
         ctx.ds.edit { it[sessionId] = sess.trim() }
+    }
+
+    /**
+     * Remembers when the daemon started, for the next open to count from. A
+     * non-positive time is the daemon not saying, and is not worth a write.
+     */
+    suspend fun currentTerminalSessionId(): String = terminalSessionIdFlow.first()
+
+    suspend fun saveTerminalSessionId(id: String) {
+        ctx.ds.edit { it[terminalSessionId] = id.trim() }
+    }
+
+    suspend fun clearTerminalSessionId() {
+        ctx.ds.edit { it.remove(terminalSessionId) }
     }
 
     /**
