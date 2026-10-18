@@ -35,4 +35,15 @@
     <string name="token_fields_label">Token counts shown</string>
     <string name="token_fields_subtitle">Choose which counts appear, and in what order</string>
     <string name="token_fields_help">Comma separated, in the order you want to read them\nAvailable: in out rate model time\nDefault: in,out,rate,model,time</string>
+
+    <!-- First-launch sign-in (see values/ for the note). -->
+    <string name="login_title">Welcome to AIxodia</string>
+    <string name="login_subtitle">Sign in with your Cloudflare API token. Account, database and daemon URL are discovered automatically — chat history stays readable even when the daemon is down.</string>
+    <string name="login_token_label">Cloudflare API token</string>
+    <string name="login_token_placeholder">Paste your token</string>
+    <string name="login_paste">Paste from clipboard</string>
+    <string name="login_show">Show token</string>
+    <string name="login_hide">Hide token</string>
+    <string name="login_continue">Continue</string>
+    <string name="login_advanced">Advanced settings</string>
 </resources>

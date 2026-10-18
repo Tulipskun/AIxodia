@@ -61,8 +61,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
+import com.tulipskun.aixodia.ui.settings.LabelledField
 
 /**
  * The blue that fills the send button. Deeper than the accent icons are drawn in
@@ -96,12 +107,33 @@ fun ConnDot(c: ConnState) {
     )
 }
 
-/** First-launch / unconfigured gate — before any network call. */
+/**
+ * First-launch sign-in gate — before any network call.
+ *
+ * A fresh install used to stop at a page whose only action was "Open Settings",
+ * which read as a roadblock: the one value the app needs (the Cloudflare token)
+ * sat one screen away behind a button. This asks for it directly, the way a
+ * login form does, and hands whatever was typed back to the caller. Saving that
+ * token is what flips the app into the chat, so nothing here has to know about
+ * the network — a bad token or an offline phone still lands in the chat, where
+ * the connection card explains itself, rather than locking the form.
+ *
+ * The token is the only credential: account, database and daemon URL are the
+ * token's own answer and are discovered for it. The Advanced link stays for the
+ * one thing discovery cannot fill in — a hand-typed daemon address.
+ */
 @Composable
-fun SetupNeeded(onOpen: () -> Unit) {
+fun SetupNeeded(
+    onSubmit: (String) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    var token by rememberSaveable { mutableStateOf("") }
+    var showToken by remember { mutableStateOf(false) }
+    val clip = LocalClipboardManager.current
     Column(
         Modifier
             .fillMaxSize()
+            .imePadding()
             .padding(28.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -113,26 +145,66 @@ fun SetupNeeded(onOpen: () -> Unit) {
             tint = MaterialTheme.colorScheme.primary,
         )
         Text(
-            "Welcome to AIxodia",
+            stringResource(R.string.login_title),
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.size(8.dp))
         Text(
-            "Enter a Cloudflare API token in Settings — account, database and daemon URL\n" +
-                "are discovered automatically. (Chat history is readable even if the daemon is down.)",
+            stringResource(R.string.login_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 420.dp),
         )
+        Spacer(Modifier.size(20.dp))
+        LabelledField(
+            label = stringResource(R.string.login_token_label),
+            value = token,
+            onValueChange = { token = it },
+            placeholder = stringResource(R.string.login_token_placeholder),
+            visualTransformation = if (showToken) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            modifier = Modifier.widthIn(max = 420.dp),
+            trailing = {
+                IconButton(
+                    onClick = {
+                        clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() }
+                    },
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = stringResource(R.string.login_paste),
+                    )
+                }
+                IconButton(onClick = { showToken = !showToken }) {
+                    Icon(
+                        if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = stringResource(
+                            if (showToken) R.string.login_hide else R.string.login_show,
+                        ),
+                    )
+                }
+            },
+        )
         Button(
-            onClick = onOpen,
+            onClick = { onSubmit(token.trim()) },
+            enabled = token.isNotBlank(),
             modifier = Modifier
-                .padding(top = 20.dp)
-                .fillMaxWidth()
-                .widthIn(max = 360.dp),
-        ) { Text("Open Settings") }
+                .padding(top = 16.dp)
+                .widthIn(max = 420.dp)
+                .fillMaxWidth(),
+        ) { Text(stringResource(R.string.login_continue)) }
+        OutlinedButton(
+            onClick = onOpenSettings,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .widthIn(max = 420.dp)
+                .fillMaxWidth(),
+        ) { Text(stringResource(R.string.login_advanced)) }
     }
 }
 

@@ -196,7 +196,10 @@ fun ChatScreen(
             )
             return
         }
-        SetupNeeded(onOpen = { showSettings = true })
+        SetupNeeded(
+            onSubmit = { value -> configuredScope.launch { settings.saveD1(value) } },
+            onOpenSettings = { showSettings = true },
+        )
         return
     }
 

@@ -21,7 +21,9 @@ class ScreenSnapshots {
     fun emptyChat() = paparazzi.snapshot { AIxodiaTheme { EmptyChatState() } }
 
     @Test
-    fun setupNeeded() = paparazzi.snapshot { AIxodiaTheme { SetupNeeded(onOpen = {}) } }
+    fun setupNeeded() = paparazzi.snapshot {
+        AIxodiaTheme { SetupNeeded(onSubmit = {}, onOpenSettings = {}) }
+    }
 
     @Test
     fun offlineBanner() = paparazzi.snapshot {
