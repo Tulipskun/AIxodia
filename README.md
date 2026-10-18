@@ -73,13 +73,15 @@ without approval; the daemon owns no credential of its own.
 
 ## Releasing
 
-CI (`.github/workflows/android.yml`) builds and verifies but does not publish.
-A release is cut from a workstation with `scripts/release.sh`: it numbers the
-build one past the latest release, signs the APK with the stable key
-(`app/aixodia-debug.keystore`, kept as the `AIXODIA_KEYSTORE_B64` repository
-secret), checks the signature is that key, and creates the `v0.1.<n>` GitHub
-Release. Every release is kept, and the shared key plus a rising versionCode
-means an install updates over the previous APK — no uninstall, cache kept.
+`.github/workflows/android.yml` builds and verifies every push but does not
+publish. A release is cut by hand, either from Actions → **Release** →
+*Run workflow* (`.github/workflows/release.yml`) or from a workstation with
+`scripts/release.sh`. Both number the build one past the latest release, sign
+the APK with the stable key (`app/aixodia-debug.keystore`, kept as the
+`AIXODIA_KEYSTORE_B64` repository secret), check the signature is that key, and
+create the `v0.1.<n>` GitHub Release. Every release is kept, and the shared key
+plus a rising versionCode means an install updates over the previous APK — no
+uninstall, cache kept.
 
 ## Test it right now
 

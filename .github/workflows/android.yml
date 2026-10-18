@@ -80,9 +80,9 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # CI builds and verifies, it does not publish. Releases are cut from a
-      # workstation with the same stable key (scripts/release.sh): one writer of
-      # release tags, so the two can never race for the same versionCode.
+      # This workflow builds and verifies, it does not publish. Releases are cut
+      # by .github/workflows/release.yml, triggered by hand: one writer of
+      # release tags, so two builds can never race for the same versionCode.
       - name: Build only (fast path)
         run: |
           gradle assembleDebug --console=plain \
@@ -118,7 +118,7 @@ jobs:
         run: cp app/build/outputs/apk/debug/app-debug.apk AIxodia.apk
 
       # The signed artifact is for a reviewer to install by hand; publishing to a
-      # Release is scripts/release.sh, run from a workstation.
+      # Release is .github/workflows/release.yml, triggered by hand.
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
