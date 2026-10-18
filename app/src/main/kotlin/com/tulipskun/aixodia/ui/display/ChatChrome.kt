@@ -163,7 +163,6 @@ fun SetupNeeded(
             value = token,
             onValueChange = { token = it },
             placeholder = stringResource(R.string.login_token_placeholder),
-            hint = stringResource(R.string.login_token_hint),
             visualTransformation = if (showToken) {
                 VisualTransformation.None
             } else {

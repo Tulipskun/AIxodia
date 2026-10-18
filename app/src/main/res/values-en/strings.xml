@@ -41,7 +41,6 @@
     <string name="login_subtitle">Enter your Cloudflare API token to get started.</string>
     <string name="login_token_label">Cloudflare API token</string>
     <string name="login_token_placeholder">Paste your token here</string>
-    <string name="login_token_hint">Your chats and settings are set up automatically.</string>
     <string name="login_paste">Paste</string>
     <string name="login_show">Show</string>
     <string name="login_hide">Hide</string>
