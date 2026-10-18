@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -25,8 +26,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.BottomSheetDefaults
@@ -71,7 +70,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.tulipskun.aixodia.data.model.AttachmentRef
@@ -319,6 +317,7 @@ fun ChatComposer(
 ) {
     val attachLabel = stringResource(R.string.attach)
     val stopLabel = stringResource(R.string.stop)
+    val sendLabel = stringResource(R.string.send)
     val card = MaterialTheme.shapes.extraLarge
     val canSend = (draft.isNotBlank() || attachments.isNotEmpty()) && connected
     var commandMenuOpen by remember { mutableStateOf(false) }
@@ -363,11 +362,7 @@ fun ChatComposer(
             textStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = MaterialTheme.colorScheme.onSurface,
             ),
-            // A chat message is one line: Enter ends the turn instead of adding a
-            // newline, so the keyboard's own send key is the way to send.
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { if (canSend && !busy) onSend() }),
+            maxLines = 5,
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             decorationBox = { inner ->
                 Box {
@@ -465,12 +460,21 @@ fun ChatComposer(
                     }
                 }
                 Spacer(Modifier.size(6.dp))
-                // Enter / the keyboard's send key ends the turn, so there is no
-                // send disc: the only control that belongs here is Stop, and only
-                // once the turn has answered with something.
+                // While the turn runs, send becomes stop — but only once the
+                // turn has answered with something. A question still on its way
+                // keeps the send arrow, disabled: there is nothing to stop yet.
                 if (busy && activityStarted) {
                     DiscControl(label = stopLabel, onClick = onStop, primary = true) { tint ->
                         Icon(Icons.Default.Stop, contentDescription = null, tint = tint)
+                    }
+                } else {
+                    DiscControl(
+                        label = sendLabel,
+                        onClick = onSend,
+                        enabled = canSend && !busy,
+                        primary = true,
+                    ) { tint ->
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = tint)
                     }
                 }
             }
