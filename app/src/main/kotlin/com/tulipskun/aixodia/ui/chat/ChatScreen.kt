@@ -106,6 +106,7 @@ import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
+import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
@@ -733,10 +734,14 @@ private fun ChatModelSheet(
     // answer from, so it leads the list: a catalogue of twenty models says
     // nothing about which one this key can use.
     val working = provider?.defaultModel.orEmpty()
-    // Thinking levels come from the daemon for the picked model, not from a
-    // fixed list here. An empty list means the model has nothing to choose, so
-    // the control is not shown at all rather than offered empty.
-    val thinkingOptions = models.firstOrNull { it.id == pickedModel }?.thinkingLevels.orEmpty()
+    // Thinking levels are the daemon's per-model answer. Until it reports
+    // thinking_levels, the set every provider accepts stands in so the picker
+    // is usable; a daemon list always wins over it.
+    val pickedModelView = models.firstOrNull { it.id == pickedModel }
+    val daemonLevels = pickedModelView?.thinkingLevels.orEmpty()
+    val thinkingOptions =
+        if (daemonLevels.isNotEmpty()) listOf("") + daemonLevels else GenerationSettings.thinkingLevels
+    val showThinking = pickedModelView?.supportsThinking == true || daemonLevels.isNotEmpty()
     val filtered = remember(models, modelQuery, working) {
         val searched = if (modelQuery.isBlank()) models else models.filter { it.id.contains(modelQuery, true) || it.name.contains(modelQuery, true) }
         if (working.isBlank() || searched.none { it.id == working }) searched
@@ -797,17 +802,18 @@ private fun ChatModelSheet(
                     }
                 }
                 val currentStatus = statuses[pickedProvider]
-                if (pickedProvider.isNotBlank()) {
+                val statusLine = when {
+                    currentStatus == null -> "No status"
+                    !currentStatus.probed -> "" // nothing to say until a test has run
+                    currentStatus.reachable -> buildString {
+                        append("OK")
+                        if (currentStatus.workingModel.isNotBlank()) append(" · ${currentStatus.workingModel}")
+                    }
+                    else -> "Unusable" + (if (currentStatus.lastError.isNotBlank()) " · ${currentStatus.lastError}" else "")
+                }
+                if (pickedProvider.isNotBlank() && statusLine.isNotBlank()) {
                     Text(
-                        when {
-                            currentStatus == null -> "No status"
-                            !currentStatus.probed -> "Not tested · key ${currentStatus.keyCount}"
-                            currentStatus.reachable -> buildString {
-                                append("OK · key ${currentStatus.keyCount}")
-                                if (currentStatus.workingModel.isNotBlank()) append(" · answers ${currentStatus.workingModel}")
-                            }
-                            else -> "Unusable" + (if (currentStatus.lastError.isNotBlank()) " · ${currentStatus.lastError}" else "")
-                        },
+                        statusLine,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -862,15 +868,6 @@ private fun ChatModelSheet(
                                             },
                                         )
                                     },
-                                    trailingIcon = {
-                                        if (m.id == working) {
-                                            Text(
-                                                "Answers",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                            )
-                                        }
-                                    },
                                     onClick = {
                                         onModel(m.id)
                                         modelQuery = ""
@@ -882,11 +879,10 @@ private fun ChatModelSheet(
                     }
                 }
             }
-            // Chat-level thinking level, offered only when the daemon says this
-            // model has levels to pick. Persisting the choice per session still
-            // waits on the daemon's settings endpoint, so the value lives in
-            // local state for now and does not change what the agent sends.
-            if (thinkingOptions.isNotEmpty()) {
+            // Chat-level thinking level. The choices are the daemon's; persisting
+            // the pick per session still waits on its settings endpoint, so the
+            // value lives in local state and does not change what the agent sends.
+            if (showThinking) {
                 ExposedDropdownMenuBox(
                     expanded = thinkingMenu,
                     onExpandedChange = { thinkingMenu = it },
@@ -905,7 +901,7 @@ private fun ChatModelSheet(
                         expanded = thinkingMenu,
                         onDismissRequest = { thinkingMenu = false },
                     ) {
-                        (listOf("") + thinkingOptions).forEach { lvl ->
+                        thinkingOptions.forEach { lvl ->
                             DropdownMenuItem(
                                 text = { Text(thinkingLabel(lvl)) },
                                 onClick = { thinkingLevel = lvl; thinkingMenu = false },
