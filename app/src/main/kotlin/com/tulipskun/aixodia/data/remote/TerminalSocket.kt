@@ -212,17 +212,20 @@ class TerminalSocket(private val settings: SettingsStore) {
                 return
             }
             val url = terminalUrlFor(c.wsUrl)
-            if (url.isBlank() || c.token.isBlank()) {
-                // A fresh install has no address, and right after a reopen the
-                // stored one may still be the previous boot's while discovery
-                // fetches the current one. Wait for it rather than declaring the
-                // terminal dead on the spot.
-                if (attempt >= MAX_OPEN_ATTEMPTS) {
-                    _error.value = R.string.terminal_no_address
-                    _state.value = TermState.CLOSED
-                    return
-                }
-                attempt++
+            if (c.token.isBlank()) {
+                // Nothing to connect with: the sign-in gate has not been passed.
+                // That is a real, actionable state, not discovery being slow.
+                _error.value = R.string.terminal_no_address
+                _state.value = TermState.CLOSED
+                return
+            }
+            if (url.isBlank()) {
+                // The token is set but the daemon address is not known yet: the
+                // app opened before discovery finished reading D1. Keep waiting
+                // for as long as the window is open — giving up here is what left
+                // the terminal saying "no daemon address" while the chat, which
+                // waits the same way, was already up. dial() re-reads settings on
+                // every pass, so it connects the moment the address lands.
                 delay(RETRY_MS)
                 continue
             }
