@@ -54,7 +54,12 @@ import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.remote.TermEvent
 import com.tulipskun.aixodia.data.remote.TermState
 import com.tulipskun.aixodia.data.remote.TerminalSocket
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The panel's own colours: a terminal reads as a terminal, not as a chat bubble. */
 private val Ink = Color(0xFF0B0F14)
@@ -121,14 +126,46 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     }
 
     // Terminal output is raw bytes, so it crosses the bridge as base64 and is
-    // written as bytes. Nothing is consumed until the page can draw, which is
-    // what keeps a prompt that answers in the first few milliseconds from being
+    // written as bytes. A shell answers one keystroke in several small writes —
+    // the echoed byte, then the prompt's redraw — and one evaluateJavascript per
+    // write is what makes typing stutter, because every one of them lands on the
+    // main thread. Bytes are gathered for a few milliseconds and handed over as
+    // one write instead, and the base64 happens off the main thread so only the
+    // bridge call itself is there. Nothing is consumed until the page can draw,
+    // which keeps a prompt that answers in the first few milliseconds from being
     // dropped on the floor.
     LaunchedEffect(pageReady.value) {
         if (!pageReady.value) return@LaunchedEffect
-        socket.output.collect { bytes ->
-            val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-            page.value?.evaluateJavascript("aixodiaWrite('$b64')", null)
+        val pending = ByteArrayOutputStream(8 * 1024)
+        val lock = Any()
+        // Conflated: a burst only needs to wake the writer once, and the writer
+        // drains everything that arrived while it was busy.
+        val arrived = Channel<Unit>(Channel.CONFLATED)
+        val pump = launch {
+            socket.output.collect { bytes ->
+                synchronized(lock) { pending.write(bytes) }
+                arrived.trySend(Unit)
+            }
+        }
+        try {
+            while (true) {
+                arrived.receive()
+                // Let a burst settle into a single write. A lone keystroke echo
+                // is alone on the wire, so this is the worst case it adds.
+                delay(4)
+                val batch = synchronized(lock) {
+                    val b = pending.toByteArray()
+                    pending.reset()
+                    b
+                }
+                if (batch.isEmpty()) continue
+                val b64 = withContext(Dispatchers.Default) {
+                    Base64.encodeToString(batch, Base64.NO_WRAP)
+                }
+                page.value?.evaluateJavascript("aixodiaWrite('$b64')", null)
+            }
+        } finally {
+            pump.cancel()
         }
     }
 

@@ -5,6 +5,9 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
+import java.net.InetAddress
+import java.net.Socket
+import javax.net.SocketFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +64,11 @@ class TerminalSocket(private val settings: SettingsStore) {
         // after about 100s. The app's own ping keeps a quiet terminal — sitting
         // at a prompt — comfortably alive from this side too.
         .pingInterval(java.time.Duration.ofSeconds(20))
+        // OkHttp leaves Nagle's algorithm on, which holds a small write until
+        // the previous one is acknowledged. A keystroke is exactly that small
+        // write, so every key would pay for it. A terminal wants each byte on
+        // the wire as soon as it is written.
+        .socketFactory(lowDelaySockets)
         .build()
 
     private val _state = MutableStateFlow(TermState.CLOSED)
@@ -253,6 +261,31 @@ class TerminalSocket(private val settings: SettingsStore) {
 
 private val controlMoshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
 private val controlAdapter = controlMoshi.adapter(ControlFrame::class.java)
+
+/**
+ * OkHttp leaves Nagle's algorithm on, so a small write can sit until the
+ * previous one is acknowledged. A terminal frame is small by nature — one
+ * keystroke, one byte — and that wait is the difference between typing feeling
+ * immediate and feeling lagged. TCP_NODELAY is set on the socket before TLS
+ * wraps it, so the option stays on the fd the encrypted stream uses.
+ */
+private val lowDelaySockets = object : SocketFactory() {
+    private val delegate = SocketFactory.getDefault()
+
+    private fun tuned(socket: Socket): Socket = socket.apply { tcpNoDelay = true }
+
+    override fun createSocket(host: String, port: Int): Socket =
+        tuned(delegate.createSocket(host, port))
+
+    override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+        tuned(delegate.createSocket(host, port, localHost, localPort))
+
+    override fun createSocket(host: InetAddress, port: Int): Socket =
+        tuned(delegate.createSocket(host, port))
+
+    override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
+        tuned(delegate.createSocket(address, port, localAddress, localPort))
+}
 
 /** Parses one control frame; null when it is not one we know. */
 internal fun parseEvent(text: String): TermEvent? {
