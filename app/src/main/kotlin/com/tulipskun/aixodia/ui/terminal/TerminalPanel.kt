@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +51,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.viewinterop.AndroidView
@@ -212,6 +215,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                             .padding(horizontal = 12.dp, vertical = 2.dp),
                     )
                 }
+                TerminalSessionBar(socket = socket)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     TerminalPage(
                         page = page,
@@ -228,6 +232,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                         page.value?.evaluateJavascript("aixodiaFocus()", null)
                     },
                 )
+                TerminalComposer(socket = socket)
             }
         }
     }
@@ -297,6 +302,8 @@ private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
         "\u2191" to "\u001b[A".toByteArray(),
         "\u2193" to "\u001b[B".toByteArray(),
         "\u2192" to "\u001b[C".toByteArray(),
+        "PgUp" to "\u001b[5~".toByteArray(),
+        "PgDn" to "\u001b[6~".toByteArray(),
     )
     Row(
         Modifier
@@ -318,6 +325,91 @@ private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * Type a line and send it to the shell as one chunk (with a trailing newline so
+ * it actually runs). Useful when the on-screen keyboard is awkward or when a
+ * long command is easier to edit before sending.
+ */
+@Composable
+private fun TerminalComposer(socket: TerminalSocket) {
+    var text by remember { mutableStateOf("") }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("Type a command…", color = InkDim) },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = InkText),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = {
+                if (text.isNotBlank()) {
+                    socket.send((text + "\n").toByteArray())
+                    text = ""
+                }
+            }),
+        )
+        Button(
+            onClick = {
+                if (text.isNotBlank()) {
+                    socket.send((text + "\n").toByteArray())
+                    text = ""
+                }
+            },
+            enabled = text.isNotBlank(),
+        ) { Text("Send") }
+    }
+}
+
+@Composable
+private fun TerminalSessionBar(socket: TerminalSocket) {
+    val sessions by socket.sessions.collectAsStateWithLifecycle()
+    val active by socket.activeSessionId.collectAsStateWithLifecycle()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        sessions.forEachIndexed { i, id ->
+            val label = "Shell ${i + 1}"
+            val selected = id == active || (active.isBlank() && i == sessions.lastIndex)
+            Surface(
+                color = if (selected) Color(0xFF2A3A4A) else InkLine,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.clickable { socket.switchSession(id) },
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (selected) Color(0xFFE8F0F8) else InkText,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+        Surface(
+            color = InkLine,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.clickable { socket.newSession() },
+        ) {
+            Text(
+                "+",
+                style = MaterialTheme.typography.labelMedium,
+                color = InkText,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
     }
 }

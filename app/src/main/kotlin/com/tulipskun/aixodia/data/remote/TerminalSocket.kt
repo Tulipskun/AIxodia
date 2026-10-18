@@ -74,6 +74,14 @@ class TerminalSocket(private val settings: SettingsStore) {
     private val _state = MutableStateFlow(TermState.CLOSED)
     val state: StateFlow<TermState> = _state
 
+    /** Known session ids on the engine, in creation order. */
+    private val _sessions = MutableStateFlow<List<String>>(emptyList())
+    val sessions: StateFlow<List<String>> = _sessions
+
+    /** The id the next dial will try to reattach to (empty = ask for a new one). */
+    private val _activeSessionId = MutableStateFlow("")
+    val activeSessionId: StateFlow<String> = _activeSessionId
+
     /** A string resource id for why the terminal is not up; 0 when nothing is wrong. */
     private val _error = MutableStateFlow(0)
     val error: StateFlow<Int> = _error
@@ -119,6 +127,10 @@ class TerminalSocket(private val settings: SettingsStore) {
     /** Dials the terminal, if it is not already dialing or up. */
     fun open() {
         wanted = true
+        scope.launch {
+            _activeSessionId.value = settings.currentTerminalSessionId()
+            _sessions.value = settings.currentTerminalSessionIds()
+        }
         // A socket left over from a previous session that died silently (app
         // backgrounded, Doze, dropped Wi-Fi) would make this return without
         // reconnecting, leaving the terminal stuck on a dead connection. Only
@@ -175,6 +187,19 @@ class TerminalSocket(private val settings: SettingsStore) {
     fun restart() {
         close()
         open()
+    }
+
+    /**
+     * Switches to an already-known session id and re-dials. Used by the tab row.
+     */
+    fun switchSession(id: String) {
+        if (id.isBlank()) return
+        scope.launch {
+            settings.saveTerminalSessionId(id)
+            _activeSessionId.value = id
+            close()
+            open()
+        }
     }
 
     /**
@@ -326,7 +351,14 @@ class TerminalSocket(private val settings: SettingsStore) {
 
                         is TermEvent.Ready -> {
                             if (ev.id.isNotBlank()) {
-                                scope.launch { settings.saveTerminalSessionId(ev.id) }
+                                scope.launch {
+                                    settings.saveTerminalSessionId(ev.id)
+                                    val ids = settings.currentTerminalSessionIds().toMutableList()
+                                    if (ev.id !in ids) ids.add(ev.id)
+                                    settings.saveTerminalSessionIds(ids)
+                                    _sessions.value = ids
+                                    _activeSessionId.value = ev.id
+                                }
                             }
                             _events.trySend(ev)
                         }
