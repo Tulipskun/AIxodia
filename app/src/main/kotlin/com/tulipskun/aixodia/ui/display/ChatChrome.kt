@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
+import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -130,81 +131,93 @@ fun SetupNeeded(
     var token by rememberSaveable { mutableStateOf("") }
     var showToken by remember { mutableStateOf(false) }
     val clip = LocalClipboardManager.current
-    Column(
-        Modifier
-            .fillMaxSize()
-            .imePadding()
-            .padding(28.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            Icons.Default.AutoAwesome,
-            contentDescription = null,
-            modifier = Modifier.size(48.dp).padding(bottom = 12.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
+    Box(Modifier.fillMaxSize().imePadding()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(28.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                Icons.Default.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp).padding(bottom = 12.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                stringResource(R.string.login_title),
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                stringResource(R.string.login_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 420.dp),
+            )
+            Spacer(Modifier.size(20.dp))
+            LabelledField(
+                label = stringResource(R.string.login_token_label),
+                value = token,
+                onValueChange = { token = it },
+                placeholder = stringResource(R.string.login_token_placeholder),
+                visualTransformation = if (showToken) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                modifier = Modifier.widthIn(max = 420.dp),
+                trailing = {
+                    IconButton(
+                        onClick = {
+                            clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() }
+                        },
+                    ) {
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = stringResource(R.string.login_paste),
+                        )
+                    }
+                    IconButton(onClick = { showToken = !showToken }) {
+                        Icon(
+                            if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = stringResource(
+                                if (showToken) R.string.login_hide else R.string.login_show,
+                            ),
+                        )
+                    }
+                },
+            )
+            Button(
+                onClick = { onSubmit(token.trim()) },
+                enabled = token.isNotBlank(),
+                modifier = Modifier
+                    .padding(top = 16.dp)
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth(),
+            ) { Text(stringResource(R.string.login_continue)) }
+            OutlinedButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth(),
+            ) { Text(stringResource(R.string.login_advanced)) }
+        }
+        // The build's own version, bottom-right, the corner a sign-in screen
+        // puts it in — one more thing the reader never has to think about until
+        // they need to say which build they are on.
         Text(
-            stringResource(R.string.login_title),
-            style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.size(8.dp))
-        Text(
-            stringResource(R.string.login_subtitle),
-            style = MaterialTheme.typography.bodyMedium,
+            "v${BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 420.dp),
-        )
-        Spacer(Modifier.size(20.dp))
-        LabelledField(
-            label = stringResource(R.string.login_token_label),
-            value = token,
-            onValueChange = { token = it },
-            placeholder = stringResource(R.string.login_token_placeholder),
-            visualTransformation = if (showToken) {
-                VisualTransformation.None
-            } else {
-                PasswordVisualTransformation()
-            },
-            modifier = Modifier.widthIn(max = 420.dp),
-            trailing = {
-                IconButton(
-                    onClick = {
-                        clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() }
-                    },
-                ) {
-                    Icon(
-                        Icons.Default.ContentCopy,
-                        contentDescription = stringResource(R.string.login_paste),
-                    )
-                }
-                IconButton(onClick = { showToken = !showToken }) {
-                    Icon(
-                        if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = stringResource(
-                            if (showToken) R.string.login_hide else R.string.login_show,
-                        ),
-                    )
-                }
-            },
-        )
-        Button(
-            onClick = { onSubmit(token.trim()) },
-            enabled = token.isNotBlank(),
             modifier = Modifier
-                .padding(top = 16.dp)
-                .widthIn(max = 420.dp)
-                .fillMaxWidth(),
-        ) { Text(stringResource(R.string.login_continue)) }
-        OutlinedButton(
-            onClick = onOpenSettings,
-            modifier = Modifier
-                .padding(top = 8.dp)
-                .widthIn(max = 420.dp)
-                .fillMaxWidth(),
-        ) { Text(stringResource(R.string.login_advanced)) }
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+        )
     }
 }
 
