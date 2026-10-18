@@ -63,6 +63,10 @@ class TerminalView @JvmOverloads constructor(
     private val bgPaint = Paint().apply { style = Paint.Style.FILL }
     private val cursorPaint = Paint().apply { style = Paint.Style.FILL }
 
+    // One BMP glyph can be drawn without allocating a String per cell per
+    // frame — which matters while a finger is flinging a screenful.
+    private val glyph = CharArray(2)
+
     var fontSizeSp = 13f
         set(value) {
             if (field == value) return
@@ -293,12 +297,17 @@ class TerminalView @JvmOverloads constructor(
                 p.color = applyDim(cellFg, attr)
                 val x = col * cellWidth
                 val combining = row.combiningAt(col)
-                val text = if (combining != null) {
-                    String(Character.toChars(cp)) + combining
+                if (combining == null && cp < 0x10000) {
+                    glyph[0] = cp.toChar()
+                    canvas.drawText(glyph, 0, 1, x, y, p)
                 } else {
-                    String(Character.toChars(cp))
+                    val text = if (combining != null) {
+                        String(Character.toChars(cp)) + combining
+                    } else {
+                        String(Character.toChars(cp))
+                    }
+                    canvas.drawText(text, x, y, p)
                 }
-                canvas.drawText(text, x, y, p)
                 if (attr and TerminalAttr.UNDERLINE != 0) drawUnderline(canvas, x, top, row.width[col], p.color)
                 if (attr and TerminalAttr.STRIKE != 0) drawStrike(canvas, x, top, row.width[col], p.color)
             }
@@ -428,8 +437,9 @@ class TerminalView @JvmOverloads constructor(
                     )
                     postInvalidateOnAnimation()
                 } else if (quick && !em.mouseReporting()) {
-                    // A tap with no program mouse mode is a no-op for now; the
-                    // panel may use it to raise the keyboard.
+                    // A tap on a terminal with no mouse mode is how you ask for
+                    // the keyboard; nothing is sent to the shell.
+                    showSoftKeyboard()
                     onUserInteraction?.invoke()
                 }
                 return true

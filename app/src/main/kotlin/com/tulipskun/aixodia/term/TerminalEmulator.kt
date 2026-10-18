@@ -52,7 +52,7 @@ class TerminalEmulator(
         private set
     var applicationKeypad = false
         private set
-    var bracketedPaste = true
+    var bracketedPaste = false
         private set
     var cursorStyle = 0
         private set
@@ -165,7 +165,6 @@ class TerminalEmulator(
             if (buffer.cursorCol > 0 || wrapPending) {
                 val col = if (wrapPending) columns - 1 else buffer.cursorCol - 1
                 if (col in 0 until columns) row().appendCombining(col, cp)
-                output.onScreenChanged()
             }
             return
         }
@@ -194,7 +193,6 @@ class TerminalEmulator(
             buffer.cursorCol = columns - 1
             if (autoWrap) wrapPending = true
         }
-        output.onScreenChanged()
     }
 
     // =======================================================================
