@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.DrawerValue
@@ -62,7 +61,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
@@ -86,6 +84,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -96,6 +95,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tulipskun.aixodia.BuildConfig
@@ -700,7 +701,6 @@ fun ChatScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatModelSheet(
     vm: ChatViewModel,
@@ -727,15 +727,21 @@ private fun ChatModelSheet(
         if (working.isBlank() || searched.none { it.id == working }) searched
         else listOf(searched.first { it.id == working }) + searched.filter { it.id != working }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
+    // A centred window, not a sheet: picking a model is a decision about this
+    // chat, and a dialog in the middle of the screen reads as one — the sheet
+    // had to be dragged up from the edge for what is a single choice, not a
+    // list of actions.
+    Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .widthIn(min = 320.dp, max = 360.dp)
+                .heightIn(max = 560.dp)
+                .shadow(8.dp, MaterialTheme.shapes.extraLarge)
+                .clip(MaterialTheme.shapes.extraLarge)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 12.dp),
+                .padding(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             // This chat's own model: the main agent it answers with. Titled for the main
