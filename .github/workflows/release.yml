@@ -1,11 +1,14 @@
 name: Release
 
-# android.yml builds and verifies every push; it deliberately does not publish.
-# This is the one place a release is cut, and it is triggered by hand. It reads
-# the same stable signing key from the repository secret, numbers the build one
-# past the highest published release, and refuses to publish an APK that is not
-# signed with that key — a different key cannot install over the last release.
+# android.yml builds and verifies every push; this workflow is the one place a
+# release is cut — now on every push to main as well as by hand, so each change
+# gets a fresh installable APK. It reads the stable signing key from the
+# repository secret and refuses to publish an APK signed with anything else: a
+# different key cannot install over the last release. One release at a time, so
+# two runs cannot race for the same versionCode.
 on:
+  push:
+    branches: ["main"]
   workflow_dispatch:
 
 # One release at a time: two runs numbering themselves against the same list
