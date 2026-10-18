@@ -1,8 +1,9 @@
 <!doctype html>
 <!--
   The terminal page. xterm.js is vendored next to this file (xterm.js,
-  xterm.css, addon-fit.js from @xterm/xterm 5.5.0 and @xterm/addon-fit 0.10.0)
-  so the terminal works with no network at all.
+  xterm.css, addon-fit.js from @xterm/xterm 5.5.0 and @xterm/addon-fit 0.10.0,
+  addon-webgl.js from @xterm/addon-webgl 0.18.0) so the terminal works with no
+  network at all.
 
   The two sides talk in base64 on purpose: a shell's output is arbitrary bytes
   (ANSI escapes, partial UTF-8), and passing them as a JS string literal would
@@ -25,6 +26,7 @@
   .xterm .xterm-viewport {
     background: transparent !important;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
   /* No scrollbar gutter: the screen is the whole width, as on a phone terminal. */
   .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
@@ -34,6 +36,7 @@
 <div id="term"></div>
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
+<script src="addon-webgl.js"></script>
 <script>
 (function () {
   var term = new Terminal({
@@ -55,6 +58,19 @@
   term.loadAddon(fit);
   term.open(document.getElementById('term'));
 
+  // Draw through WebGL when the WebView can: a whole screen is painted in one
+  // GPU pass instead of per-row canvas calls, which is what makes fast output
+  // and flick-scrolling feel smooth. If the context is lost (or unsupported)
+  // the addon is disposed and xterm goes back to its own canvas renderer, so
+  // this is always a win or a no-op, never a regression.
+  try {
+    var webgl = new WebglAddon.WebglAddon();
+    webgl.onContextLoss(function () { webgl.dispose(); });
+    term.loadAddon(webgl);
+  } catch (e) { /* keep the default renderer */ }
+
+  var viewport = term.element ? term.element.querySelector('.xterm-viewport') : null;
+
   function toBase64(bytes) {
     var s = '';
     for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
@@ -73,19 +89,96 @@
     }
   }
 
+  // Ctrl / Alt are latching modifiers set by the app's key row. They apply to
+  // the next keystroke the soft keyboard sends: Ctrl turns a letter into its
+  // control byte (Ctrl-C -> 0x03), Alt prefixes ESC, which is what the shell
+  // and readline expect. They are one-shot, so they clear themselves afterwards
+  // and the app is told, to keep the two button states in step.
+  var ctrlOn = false, altOn = false;
+  function reportMods() {
+    if (window.aixodia) window.aixodia.mods(ctrlOn, altOn);
+  }
+  function applyMods(data) {
+    if (!ctrlOn && !altOn) return data;
+    var out = '';
+    for (var i = 0; i < data.length; i++) {
+      var ch = data.charAt(i), c = data.charCodeAt(i);
+      if (ctrlOn && ((c >= 64 && c <= 95) || (c >= 97 && c <= 122))) {
+        out += String.fromCharCode(c & 0x1f);
+      } else {
+        if (altOn) out += '\u001b';
+        out += ch;
+      }
+    }
+    ctrlOn = false;
+    altOn = false;
+    reportMods();
+    return out;
+  }
+  window.aixodiaSetMods = function (c, a) { ctrlOn = !!c; altOn = !!a; };
+
   // Keystrokes, including control characters: Ctrl-C arrives as 0x03 and is
   // passed straight through as a byte. Typing straight into the screen is the
   // terminal's own input path; the app's command field is a second way in, for
   // when the phone keyboard is awkward, and it sends a finished line at once.
   term.onData(function (data) {
-    if (window.aixodia) window.aixodia.send(toBase64(new TextEncoder().encode(data)));
+    if (window.aixodia) window.aixodia.send(toBase64(new TextEncoder().encode(applyMods(data))));
   });
+
+  // Momentum: xterm moves the viewport with the finger but stops dead when the
+  // finger lifts. Track the finger's velocity and keep scrolling after release
+  // with a decaying step, so a flick coasts to a stop the way a native list
+  // does. xterm redraws from the viewport's scroll event, so setting scrollTop
+  // is all that is needed.
+  var flingRAF = 0, flingVel = 0, lastY = 0, lastT = 0;
+  function stopFling() {
+    if (flingRAF) { cancelAnimationFrame(flingRAF); flingRAF = 0; }
+    flingVel = 0;
+  }
+  if (viewport && term.element) {
+    term.element.addEventListener('touchstart', function (e) {
+      stopFling();
+      if (e.touches.length === 1) { lastY = e.touches[0].pageY; lastT = performance.now(); flingVel = 0; }
+    }, { passive: true });
+    term.element.addEventListener('touchmove', function (e) {
+      if (e.touches.length !== 1) return;
+      var y = e.touches[0].pageY, t = performance.now(), dt = t - lastT;
+      if (dt > 0) flingVel = (y - lastY) / dt; // page px per ms
+      lastY = y; lastT = t;
+    }, { passive: true });
+    term.element.addEventListener('touchend', function () {
+      if (Math.abs(flingVel) < 0.05) { flingVel = 0; return; }
+      var v = flingVel, prev = performance.now();
+      function step(now) {
+        var dt = Math.min(now - prev, 50); prev = now;
+        viewport.scrollTop -= v * dt;
+        v *= Math.exp(-dt / 220);
+        if (Math.abs(v) > 0.02) flingRAF = requestAnimationFrame(step);
+        else { flingRAF = 0; flingVel = 0; }
+      }
+      flingRAF = requestAnimationFrame(step);
+    }, { passive: true });
+  }
+
+  // Tell the app when the view leaves or returns to the live edge, so it can
+  // show a "jump to bottom" button only while there is something above.
+  var wasAtBottom = true;
+  function reportScroll() {
+    if (!viewport) return;
+    var at = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 4;
+    if (at !== wasAtBottom) {
+      wasAtBottom = at;
+      if (window.aixodia) window.aixodia.scrollState(at);
+    }
+  }
+  if (viewport) viewport.addEventListener('scroll', reportScroll, { passive: true });
+  window.aixodiaScrollBottom = function () { term.scrollToBottom(); reportScroll(); };
 
   window.aixodiaWrite = function (b64) {
     var bin = atob(b64);
     var bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    term.write(bytes);
+    term.write(bytes, reportScroll);
   };
   window.aixodiaReset = function () { term.reset(); };
   window.aixodiaFocus = function () { term.focus(); term.scrollToBottom(); };

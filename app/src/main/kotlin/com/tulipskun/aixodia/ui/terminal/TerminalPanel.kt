@@ -27,10 +27,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -96,6 +98,13 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     var ended by remember { mutableStateOf<TermEvent?>(null) }
     val page = remember { mutableStateOf<WebView?>(null) }
     val pageReady = remember { mutableStateOf(false) }
+
+    // Both of these are owned by the page and reported back across the bridge:
+    // the latching Ctrl/Alt modifiers, and whether the view is at the live edge.
+    // Keeping them here lets the key row and the jump button act on the page.
+    val ctrlOn = remember { mutableStateOf(false) }
+    val altOn = remember { mutableStateOf(false) }
+    val atBottom = remember { mutableStateOf(true) }
 
     // Switching sessions must not leave the previous shell's bytes on screen:
     // reset xterm so the new session (and its replayed ring buffer) renders
@@ -244,9 +253,48 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                         page = page,
                         pageReady = pageReady,
                         socket = socket,
+                        ctrlOn = ctrlOn,
+                        altOn = altOn,
+                        atBottom = atBottom,
                     )
+                    // Only while there is history above: a terminal sitting at
+                    // the prompt needs no button, and one over the output would
+                    // cover the text being read.
+                    if (!atBottom.value) {
+                        Surface(
+                            color = Color(0xFF1A222C),
+                            shape = RoundedCornerShape(50),
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 12.dp, bottom = 12.dp)
+                                .clickable {
+                                    page.value?.evaluateJavascript("aixodiaScrollBottom()", null)
+                                    atBottom.value = true
+                                },
+                        ) {
+                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Scroll to bottom",
+                                    tint = InkText,
+                                )
+                            }
+                        }
+                    }
                 }
                 TerminalKeys(
+                    ctrlOn = ctrlOn.value,
+                    altOn = altOn.value,
+                    onCtrl = {
+                        val v = !ctrlOn.value
+                        ctrlOn.value = v
+                        page.value?.evaluateJavascript("aixodiaSetMods($v, ${altOn.value})", null)
+                    },
+                    onAlt = {
+                        val v = !altOn.value
+                        altOn.value = v
+                        page.value?.evaluateJavascript("aixodiaSetMods(${ctrlOn.value}, $v)", null)
+                    },
                     onKey = { bytes ->
                         socket.send(bytes)
                         // Tapping a key must not take the keyboard with it: the
@@ -255,7 +303,19 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                         page.value?.evaluateJavascript("aixodiaFocus()", null)
                     },
                 )
-                TerminalComposer(socket = socket)
+                TerminalComposer(
+                    socket = socket,
+                    // The composer sends a finished line directly, bypassing the
+                    // page's input path, so a latch left over from the keyboard
+                    // would stay lit for no reason.
+                    onSend = {
+                        if (ctrlOn.value || altOn.value) {
+                            ctrlOn.value = false
+                            altOn.value = false
+                            page.value?.evaluateJavascript("aixodiaSetMods(false, false)", null)
+                        }
+                    },
+                )
             }
         }
     }
@@ -272,7 +332,7 @@ private fun TerminalHeader(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 14.dp, end = 2.dp, top = 6.dp, bottom = 2.dp),
+            .padding(start = 14.dp, end = 2.dp, top = 4.dp, bottom = 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -292,7 +352,7 @@ private fun TerminalHeader(
             }
         }
         if (canRestart) {
-            IconButton(onClick = onRestart) {
+            IconButton(onClick = onRestart, modifier = Modifier.size(38.dp)) {
                 Icon(
                     Icons.Default.Refresh,
                     contentDescription = stringResource(R.string.terminal_open_new),
@@ -300,14 +360,14 @@ private fun TerminalHeader(
                 )
             }
         }
-        IconButton(onClick = onCloseSession) {
+        IconButton(onClick = onCloseSession, modifier = Modifier.size(38.dp)) {
             Icon(
                 Icons.Default.Close,
                 contentDescription = "Close session",
                 tint = InkDim,
             )
         }
-        IconButton(onClick = onClose) {
+        IconButton(onClick = onClose, modifier = Modifier.size(38.dp)) {
             Icon(
                 Icons.Default.Close,
                 contentDescription = stringResource(R.string.terminal_close),
@@ -320,10 +380,19 @@ private fun TerminalHeader(
 /**
  * The keys a phone keyboard does not have. A shell without Ctrl-C cannot stop
  * anything, so these are not extras: they are what makes the terminal usable.
+ *
+ * Ctrl and Alt latch for one keystroke: tap Ctrl, then type C, and the page
+ * turns it into 0x03 (the same as the ^C key, but for any letter or symbol).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
+private fun TerminalKeys(
+    ctrlOn: Boolean,
+    altOn: Boolean,
+    onCtrl: () -> Unit,
+    onAlt: () -> Unit,
+    onKey: (ByteArray) -> Unit,
+) {
     val keys = listOf(
         "^C" to byteArrayOf(3),
         "^D" to byteArrayOf(4),
@@ -343,29 +412,37 @@ private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
     FlowRow(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
+        KeyChip("Alt", active = altOn, onClick = onAlt)
         keys.forEach { (label, bytes) ->
-            Surface(
-                color = InkLine,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.clickable { onKey(bytes) },
-            ) {
-                Box(
-                    Modifier
-                        .defaultMinSize(minWidth = 46.dp, minHeight = 34.dp)
-                        .padding(horizontal = 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = InkText,
-                    )
-                }
-            }
+            KeyChip(label, onClick = { onKey(bytes) })
+        }
+    }
+}
+
+/** One tappable key; [active] fills it in while a modifier is latched. */
+@Composable
+private fun KeyChip(label: String, active: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        color = if (active) Color(0xFF2A3A4A) else InkLine,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Box(
+            Modifier
+                .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp)
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (active) Color(0xFFE8F0F8) else InkText,
+            )
         }
     }
 }
@@ -377,12 +454,12 @@ private fun TerminalKeys(onKey: (ByteArray) -> Unit) {
  * in any terminal.
  */
 @Composable
-private fun TerminalComposer(socket: TerminalSocket) {
+private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
     var text by remember { mutableStateOf("") }
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
@@ -394,7 +471,10 @@ private fun TerminalComposer(socket: TerminalSocket) {
                 var nl = rest.indexOf('\n')
                 while (nl >= 0) {
                     val line = rest.substring(0, nl)
-                    if (line.isNotEmpty()) socket.send((line + "\n").toByteArray())
+                    if (line.isNotEmpty()) {
+                        socket.send((line + "\n").toByteArray())
+                        onSend()
+                    }
                     rest = rest.substring(nl + 1)
                     nl = rest.indexOf('\n')
                 }
@@ -433,7 +513,7 @@ private fun TerminalSessionBar(socket: TerminalSocket) {
                     label,
                     style = MaterialTheme.typography.labelMedium,
                     color = if (selected) Color(0xFFE8F0F8) else InkText,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
         }
@@ -446,7 +526,7 @@ private fun TerminalSessionBar(socket: TerminalSocket) {
                 "+",
                 style = MaterialTheme.typography.labelMedium,
                 color = InkText,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
     }
@@ -463,6 +543,9 @@ private fun TerminalPage(
     page: MutableState<WebView?>,
     pageReady: MutableState<Boolean>,
     socket: TerminalSocket,
+    ctrlOn: MutableState<Boolean>,
+    altOn: MutableState<Boolean>,
+    atBottom: MutableState<Boolean>,
 ) {
     val main = remember { Handler(Looper.getMainLooper()) }
     val bridge = remember {
@@ -478,6 +561,21 @@ private fun TerminalPage(
             @JavascriptInterface
             fun resize(cols: Int, rows: Int) {
                 socket.resize(cols, rows)
+            }
+
+            // The page reports these back after it has acted on them, so the
+            // key row and the jump button always mirror the page's own state.
+            @JavascriptInterface
+            fun mods(ctrl: Boolean, alt: Boolean) {
+                main.post {
+                    ctrlOn.value = ctrl
+                    altOn.value = alt
+                }
+            }
+
+            @JavascriptInterface
+            fun scrollState(atBottomNow: Boolean) {
+                main.post { atBottom.value = atBottomNow }
             }
 
             @JavascriptInterface
