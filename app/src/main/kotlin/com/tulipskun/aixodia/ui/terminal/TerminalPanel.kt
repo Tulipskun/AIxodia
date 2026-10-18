@@ -1,14 +1,9 @@
 package com.tulipskun.aixodia.ui.terminal
 
-import android.annotation.SuppressLint
-import android.os.Handler
-import android.os.Looper
-import android.util.Base64
-import android.view.View
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.view.ViewGroup
-import android.webkit.JavascriptInterface
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
@@ -25,10 +20,10 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -40,7 +35,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,19 +46,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.remote.TermEvent
 import com.tulipskun.aixodia.data.remote.TermState
 import com.tulipskun.aixodia.data.remote.TerminalSocket
+import com.tulipskun.aixodia.term.TerminalEmulator
+import com.tulipskun.aixodia.term.TerminalOutput
+import com.tulipskun.aixodia.term.TerminalView
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -81,10 +80,13 @@ private val InkDim = Color(0xFF8CA0B3)
 /**
  * A terminal on the machine the engine runs on, sliding in over the chat.
  *
- * The window owns the connection: it dials when it appears and hangs up when it
- * goes away, so a shell never outlives the screen that shows it. The shell is
- * the engine's, on the engine's host — this is the phone looking at that
- * machine, not a shell on the phone.
+ * The rendering and the emulation are the app's own — a native [TerminalView]
+ * drawing a [TerminalEmulator] — so a finger is a mouse click, a key is a byte,
+ * and nothing stands between the socket and the screen. The window owns the
+ * connection: it dials when it appears and hangs up when it goes away.
+ *
+ * The shell is the engine's, on the engine's host — this is the phone looking at
+ * that machine, not a shell on the phone.
  */
 @Composable
 fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
@@ -92,60 +94,52 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val errorRes by socket.error.collectAsStateWithLifecycle()
     val detail by socket.detail.collectAsStateWithLifecycle()
     val activeSessionId by socket.activeSessionId.collectAsStateWithLifecycle()
-    val sessions by socket.sessions.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     var ready by remember { mutableStateOf<TermEvent.Ready?>(null) }
     var ended by remember { mutableStateOf<TermEvent?>(null) }
-    val page = remember { mutableStateOf<WebView?>(null) }
-    val pageReady = remember { mutableStateOf(false) }
 
-    // Both of these are owned by the page and reported back across the bridge:
-    // the latching Ctrl/Alt modifiers, and whether the view is at the live edge.
-    // Keeping them here lets the key row and the jump button act on the page.
+    // The view is created by Compose, the emulator by us; each needs the other,
+    // so the view is held in a state the emulator's callbacks read.
+    val terminalView = remember { mutableStateOf<TerminalView?>(null) }
     val ctrlOn = remember { mutableStateOf(false) }
     val altOn = remember { mutableStateOf(false) }
     val atBottom = remember { mutableStateOf(true) }
 
-    // Switching session starts the page over rather than resetting it in place:
-    // a plain reset keeps the renderer and the scroll position, so the new
-    // shell's replayed screen can land on top of the old one. A reload is a cold
-    // xterm, and the page reports ready again once it is up.
-    val lastSession = remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(activeSessionId) {
-        if (lastSession.value != null && activeSessionId != lastSession.value && page.value != null) {
-            ended = null
-            ready = null
-            pageReady.value = false
-            page.value?.reload()
+    val emulator = remember {
+        val out = object : TerminalOutput {
+            // Anything the emulator owes the shell — a device-status reply, a
+            // mouse report — goes back down the same socket.
+            override fun write(bytes: ByteArray) {
+                socket.send(bytes)
+            }
+
+            override fun onScreenChanged() {
+                val v = terminalView.value ?: return
+                v.post { v.onContentChanged() }
+            }
+
+            override fun onTitleChanged(title: String) = Unit
+
+            override fun onClipboard(text: String) {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    ?: return
+                cm.setPrimaryClip(ClipData.newPlainText("terminal", text))
+            }
         }
-        if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
+        // A placeholder size until the view is measured and reports the real one.
+        TerminalEmulator(80, 24, out)
     }
+
     var leaving by remember { mutableStateOf(false) }
     var appeared by remember { mutableStateOf(false) }
 
-    // Open on the way in, hang up on the way out: closing the panel ends the
-    // shell, which is the only way to be sure nothing is left running.
     DisposableEffect(Unit) {
         socket.open()
-        onDispose {
-            // A WebView has to leave the hierarchy before it is destroyed, and
-            // Compose removes it on its own schedule — so it is detached here
-            // rather than leaked behind the panel.
-            page.value?.let {
-                (it.parent as? ViewGroup)?.removeView(it)
-                it.removeJavascriptInterface("aixodia")
-                it.destroy()
-            }
-            page.value = null
-            socket.close()
-        }
+        onDispose { socket.close() }
     }
 
     LaunchedEffect(Unit) { appeared = true }
-    // The socket reconnects on its own when the link drops or the daemon moves,
-    // including while the app is in the background, so there is nothing to poke
-    // when it comes back. Keeping a reconnect here would only restart a shell
-    // that finished on purpose.
     LaunchedEffect(leaving) {
         if (leaving) {
             delay(240)
@@ -166,21 +160,12 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         }
     }
 
-    // Terminal output is raw bytes, so it crosses the bridge as base64 and is
-    // written as bytes. A shell answers one keystroke in several small writes —
-    // the echoed byte, then the prompt's redraw — and one evaluateJavascript per
-    // write is what makes typing stutter, because every one of them lands on the
-    // main thread. Bytes are gathered for a few milliseconds and handed over as
-    // one write instead, and the base64 happens off the main thread so only the
-    // bridge call itself is there. Nothing is consumed until the page can draw,
-    // which keeps a prompt that answers in the first few milliseconds from being
-    // dropped on the floor.
-    LaunchedEffect(pageReady.value) {
-        if (!pageReady.value) return@LaunchedEffect
+    // Output is raw bytes and can arrive in many small writes per keystroke.
+    // They are gathered for a few milliseconds and written once, on the main
+    // thread — the emulator and the view both belong to it.
+    LaunchedEffect(Unit) {
         val pending = ByteArrayOutputStream(8 * 1024)
         val lock = Any()
-        // Conflated: a burst only needs to wake the writer once, and the writer
-        // drains everything that arrived while it was busy.
         val arrived = Channel<Unit>(Channel.CONFLATED)
         val pump = launch {
             socket.output.collect { bytes ->
@@ -191,8 +176,6 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         try {
             while (true) {
                 arrived.receive()
-                // Let a burst settle into a single write. A lone keystroke echo
-                // is alone on the wire, so this is the worst case it adds.
                 delay(4)
                 val batch = synchronized(lock) {
                     val b = pending.toByteArray()
@@ -200,20 +183,29 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     b
                 }
                 if (batch.isEmpty()) continue
-                val b64 = withContext(Dispatchers.Default) {
-                    Base64.encodeToString(batch, Base64.NO_WRAP)
-                }
-                page.value?.evaluateJavascript("aixodiaWrite('$b64')", null)
+                withContext(Dispatchers.Main) { emulator.write(batch) }
             }
         } finally {
             pump.cancel()
         }
     }
 
+    // Switching session replays the new shell's screen from the engine, so the
+    // old one is cleared first rather than left underneath it.
+    val lastSession = remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(activeSessionId) {
+        if (lastSession.value != null && activeSessionId != lastSession.value) {
+            ended = null
+            ready = null
+            emulator.hardReset()
+            terminalView.value?.scrollToBottom()
+        }
+        if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
+    }
+
     // While the soft keyboard is up the title and the session tabs step aside:
     // they are the least useful chrome exactly when the screen is at its
-    // scarcest, and the terminal — the thing being typed into — gets the room
-    // instead. A full-screen program like opencode then fills what is left.
+    // scarcest, and the terminal gets the room instead.
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     AnimatedVisibility(
@@ -225,12 +217,9 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
             Column(
                 Modifier
                     .fillMaxSize()
-                    // The screen is the whole width and reaches the bottom edge;
-                    // only the status bar and the keyboard take room away. A
-                    // nav-bar inset here is what left a dead strip under the
-                    // composer, and horizontal insets left one at each side.
-                    .statusBarsPadding()
-                    .imePadding(),
+                    // The system bars set the floor and the ceiling. The nav bar
+                    // keeps its strip or it covers the composer.
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
                 if (!imeVisible) {
                     TerminalHeader(
@@ -240,15 +229,17 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                         onRestart = {
                             ended = null
                             ready = null
-                            page.value?.evaluateJavascript("aixodiaReset()", null)
-                            page.value?.requestFocus()
+                            emulator.hardReset()
+                            terminalView.value?.scrollToBottom()
+                            terminalView.value?.requestFocus()
                             socket.newSession()
                         },
                         onCloseSession = {
                             ended = null
                             ready = null
-                            page.value?.evaluateJavascript("aixodiaReset()", null)
-                            page.value?.requestFocus()
+                            emulator.hardReset()
+                            terminalView.value?.scrollToBottom()
+                            terminalView.value?.requestFocus()
                             socket.closeSession()
                         },
                         onClose = { leaving = true },
@@ -256,17 +247,16 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     TerminalSessionBar(socket = socket)
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    TerminalPage(
-                        page = page,
-                        pageReady = pageReady,
+                    TerminalHost(
+                        view = terminalView,
+                        emulator = emulator,
                         socket = socket,
                         ctrlOn = ctrlOn,
                         altOn = altOn,
                         atBottom = atBottom,
                     )
-                    // Only while there is history above: a terminal sitting at
-                    // the prompt needs no button, and one over the output would
-                    // cover the text being read.
+                    // Only while there is history above: a terminal at the
+                    // prompt needs no button.
                     if (!atBottom.value) {
                         Surface(
                             color = Color(0xFF1A222C),
@@ -275,8 +265,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                 .align(Alignment.BottomEnd)
                                 .padding(end = 12.dp, bottom = 12.dp)
                                 .clickable {
-                                    page.value?.evaluateJavascript("aixodiaScrollBottom()", null)
-                                    atBottom.value = true
+                                    terminalView.value?.scrollToBottom()
                                 },
                         ) {
                             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
@@ -295,31 +284,28 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     onCtrl = {
                         val v = !ctrlOn.value
                         ctrlOn.value = v
-                        page.value?.evaluateJavascript("aixodiaSetMods($v, ${altOn.value})", null)
+                        terminalView.value?.setLatchedMods(v, altOn.value)
+                        terminalView.value?.requestFocus()
                     },
                     onAlt = {
                         val v = !altOn.value
                         altOn.value = v
-                        page.value?.evaluateJavascript("aixodiaSetMods(${ctrlOn.value}, $v)", null)
+                        terminalView.value?.setLatchedMods(ctrlOn.value, v)
+                        terminalView.value?.requestFocus()
                     },
                     onKey = { bytes ->
                         socket.send(bytes)
-                        // Tapping a key must not take the keyboard with it: the
-                        // focus goes straight back to the terminal.
-                        page.value?.requestFocus()
-                        page.value?.evaluateJavascript("aixodiaFocus()", null)
+                        // Tapping a key must not take the keyboard with it.
+                        terminalView.value?.requestFocus()
                     },
                 )
                 TerminalComposer(
                     socket = socket,
-                    // The composer sends a finished line directly, bypassing the
-                    // page's input path, so a latch left over from the keyboard
-                    // would stay lit for no reason.
                     onSend = {
                         if (ctrlOn.value || altOn.value) {
                             ctrlOn.value = false
                             altOn.value = false
-                            page.value?.evaluateJavascript("aixodiaSetMods(false, false)", null)
+                            terminalView.value?.setLatchedMods(false, false)
                         }
                     },
                 )
@@ -388,7 +374,7 @@ private fun TerminalHeader(
  * The keys a phone keyboard does not have. A shell without Ctrl-C cannot stop
  * anything, so these are not extras: they are what makes the terminal usable.
  *
- * Ctrl and Alt latch for one keystroke: tap Ctrl, then type C, and the page
+ * Ctrl and Alt latch for one keystroke: tap Ctrl, then type C, and the view
  * turns it into 0x03 (the same as the ^C key, but for any letter or symbol).
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -456,9 +442,7 @@ private fun KeyChip(label: String, active: Boolean = false, onClick: () -> Unit)
 
 /**
  * A line the phone keyboard can type into. Enter is the ordinary return key, not
- * an IME "send" key: the newline that ends a line belongs to the shell, so the
- * field never keeps one and pressing return runs what was typed, the way it does
- * in any terminal.
+ * an IME "send" key: the newline that ends a line belongs to the shell.
  */
 @Composable
 private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
@@ -466,9 +450,7 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
     Row(
         Modifier
             .fillMaxWidth()
-            // A little room under the field so it clears the gesture pill now
-            // that the nav-bar inset no longer lifts the whole panel.
-            .padding(start = 10.dp, end = 10.dp, top = 2.dp, bottom = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
@@ -477,7 +459,7 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
                 // A newline means the line is finished: send every completed line
                 // and keep only what is still being typed. An empty line is not
                 // dropped — pressing return on a bare prompt sends the newline
-                // the shell is waiting for, exactly as it would from the screen.
+                // the shell is waiting for.
                 var rest = value
                 var nl = rest.indexOf('\n')
                 while (nl >= 0) {
@@ -542,95 +524,46 @@ private fun TerminalSessionBar(socket: TerminalSocket) {
 }
 
 /**
- * The xterm.js page. It is a local asset — nothing is loaded from the network —
- * and the bridge is the only way in or out: base64 keystrokes out, base64 output
- * in, and a size report whenever the window changes.
+ * Hosts the native terminal. Everything crosses two function values: bytes out
+ * to the socket, and a size report when the grid changes. Nothing is loaded from
+ * the network and nothing renders in a browser.
  */
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun TerminalPage(
-    page: MutableState<WebView?>,
-    pageReady: MutableState<Boolean>,
+private fun TerminalHost(
+    view: MutableState<TerminalView?>,
+    emulator: TerminalEmulator,
     socket: TerminalSocket,
     ctrlOn: MutableState<Boolean>,
     altOn: MutableState<Boolean>,
     atBottom: MutableState<Boolean>,
 ) {
-    val main = remember { Handler(Looper.getMainLooper()) }
-    val bridge = remember {
-        object {
-            @JavascriptInterface
-            fun send(b64: String) {
-                // Called on the WebView's bridge thread; send() is thread-safe
-                // and must not wait for the UI.
-                runCatching { Base64.decode(b64, Base64.NO_WRAP) }
-                    .onSuccess { socket.send(it) }
-            }
-
-            @JavascriptInterface
-            fun resize(cols: Int, rows: Int) {
-                socket.resize(cols, rows)
-            }
-
-            // The page reports these back after it has acted on them, so the
-            // key row and the jump button always mirror the page's own state.
-            @JavascriptInterface
-            fun mods(ctrl: Boolean, alt: Boolean) {
-                main.post {
-                    ctrlOn.value = ctrl
-                    altOn.value = alt
-                }
-            }
-
-            @JavascriptInterface
-            fun scrollState(atBottomNow: Boolean) {
-                main.post { atBottom.value = atBottomNow }
-            }
-
-            @JavascriptInterface
-            fun ready() {
-                main.post {
-                    pageReady.value = true
-                    page.value?.requestFocus()
-                    page.value?.evaluateJavascript("aixodiaFocus()", null)
-                }
-            }
-        }
-    }
     AndroidView(
         factory = { ctx ->
-            WebView(ctx).apply {
+            TerminalView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
-                setBackgroundColor(0xFF0B0F14.toInt())
-                // Tap the screen to type: the WebView has to be able to take
-                // focus, or the soft keyboard has nothing to appear for.
-                isFocusable = true
-                isFocusableInTouchMode = true
-                // The page itself never scrolls (the document is exactly one
-                // screen tall; the scrollback scrolls inside xterm), so the
-                // WebView gets no scroll bar and no over-scroll glow.
-                isVerticalScrollBarEnabled = false
-                overScrollMode = View.OVER_SCROLL_NEVER
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = false
-                // The page is a local asset that must never come from a cache:
-                // a stale copy of the renderer is invisible and would survive
-                // every reload otherwise.
-                settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
-                // The page is a local asset and has no reason to navigate; this
-                // also keeps a stray link from turning the terminal into a browser.
-                webViewClient = WebViewClient()
-                addJavascriptInterface(bridge, "aixodia")
-                loadUrl("file:///android_asset/terminal/index.html")
-                page.value = this
+                setBackgroundColor(Ink.toArgb())
+                setEmulator(emulator)
+                inputSink = { socket.send(it) }
+                onResize = { cols, rows -> socket.resize(cols, rows) }
+                onScrollChanged = { atBottom.value = it }
+                onModsConsumed = {
+                    // The view has spent its latch; keep the chips in step.
+                    ctrlOn.value = false
+                    altOn.value = false
+                }
+                requestFocus()
+                view.value = this
             }
         },
         update = { },
         modifier = Modifier.fillMaxSize(),
     )
+    LaunchedEffect(view.value) {
+        view.value?.requestFocus()
+    }
 }
 
 /** One line under the title: what the shell is, or how it ended. */

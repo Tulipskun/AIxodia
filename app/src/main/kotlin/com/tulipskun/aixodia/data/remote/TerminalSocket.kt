@@ -92,8 +92,8 @@ class TerminalSocket(private val settings: SettingsStore) {
 
     // A channel, not a StateFlow: terminal output is a stream, and a dropped
     // frame would leave the screen showing something the shell never printed.
-    // Nothing is consumed until the page can render it, so a shell that answers
-    // before the WebView is ready is not lost.
+    // Nothing is consumed until the view can render it, so a shell that answers
+    // before the panel is up is not lost.
     private val _output = Channel<ByteArray>(Channel.UNLIMITED)
     val output: Flow<ByteArray> = _output.receiveAsFlow()
 
