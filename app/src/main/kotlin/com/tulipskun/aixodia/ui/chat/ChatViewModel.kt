@@ -332,6 +332,13 @@ class ChatViewModel(
                         val msg = friendlyError(f.text)
                         errorCard.value = msg
                         notice.value = msg
+                        // A session the daemon has never heard of is not worth
+                        // retrying: clearing its pending flags lets the next
+                        // sync prune the dead chat instead of resending into it.
+                        if (isMissingSession(f.text)) {
+                            val dead = sessionId
+                            viewModelScope.launch { repo.forgetDeadSession(dead) }
+                        }
                         finishStats()
                     }
                     // The ack only means the message reached the daemon. The

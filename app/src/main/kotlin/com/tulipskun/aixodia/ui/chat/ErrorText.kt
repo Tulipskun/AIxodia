@@ -45,7 +45,21 @@ fun friendlyError(raw: String): String {
         "tunnel" in s || "connection refused" in s || "no such host" in s ->
             "Cannot reach the daemon. Check that the machine running ai-engine is still up."
 
+        isMissingSession(raw) ->
+            "This chat is no longer on the daemon. Start a new chat."
+
         else ->
             "Failed to send the message. Please try again."
     }
+}
+
+/**
+ * True when the daemon answered that it does not know this session. History
+ * lives on the daemon, so a chat the phone still lists can be gone there; the
+ * send fails with a 404, and retrying it cannot work. Requires both words so an
+ * upstream "model not found" is not mistaken for it.
+ */
+fun isMissingSession(raw: String): Boolean {
+    val s = raw.lowercase()
+    return "session" in s && ("not found" in s || "not_found" in s)
 }

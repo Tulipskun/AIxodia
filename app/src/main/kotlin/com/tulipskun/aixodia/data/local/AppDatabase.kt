@@ -114,6 +114,12 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE pending = 1 ORDER BY createdAt ASC")
     suspend fun allPending(): List<MessageEntity>
 
+    // The daemon answered that it never had this session, so nothing can be
+    // flushed into it: the rows stop being pending and the session becomes
+    // prunable again instead of retrying forever.
+    @Query("UPDATE messages SET pending = 0 WHERE sessionId = :sid")
+    suspend fun clearPending(sid: String)
+
     @Query("UPDATE messages SET pending = 0 WHERE clientMsgId = :clientMsgId")
     suspend fun markAcked(clientMsgId: String)
 

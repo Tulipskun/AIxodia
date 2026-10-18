@@ -22,9 +22,10 @@ import java.util.concurrent.TimeUnit
  * `/accounts`, then `/accounts/{id}/d1/database`) and cached in settings, so an
  * operator never types a Cloudflare id.
  *
- * This class owns history only. Provider keys, agent settings and per-chat
- * model pins stay on the daemon, because validating them needs the running
- * router rather than the database.
+ * This class owns what has to be shared off the machine: the daemon's own row,
+ * i.e. the tunnel URL the phone dials. Chat history is the daemon's local
+ * store; provider keys and settings live there too, because validating them
+ * needs the running router rather than the database.
  */
 class D1Api(private val settings: SettingsStore) {
 
@@ -199,94 +200,6 @@ class D1Api(private val settings: SettingsStore) {
         }
     }
 
-    // ---------------------------------------------------------------- history
-
-    /** The session list, newest first. */
-    suspend fun sessions(): List<SessionRow> = query(
-        "SELECT id, title, provider, model, created_at, updated_at FROM chat_sessions " +
-            "ORDER BY updated_at DESC LIMIT 200",
-    ).rows.map {
-        SessionRow(
-            id = it.optString("id"),
-            title = it.optString("title"),
-            model = it.optString("model"),
-            provider = it.optString("provider"),
-            updatedAt = it.optLong("updated_at"),
-        )
-    }
-
-    /** Creates the chat in D1 too, so the drawer and the daemon agree. */
-    suspend fun createSession(id: String, title: String): Boolean {
-        query(
-            "INSERT OR IGNORE INTO chat_sessions(id, title, model, created_at, updated_at) " +
-                "VALUES(?, ?, '', unixepoch(), unixepoch())",
-            listOf(id, title),
-        )
-        return true
-    }
-
-    /** Renames a chat, the way Gemini/ChatGPT let you retitle a conversation. */
-    suspend fun renameSession(sessionId: String, title: String): Boolean = query(
-        "UPDATE chat_sessions SET title = ?, updated_at = unixepoch() WHERE id = ?",
-        listOf(title, sessionId),
-    ).changes > 0
-
-    /**
-     * Removes the chat, its turns and its state row — the same three deletes the
-     * Worker used to run, one statement at a time so a failure names itself.
-     */
-    suspend fun deleteSession(sessionId: String): Boolean {
-        query("DELETE FROM chat_turns WHERE session_id = ?", listOf(sessionId))
-        return query("DELETE FROM chat_sessions WHERE id = ?", listOf(sessionId)).changes > 0
-    }
-
-    /** One page of history, oldest-first, the way the thread renders. */
-    suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int): List<TurnRow> {
-        val capped = limit.coerceIn(1, 200).toString()
-        suspend fun page(columns: String): Rows = if (beforeSeq <= 0L) {
-            query(
-                "$columns WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
-                listOf(sessionId, capped),
-            )
-        } else {
-            query(
-                "$columns WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
-                listOf(sessionId, beforeSeq.toString(), capped),
-            )
-        }
-        // A database whose daemon never wrote blocks has no such column; the
-        // whole statement fails, so read the old columns instead and let the
-        // rows render through the role.
-        val rows = try {
-            page(TURN_COLUMNS)
-        } catch (e: Exception) {
-            if (!e.message.orEmpty().contains("no such column", ignoreCase = true)) throw e
-            page(TURN_COLUMNS_LEGACY)
-        }
-        return rows.rows.map { row ->
-            TurnRow(
-                seq = row.optLong("seq"),
-                role = row.optString("role"),
-                agent = row.optString("agent"),
-                jobId = row.optString("job_id"),
-                text = row.optString("text"),
-                createdAt = row.optLong("created_at"),
-                model = row.optString("model"),
-                inputTokens = row.optInt("input_tokens"),
-                outputTokens = row.optInt("output_tokens"),
-                cacheRead = row.optInt("cache_read_tokens"),
-                cacheWrite = row.optInt("cache_write_tokens"),
-                reasoningTokens = row.optInt("reasoning_tokens"),
-                reasoningContent = row.optString("reasoning_content"),
-                // D1 stores the flag as an INTEGER, so it comes back as 0/1.
-                inputIncludesCache = row.optInt("input_includes_cache") != 0,
-                durationMs = row.optLong("duration_ms"),
-                generationMs = row.optLong("generation_ms"),
-                block = row.optString("block"),
-            )
-        }.reversed()
-    }
-
     /**
      * The daemon's single `tunnel` row: its public URL, its version (which
      * carries the start time) and its last heartbeat. ai-engine rewrites this
@@ -336,68 +249,11 @@ class D1Api(private val settings: SettingsStore) {
 
     private fun nowSeconds(): Long = System.currentTimeMillis() / 1000
 
-    /** Turns with seq greater than [afterSeq], oldest-first (incremental pull). */
-    suspend fun turnsAfter(sessionId: String, afterSeq: Long, limit: Int = 200): List<TurnRow> {
-        if (afterSeq <= 0L) return turns(sessionId, 0, limit)
-        val capped = limit.coerceIn(1, 200).toString()
-        suspend fun page(columns: String): Rows = query(
-            "$columns WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
-            listOf(sessionId, afterSeq.toString(), capped),
-        )
-        val rows = try {
-            page(TURN_COLUMNS)
-        } catch (e: Exception) {
-            if (!e.message.orEmpty().contains("no such column", ignoreCase = true)) throw e
-            page(TURN_COLUMNS_LEGACY)
-        }
-        return rows.rows.map { row ->
-            TurnRow(
-                seq = row.optLong("seq"),
-                role = row.optString("role"),
-                agent = row.optString("agent"),
-                jobId = row.optString("job_id"),
-                text = row.optString("text"),
-                createdAt = row.optLong("created_at"),
-                model = row.optString("model"),
-                inputTokens = row.optInt("input_tokens"),
-                outputTokens = row.optInt("output_tokens"),
-                cacheRead = row.optInt("cache_read_tokens"),
-                cacheWrite = row.optInt("cache_write_tokens"),
-                reasoningTokens = row.optInt("reasoning_tokens"),
-                reasoningContent = row.optString("reasoning_content"),
-                inputIncludesCache = row.optInt("input_includes_cache") != 0,
-                durationMs = row.optLong("duration_ms"),
-                generationMs = row.optLong("generation_ms"),
-                block = row.optString("block"),
-            )
-        }
-    }
-
-    /**
-     * One cheap query for the settings screen: how many chats this token can
-     * read. It throws with a readable reason, so the screen can say why not.
-     */
-    suspend fun ping(): Int =
-        query("SELECT COUNT(*) AS n FROM chat_sessions").rows.firstOrNull()?.optInt("n") ?: 0
-
     companion object {
         /** The one Cloudflare endpoint every call is addressed with. */
         const val API_BASE = "https://api.cloudflare.com/client/v4"
 
         /** The database `discover` prefers when the token can see several. */
         private const val DEFAULT_DATABASE = "aixodia"
-
-        private const val TURN_COLUMNS =
-            "SELECT seq, role, agent, job_id, text, created_at, model, " +
-                "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, " +
-                "reasoning_tokens, reasoning_content, " +
-                "duration_ms, generation_ms, block FROM chat_turns"
-
-        /** The same page for a database whose daemon never wrote blocks. */
-        private const val TURN_COLUMNS_LEGACY =
-            "SELECT seq, role, agent, job_id, text, created_at, model, " +
-                "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, " +
-                "reasoning_tokens, reasoning_content, " +
-                "duration_ms, generation_ms FROM chat_turns"
     }
 }

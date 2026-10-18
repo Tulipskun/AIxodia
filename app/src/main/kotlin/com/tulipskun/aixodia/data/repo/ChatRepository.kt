@@ -163,6 +163,19 @@ class ChatRepository(
         )
     }
 
+    /**
+     * The daemon answered that this session does not exist (it stores the
+     * history, so a session can be gone while the phone still lists it). Keep
+     * the transcript on screen but stop retrying it: a pending message is
+     * flushed on every reconnect and can never land, and a session with a
+     * pending message is never pruned by [syncSessions] either, so the chat
+     * would stay stuck forever.
+     */
+    suspend fun forgetDeadSession(sid: String) {
+        if (sid.isEmpty()) return
+        try { db.messages().clearPending(sid) } catch (_: Exception) { }
+    }
+
     suspend fun openSession(sid: String) {
         _active.value = sid
         if (db.sessions().get(sid) == null) {

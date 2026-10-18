@@ -40,6 +40,22 @@ class ErrorTextTest {
             friendlyError("unknown model \"foo\": prefix it with a provider"),
         )
 
+    // The daemon stores the history, so the phone can hold a chat it no longer
+    // has. This is the exact text the phone received for that case.
+    @Test fun goneSessionIsNotRetryable() =
+        assertEquals(
+            "This chat is no longer on the daemon. Start a new chat.",
+            friendlyError(
+                "chat 404: {\"error\":{\"message\":\"session \\\"246b602223971d82\\\" not found\",\"type\":\"not_found\"}}",
+            ),
+        )
+
+    @Test fun upstreamNotFoundIsNotAGoneSession() =
+        assertEquals(
+            "Failed to send the message. Please try again.",
+            friendlyError("chat: model not found"),
+        )
+
     @Test fun unknownErrorFallsBack() =
         assertEquals("Failed to send the message. Please try again.", friendlyError("something odd"))
 }
