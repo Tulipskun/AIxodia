@@ -55,6 +55,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tulipskun.aixodia.R
@@ -193,7 +194,8 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     .windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
                 TerminalHeader(
-                    status = statusLine(state, errorRes, ready, ended),
+                    status = statusLine(state, errorRes, ready, ended) +
+                        (if (detail.isNotBlank()) "  ·  $detail" else ""),
                     canRestart = state == TermState.CLOSED || state == TermState.ENDED,
                     onRestart = {
                         ended = null
@@ -204,17 +206,6 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     },
                     onClose = { leaving = true },
                 )
-                if (detail.isNotBlank()) {
-                    Text(
-                        text = detail,
-                        color = Color(0xFF8899AA),
-                        fontSize = 11.sp,
-                        maxLines = 3,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 2.dp),
-                    )
-                }
                 TerminalSessionBar(socket = socket)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     TerminalPage(
@@ -263,6 +254,7 @@ private fun TerminalHeader(
                     style = MaterialTheme.typography.labelSmall,
                     color = InkDim,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
