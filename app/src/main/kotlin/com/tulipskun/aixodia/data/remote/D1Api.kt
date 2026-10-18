@@ -336,18 +336,6 @@ class D1Api(private val settings: SettingsStore) {
 
     private fun nowSeconds(): Long = System.currentTimeMillis() / 1000
 
-    /** Sets the push-now flag so the running session hands over promptly. */
-    suspend fun setPushNowFlag(): Boolean = try {
-        query(
-            "INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, unixepoch()) " +
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            listOf("kernel/push-now", "1"),
-        )
-        true
-    } catch (e: Exception) {
-        false
-    }
-
     /** Turns with seq greater than [afterSeq], oldest-first (incremental pull). */
     suspend fun turnsAfter(sessionId: String, afterSeq: Long, limit: Int = 200): List<TurnRow> {
         if (afterSeq <= 0L) return turns(sessionId, 0, limit)

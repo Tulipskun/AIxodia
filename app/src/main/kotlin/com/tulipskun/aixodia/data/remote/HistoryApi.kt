@@ -110,12 +110,12 @@ class HistoryApi(private val settings: SettingsStore) {
      * like "not configured", never like a crash: okhttp throws on a relative
      * URL, and that exception used to escape into the ViewModel scope.
      */
-    /** Asks the running daemon to hand over now (sets D1 flag + sentinel). */
+    /** Asks the running daemon to end this session and start the next one. */
     suspend fun triggerPushNow(): Boolean = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
-            val req = Request.Builder().url("$base/api/push-now")
+            val req = Request.Builder().url("$base/restart")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
                 .post("{}".toRequestBody("application/json".toMediaType()))
@@ -124,12 +124,8 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault(false)
     }
 
-    /** Sets the D1 push-now flag and signals the daemon directly. */
-    suspend fun pushNow(): Boolean = withContext(Dispatchers.IO) {
-        val d1ok = d1.setPushNowFlag()
-        val engineOk = triggerPushNow()
-        d1ok || engineOk
-    }
+    /** Ends this session: the engine writes ~/.exit and the notebook restarts itself. */
+    suspend fun pushNow(): Boolean = triggerPushNow()
 
     /** Recent engine log entries (newest first), for debugging. */
     suspend fun fetchLogs(limit: Int = 200): List<JSONObject> = withContext(Dispatchers.IO) {

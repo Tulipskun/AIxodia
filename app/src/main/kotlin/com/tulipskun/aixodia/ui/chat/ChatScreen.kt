@@ -358,7 +358,7 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { if (!pushNowBusy) showPushNowDialog = false },
             title = { Text("Push now?") },
-            text = { Text("Sets the D1 flag and signals the daemon to hand over immediately (critical). Confirm?") },
+            text = { Text("Signals the daemon to end this session: it backs up and starts the next one. Confirm?") },
             confirmButton = {
                 TextButton(
                     enabled = !pushNowBusy,
