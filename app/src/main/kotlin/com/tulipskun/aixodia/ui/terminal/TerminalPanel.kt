@@ -189,19 +189,17 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         }
     }
 
-    // Switching session replays the new shell's screen from the engine, so the
-    // old one is cleared first rather than left underneath it.
+    // Remember the modes of the screen being left, and forget the previous run's
+    // exit banner. The new screen itself is cleared by the engine: every attach
+    // starts with RIS and the session's own modes, so resetting the emulator
+    // here would race the replay — when the replay arrived first, this reset ran
+    // second and wiped the screen it had just drawn.
     val lastSession = remember { mutableStateOf<String?>(null) }
     LaunchedEffect(activeSessionId) {
         if (lastSession.value != null && activeSessionId != lastSession.value) {
-            // Keep the modes of the screen being left, then put back the ones
-            // of the session being joined (if this app has seen them before).
             lastSession.value?.let { socket.rememberModes(it, emulator.snapshotModes()) }
             ended = null
             ready = null
-            emulator.hardReset()
-            socket.rememberedModes(activeSessionId)?.let(emulator::applyModes)
-            terminalView.value?.scrollToBottom()
         }
         if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
     }
@@ -583,7 +581,10 @@ private fun TerminalSessionBar(socket: TerminalSocket) {
     ) {
         sessions.forEachIndexed { i, id ->
             val label = "Shell ${i + 1}"
-            val selected = id == active || (active.isBlank() && i == sessions.lastIndex)
+            // Only the session that is actually attached is selected. Falling
+            // back to "the last tab" when nothing is attached marked a closed
+            // tab as the live one.
+            val selected = active.isNotBlank() && id == active
             Surface(
                 color = if (selected) Color(0xFF2A3A4A) else InkLine,
                 shape = RoundedCornerShape(8.dp),

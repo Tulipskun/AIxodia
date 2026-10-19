@@ -133,11 +133,25 @@ class TerminalSocket(
     @Volatile
     private var pendingSize: Pair<Int, Int>? = null
 
+    /**
+     * The id the next dial must use, overriding settings until the write lands.
+     * Closing or switching a tab changes it synchronously: the DataStore edit is
+     * asynchronous, and a dial that started in between would otherwise reattach
+     * the shell that was just closed — or the one before the tab was tapped.
+     * Null means "read settings".
+     */
+    @Volatile
+    private var retarget: String? = null
+
     /** Opens the stream, if it is not already dialing or up. */
     fun open() {
         wanted = true
         scope.launch {
-            _activeSessionId.value = settings.currentTerminalSessionId()
+            when (val target = retarget) {
+                null -> _activeSessionId.value = settings.currentTerminalSessionId()
+                "" -> _activeSessionId.value = ""
+                else -> _activeSessionId.value = target
+            }
             _sessions.value = settings.currentTerminalSessionIds()
         }
         // A stream left over from a previous session that died silently (app
@@ -201,9 +215,10 @@ class TerminalSocket(
     /** Switches to an already-known session id and re-dials. Used by the tab row. */
     fun switchSession(id: String) {
         if (id.isBlank()) return
+        retarget = id
+        _activeSessionId.value = id
         scope.launch {
             settings.saveTerminalSessionId(id)
-            _activeSessionId.value = id
             close()
             open()
         }
@@ -211,12 +226,20 @@ class TerminalSocket(
 
     /**
      * Kills the current shell and forgets its id, then leaves the panel closed.
-     * Used by the "close session" button: it drops the tab and hangs up, and
-     * nothing dials again until the user asks for a shell (the header's
-     * open-new button).
+     * Used by the "close session" button: it drops the tab and ends the shell on
+     * the engine, and nothing dials again until the user asks for a shell (the
+     * header's open-new button).
      */
     fun closeSession() {
         val id = _activeSessionId.value
+        val stream = sid
+        retarget = ""
+        _activeSessionId.value = ""
+        // End the shell, not just the stream. Hanging up leaves the engine's
+        // shell — and its slot — alive, so a handful of closes made every new
+        // terminal fail with "too many terminals". The control frame goes out
+        // before the close below on the same socket, so the engine sees it first.
+        if (stream != null) relay?.termJSON(stream, """{"type":"close"}""")
         scope.launch {
             if (id.isNotBlank()) {
                 sessionModes.remove(id)
@@ -226,7 +249,6 @@ class TerminalSocket(
                 settings.clearTerminalSessionId()
             }
             _sessions.value = settings.currentTerminalSessionIds()
-            _activeSessionId.value = ""
         }
         close()
         // Show it as finished, not as the brief CLOSED of a window that is about
@@ -251,6 +273,9 @@ class TerminalSocket(
      * old (possibly still running) shell is left behind. Used by "open new shell".
      */
     fun newSession() {
+        // Empty means "ask the engine for a new id". Set before the DataStore
+        // clear so a dial cannot reattach the old shell in between.
+        retarget = ""
         scope.launch {
             settings.clearTerminalSessionId()
             close()
@@ -343,7 +368,7 @@ class TerminalSocket(
 
             // Reattach to a surviving shell when we have its id; otherwise the
             // engine hands back a fresh one in its ready frame.
-            val wantedId = settings.currentTerminalSessionId()
+            val wantedId = retarget ?: settings.currentTerminalSessionId()
             // Zero when the view has not been laid out yet: the engine then
             // keeps the shell's current size instead of forcing 80x24 onto a
             // running program. The view sends the real size as soon as it is
@@ -358,8 +383,13 @@ class TerminalSocket(
             val stream = object : TermStream {
                 // A stream that is no longer the current one must not touch
                 // shared state; its close callback can arrive after the next
-                // dial has already begun.
-                private fun stale(): Boolean = (sid ?: -1) != mySid
+                // dial has already begun. Before openTerminal has returned,
+                // sid is still null and mySid is still -2: events that arrive
+                // in that window belong to this stream, not to a stale one.
+                private fun stale(): Boolean {
+                    val current = sid ?: return mySid != -2
+                    return current != mySid
+                }
 
                 override fun onText(json: String) {
                     if (stale()) return
@@ -380,13 +410,17 @@ class TerminalSocket(
 
                         is TermEvent.Ready -> {
                             if (ev.id.isNotBlank()) {
+                                // Synchronously, so a retry inside dial() and
+                                // the tabs see the id before the DataStore
+                                // write completes.
+                                retarget = ev.id
+                                _activeSessionId.value = ev.id
                                 scope.launch {
                                     settings.saveTerminalSessionId(ev.id)
                                     val ids = settings.currentTerminalSessionIds().toMutableList()
                                     if (ev.id !in ids) ids.add(ev.id)
                                     settings.saveTerminalSessionIds(ids)
                                     _sessions.value = ids
-                                    _activeSessionId.value = ev.id
                                 }
                             }
                             _state.value = TermState.OPEN
