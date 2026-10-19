@@ -108,6 +108,9 @@ data class ProviderStatus(
     @Json(name = "probed") val probed: Boolean = false,
     @Json(name = "working_model") val workingModel: String = "",
     @Json(name = "last_error") val lastError: String = "",
+    // Built-in providers are carried by the engine (the opencode free tier
+    // needs no key) and cannot be added, edited or removed.
+    @Json(name = "builtin") val builtin: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)

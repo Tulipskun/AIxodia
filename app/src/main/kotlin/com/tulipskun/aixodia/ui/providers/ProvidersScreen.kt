@@ -276,7 +276,7 @@ private fun ProviderCard(p: ProviderStatus, tested: Boolean, onClick: () -> Unit
             Column(Modifier.weight(1f)) {
                 Text(p.id, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${p.adapter} · ${p.keyCount} key",
+                    "${p.adapter} · ${if (p.builtin) "built-in · ไม่ต้องใช้ key" else "${p.keyCount} key"}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -324,43 +324,51 @@ private fun ProviderDetailSheet(
                 Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             }
 
-            Text("key ${provider.keyCount} อัน", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "key ถูกเก็บไว้ที่ daemon และอ่านกลับไม่ได้ ลบแล้วต้องใส่ใหม่",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            (1..provider.keyCount).forEach { position ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("key $position", modifier = Modifier.weight(1f))
-                    TextButton(onClick = {
+            if (provider.builtin) {
+                Text(
+                    "provider นี้ติดมากับ engine — โหมดไม่ต้อง login ใช้ฟรีโดยไม่ต้องใส่ key และแก้ไข/ลบไม่ได้",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text("key ${provider.keyCount} อัน", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "key ถูกเก็บไว้ที่ daemon และอ่านกลับไม่ได้ ลบแล้วต้องใส่ใหม่",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                (1..provider.keyCount).forEach { position ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("key $position", modifier = Modifier.weight(1f))
+                        TextButton(onClick = {
+                            scope.launch {
+                                val result = history.changeKeys(provider.id, remove = listOf(position - 1))
+                                note = result
+                                history.providers().firstOrNull { it.id == provider.id }?.let(onChanged)
+                            }
+                        }) { Text("ลบ") }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = newKey,
+                    onValueChange = { newKey = it },
+                    singleLine = true,
+                    label = { Text("เพิ่ม key") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    enabled = newKey.isNotBlank(),
+                    onClick = {
+                        val key = newKey.trim()
+                        newKey = ""
                         scope.launch {
-                            val result = history.changeKeys(provider.id, remove = listOf(position - 1))
-                            note = result
+                            note = history.changeKeys(provider.id, add = listOf(key))
                             history.providers().firstOrNull { it.id == provider.id }?.let(onChanged)
                         }
-                    }) { Text("ลบ") }
-                }
+                    },
+                ) { Text("เพิ่ม key") }
             }
-
-            OutlinedTextField(
-                value = newKey,
-                onValueChange = { newKey = it },
-                singleLine = true,
-                label = { Text("เพิ่ม key") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(
-                enabled = newKey.isNotBlank(),
-                onClick = {
-                    val key = newKey.trim()
-                    newKey = ""
-                    scope.launch {
-                        note = history.changeKeys(provider.id, add = listOf(key))
-                        history.providers().firstOrNull { it.id == provider.id }?.let(onChanged)
-                    }
-                },
-            ) { Text("เพิ่ม key") }
 
             HorizontalDivider()
 
@@ -382,7 +390,9 @@ private fun ProviderDetailSheet(
                 },
             ) { Text(if (testing) "กำลังทดสอบ…" else "ทดสอบ provider นี้") }
 
-            OutlinedButton(onClick = { confirmDelete = true }) { Text("ลบ provider") }
+            if (!provider.builtin) {
+                OutlinedButton(onClick = { confirmDelete = true }) { Text("ลบ provider") }
+            }
         }
     }
 
