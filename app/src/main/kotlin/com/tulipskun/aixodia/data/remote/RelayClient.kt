@@ -348,7 +348,18 @@ class RelayClient(private val settings: SettingsStore) {
                 // (presence false) leaves the socket up and must not redial.
                 val down = CompletableDeferred<Unit>()
                 ws = client.newWebSocket(req, object : WebSocketListener() {
+                    // A socket that has been replaced must not touch shared
+                    // state: reconnect() cancels the old one and the loop dials a
+                    // new one at once, so the old socket's teardown callbacks
+                    // arrive after the new one exists. Letting them run would
+                    // fail the new socket's rpc requests and kill its streams.
+                    private fun stale(w: WebSocket): Boolean = ws !== w
+
                     override fun onOpen(w: WebSocket, r: Response) {
+                        if (stale(w)) {
+                            ready.complete(Unit)
+                            return
+                        }
                         _lastError.value = 0
                         // The relay only forwards this side's frames after it has
                         // been told which half of the room this is.
@@ -358,27 +369,34 @@ class RelayClient(private val settings: SettingsStore) {
                         ready.complete(Unit)
                     }
 
-                    override fun onMessage(w: WebSocket, text: String) = onText(text)
+                    override fun onMessage(w: WebSocket, text: String) {
+                        if (!stale(w)) onText(text)
+                    }
 
-                    override fun onMessage(w: WebSocket, bytes: ByteString) = onBinary(bytes)
+                    override fun onMessage(w: WebSocket, bytes: ByteString) {
+                        if (!stale(w)) onBinary(bytes)
+                    }
 
                     override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
                         if (!ready.isCompleted) ready.complete(Unit)
+                        down.complete(Unit)
+                        if (stale(w)) return
                         _engine.value = false
                         _state.value = ConnState.OFFLINE
                         _lastError.value = describe(r, t)
                         lost("socket failed")
-                        down.complete(Unit)
                     }
 
                     override fun onClosed(w: WebSocket, code: Int, reason: String) {
+                        if (!ready.isCompleted) ready.complete(Unit)
+                        down.complete(Unit)
+                        if (stale(w)) return
                         _engine.value = false
                         _state.value = ConnState.OFFLINE
                         if (code == 1008 || reason.isNotEmpty()) {
                             _lastError.value = R.string.offline_closed
                         }
                         lost("socket closed")
-                        down.complete(Unit)
                     }
 
                     override fun onClosing(w: WebSocket, code: Int, reason: String) {

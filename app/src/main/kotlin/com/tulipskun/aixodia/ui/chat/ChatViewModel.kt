@@ -12,6 +12,7 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.ChatRepository
+import com.tulipskun.aixodia.ui.display.LiveUsage
 import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.toolStepFor
@@ -238,6 +239,13 @@ class ChatViewModel(
 
     /** Model, tokens, elapsed time and rate for the footer. */
     val turnStats = MutableStateFlow(TurnStats())
+    /**
+     * The running cost of the turn in flight, restated by the engine after
+     * every provider round. The strip draws it in place of the turn's own
+     * stored row until that row lands, so the figures climb with the rounds
+     * instead of jumping once when the turn ends. Null between turns.
+     */
+    val liveUsage = MutableStateFlow<LiveUsage?>(null)
     /** Unix second the daemon process started; 0 = unknown/not polled yet. */
     val daemonStartedAt = MutableStateFlow(0L)
     /** Files picked and uploaded, waiting to go out with the next message. */
@@ -327,6 +335,7 @@ class ChatViewModel(
                         turnBaseSeq = -1L
                         pendingThinkingMs = 0L
                         busy.value = false
+                        liveUsage.value = null
                         // Raw daemon text is logged by the daemon; the user sees Thai.
                         // The error becomes a retryable card, not just a notice line.
                         val msg = friendlyError(f.text)
@@ -400,6 +409,12 @@ class ChatViewModel(
             return
         }
         recordUsage(frame)
+        // The closing frame names the seq the turn's answer lands at. The strip
+        // uses it to skip that row once it reaches the thread, so the running
+        // total is never counted alongside the row it becomes.
+        if (frame != null && frame.seq > 0L) {
+            liveUsage.value = liveUsage.value?.copy(seq = frame.seq)
+        }
         // The whole turn's time, from send to the answer arriving (includes
         // tool execution): one figure for every pill in this turn, not a
         // per-request sum.
@@ -625,7 +640,31 @@ class ChatViewModel(
         traceNote(note)
     }
 
+    /**
+     * A provider round finished: adopt the turn's running cost. The engine
+     * sends the sum so far, not the round's own figures, so a frame that never
+     * arrives is corrected by the next one. The answer's seq is the one piece
+     * the usage frame does not carry, so it is kept from whatever is already
+     * known and filled in when the closing message names it.
+     */
+    private fun onUsage(f: AiOutput) {
+        liveUsage.value = LiveUsage(
+            seq = liveUsage.value?.seq ?: 0L,
+            promptTokens = f.inputTokens,
+            cacheRead = f.cacheRead,
+            cacheWrite = f.cacheWrite,
+            outputTokens = f.outputTokens,
+            inputIncludesCache = f.inputIncludesCache,
+        )
+    }
+
     private fun onTrace(f: AiOutput) {
+        // A provider round finished: the engine restates the turn's running
+        // cost. It moves the strip only, so it never touches the thread.
+        if (f.stage == "usage") {
+            onUsage(f)
+            return
+        }
         if (f.agent.isNotEmpty() && f.agent != "main") {
             val detail = when (f.stage) {
                 "tool_call", "tool_running" -> "Using ${f.toolCall?.name ?: "tool"}"
@@ -782,6 +821,10 @@ class ChatViewModel(
         val thinkingMs = pendingThinkingMs
         clearLiveTurn()
         answerSettled = false
+        // The turn is over: let the running total go. Its answer's stored row
+        // carries the same figures (and the turn's duration, which a running
+        // total has no way to report), so the strip hands over to the thread.
+        liveUsage.value = null
         // Repository has already committed the WS rows. A D1 read is only a
         // compatibility/recovery fallback for a daemon without a complete batch.
         viewModelScope.launch {
@@ -1034,6 +1077,7 @@ class ChatViewModel(
         liveSubText = ""
         liveBlocks.value = emptyList()
         subAgents.value = emptyList()
+        liveUsage.value = null
         liveText.value = ""
         liveReasoning.value = ""
         reasoningActive.value = false

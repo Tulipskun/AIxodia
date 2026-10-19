@@ -110,6 +110,61 @@ fun sessionTotals(messages: List<ChatMessage>): SessionTotals {
 }
 
 /**
+ * The in-flight turn's running cost, as the engine restates it after every
+ * provider round. A turn that runs tools makes several provider calls, and
+ * waiting for the whole turn to land left the strip still while the figures
+ * were already known; this is what lets it climb with each round instead.
+ *
+ * [seq] is the seq the turn's own answer will land at, filled in when the
+ * closing frame names it. It is what keeps the running total from being read
+ * twice once that answer reaches the thread: the strip drops the stored row and
+ * draws this instead, so the handover changes nothing on screen. Zero means the
+ * answer's seq is not known yet.
+ */
+data class LiveUsage(
+    val seq: Long = 0L,
+    val promptTokens: Int = 0,
+    val cacheRead: Int = 0,
+    val cacheWrite: Int = 0,
+    val outputTokens: Int = 0,
+    val inputIncludesCache: Boolean = false,
+) {
+    /** The same split [sessionTotals] draws for a stored answer. */
+    fun totals(): SessionTotals {
+        val prompt = if (inputIncludesCache) promptTokens else promptTokens + cacheRead + cacheWrite
+        val fresh = if (inputIncludesCache) (promptTokens - cacheRead).coerceAtLeast(0) else promptTokens
+        return SessionTotals(
+            promptTokens = prompt,
+            cacheRead = cacheRead,
+            freshInput = fresh,
+            outTokens = outputTokens,
+        )
+    }
+}
+
+/** Folds another thread's totals in, keeping the newest turn's own time. */
+fun SessionTotals.plus(other: SessionTotals): SessionTotals = SessionTotals(
+    promptTokens = promptTokens + other.promptTokens,
+    cacheRead = cacheRead + other.cacheRead,
+    freshInput = freshInput + other.freshInput,
+    outTokens = outTokens + other.outTokens,
+    lastTurnMs = if (other.totalMs > 0L) other.lastTurnMs else lastTurnMs,
+    totalMs = totalMs + other.totalMs,
+)
+
+/**
+ * The strip's figures: the committed thread plus the turn still running. The
+ * running turn's own stored row is skipped in case the answer has already
+ * reached the thread while the live total has not been let go of yet — the
+ * turn is then counted once either way.
+ */
+fun sessionTotals(messages: List<ChatMessage>, live: LiveUsage?): SessionTotals {
+    if (live == null) return sessionTotals(messages)
+    val committed = messages.filterNot { it.isAnswer && live.seq != 0L && it.seq == live.seq }
+    return sessionTotals(committed).plus(live.totals())
+}
+
+/**
  * The session's totals, as one thin bar above the composer.
  *
  * The figures are the same four the thread has been carrying, but the prompt is

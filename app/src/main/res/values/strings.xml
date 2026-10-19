@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AIxodia</string>
-
-    <!-- Token footer. These are labels, not sentences: a footer is read at a
-         glance between two answers, so every one of them is a word a reader
-         already knows from every other tool. -->
+    <!-- Token footer. -->
 
     <!-- The session strip above the composer: three counts under one bar, each
          labelled by the word the bar's own legend uses. Lower case, because the
@@ -14,83 +11,70 @@
     <string name="stat_new">new</string>
     <string name="stat_out">out</string>
 
+    <string name="offline_title">Cannot reach daemon</string>
+    <string name="offline_unknown_host">Host not found — check the daemon and tunnel are still running</string>
+    <string name="offline_refused">Cannot connect to daemon</string>
+    <string name="offline_timeout">Connection timed out</string>
+    <string name="offline_tls">TLS certificate invalid</string>
+    <string name="offline_generic">Cannot connect — see logcat or retry</string>
+    <string name="offline_retry">Retry</string>
+    <string name="offline_token_rejected">401 token rejected — daemon does not accept this D1 token</string>
+    <string name="offline_rate_limited">429 temporarily locked after 5+ wrong token guesses</string>
+    <string name="offline_token_unverified">503 daemon could not verify the token with Cloudflare</string>
+    <string name="offline_http">Cannot connect (HTTP %1$d)</string>
+    <string name="offline_closed">Connection closed (%1$d)</string>
 
-    <string name="offline_title">ต่อ daemon ไม่ได้</string>
-    <string name="offline_unknown_host">หาเครื่องปลายทางไม่พบ — ดูว่า daemon กับ tunnel ยังรันอยู่</string>
-    <string name="offline_refused">เชื่อมต่อ daemon ไม่ได้</string>
-    <string name="offline_timeout">เชื่อมต่อหมดเวลา</string>
-    <string name="offline_tls">ใบรับรอง TLS ใช้ไม่ได้</string>
-    <string name="offline_generic">เชื่อมต่อไม่ได้ — ดู logcat หรือกดลองใหม่</string>
-    <string name="offline_retry">ลองใหม่</string>
-    <string name="offline_token_rejected">401 token ไม่ผ่าน — daemon ไม่รับ D1 token นี้</string>
-    <string name="offline_rate_limited">429 ถูกล็อกชั่วคราวจากการเดา token ผิดเกิน 5 ครั้ง</string>
-    <string name="offline_token_unverified">503 daemon ตรวจ token กับ Cloudflare ไม่ได้ชั่วคราว</string>
-    <string name="offline_http">เชื่อมต่อไม่ได้ (HTTP %1$d)</string>
-    <string name="offline_closed">ปิดการเชื่อมต่อ (%1$d)</string>
+    <string name="composer_hint">Send a message…</string>
+    <string name="send">Send</string>
+    <string name="attach">Attach</string>
+    <string name="attach_media">Image / video</string>
+    <string name="attach_file">File</string>
+    <string name="stop">Stop</string>
+    <string name="retry">Retry</string>
+    <string name="dismiss">Dismiss</string>
 
-    <string name="composer_hint">ส่งข้อความ…</string>
-    <string name="send">ส่ง</string>
-    <string name="attach">แนบไฟล์</string>
-    <string name="attach_media">รูปภาพ / วิดีโอ</string>
-    <string name="attach_file">ไฟล์แนบ</string>
-    <string name="stop">หยุดการทำงาน</string>
-    <string name="retry">ลองอีกครั้ง</string>
-    <string name="dismiss">ปิด</string>
-
-    <!-- The row under the composer. The button itself shows only a slash; this
-         is what a screen reader calls it. -->
     <string name="cmd">CMD</string>
-    <string name="clear_draft">ล้างข้อความ</string>
-    <string name="new_chat">แชทใหม่</string>
-    <string name="settings">ตั้งค่า</string>
-    <string name="refresh">ดึงข้อมูลล่าสุด</string>
-    <string name="menu">เมนูแชท</string>
+    <string name="clear_draft">Clear draft</string>
+    <string name="new_chat">New chat</string>
+    <string name="settings">Settings</string>
+    <string name="refresh">Refresh latest</string>
+    <string name="menu">Chat menu</string>
     <string name="agent_default">Agent default</string>
 
-    <!-- The empty thread. -->
-    <string name="empty_title">เริ่มสนทนากับ agent</string>
-    <string name="empty_hint">พิมพ์งานด้านล่าง แล้ว agent จะทำต่อแม้ปิดแอป</string>
+    <string name="empty_title">Start a conversation with the agent</string>
+    <string name="empty_hint">Type below — the agent keeps working even after the app is closed</string>
 
-    <!-- Tool cards. -->
-    <string name="collapse">ยุบ</string>
-    <string name="expand">ขยาย</string>
-    <string name="tool_done">ทำเสร็จแล้ว</string>
-    <string name="tool_failed">ผิดพลาด</string>
+    <string name="collapse">Collapse</string>
+    <string name="expand">Expand</string>
+    <string name="tool_done">Done</string>
+    <string name="tool_failed">Failed</string>
 
-    <!-- The connection dot, read out rather than shown. -->
-    <string name="online">ออนไลน์</string>
-    <string name="connecting">กำลังต่อ</string>
-    <string name="offline">ออฟไลน์</string>
+    <string name="online">Online</string>
+    <string name="connecting">Connecting</string>
+    <string name="offline">Offline</string>
 
-    <string name="sub_agent_running">กำลังทำงาน</string>
-    <string name="sub_agent_stop">หยุด</string>
+    <string name="sub_agent_running">Running</string>
+    <string name="sub_agent_stop">Stop</string>
     <string name="sub_agent_title">SUB AGENT %1$d</string>
     <string name="agent_main">main</string>
     <string name="agent_sub">SUB</string>
     <string name="agent_worker">WORKER</string>
-    <string name="agent_user">คุณ</string>
-    <string name="live_answering">กำลังตอบ</string>
-    <string name="live_thinking">กำลังคิด · %1$s</string>
-    <!-- The five live states, in the harness's words. Sending is what a bubble
-         wears while its row is still on its way; the thinking title heads the
-         expanded card every request shows, and the thought pill is what a
-         finished turn keeps. English, like the harness draws them. -->
+    <string name="agent_user">You</string>
+    <string name="live_answering">Answering</string>
+    <string name="live_thinking">Thinking · %1$s</string>
     <string name="sending">Sending…</string>
     <string name="sending_request">Sending request to provider…</string>
     <string name="thinking_title">Thinking…</string>
     <string name="thought_for">Thought for %1$s</string>
     <string name="thought">Thought</string>
-    <string name="copy_message">คัดลอกข้อความ</string>
-    <string name="retry_turn">ส่งใหม่</string>
-    <string name="copied">คัดลอกแล้ว</string>
-    <string name="copy_long_press">แตะค้างเพื่อคัดลอก</string>
-    <string name="token_fields_label">แสดงตัวเลข token</string>
-    <string name="token_fields_subtitle">จัดลำดับว่าตัวเลขไหนขึ้นก่อน และจะแสดงบรรทัดไหนบ้าง</string>
-    <string name="token_fields_help">คั่นด้วยจุลภาค เรียงตามลำดับที่อยากเห็น\nใส่ได้: in out rate model time\nค่าเริ่มต้น: model,rate,time\n(in/out ของแต่ละเทิร์นปิดไว้ เพราะยอดรวมอยู่ในแถบเหนือช่องพิมพ์แล้ว)</string>
+    <string name="copy_message">Copy message</string>
+    <string name="retry_turn">Retry</string>
+    <string name="copied">Copied</string>
+    <string name="copy_long_press">Long-press to copy</string>
+    <string name="token_fields_label">Show token counts</string>
+    <string name="token_fields_subtitle">Choose which counts appear and in what order</string>
+    <string name="token_fields_help">Comma-separated, in display order.\nAvailable: in out rate model time\nDefault: model,rate,time\n(per-turn in/out are off — the totals are in the bar above the composer)</string>
 
-    <!-- First-launch sign-in. The token is the one credential, so this is a
-         login form rather than a pointer into Settings. Plain, one-line copy
-         like any ordinary app's sign-in screen. -->
     <string name="login_title">Welcome to AIxodia</string>
     <string name="login_subtitle">Enter your Cloudflare API token to get started.</string>
     <string name="login_token_label">Cloudflare API token</string>
@@ -100,12 +84,12 @@
     <string name="login_hide">Hide</string>
     <string name="login_continue">Continue</string>
     <string name="login_advanced">Advanced settings</string>
-    <string name="terminal">เทอร์มินัล</string>
-    <string name="terminal_close">ปิดเทอร์มินัล</string>
-    <string name="terminal_open_new">เปิดเชลล์ใหม่</string>
-    <string name="terminal_connecting">กำลังเชื่อมต่อ…</string>
-    <string name="terminal_no_address">ยังไม่มีที่อยู่ของ daemon — รอให้แอพเจอเครื่องก่อน</string>
-    <string name="terminal_closed">การเชื่อมต่อปิดลง</string>
-    <string name="terminal_ended">เชลล์จบแล้ว (exit %1$d)</string>
-    <string name="terminal_failed">เทอร์มินัลผิดพลาด: %1$s</string>
+    <string name="terminal">Terminal</string>
+    <string name="terminal_close">Close terminal</string>
+    <string name="terminal_open_new">Open new shell</string>
+    <string name="terminal_connecting">Connecting…</string>
+    <string name="terminal_no_address">No daemon address — waiting for the app to find the machine</string>
+    <string name="terminal_closed">Connection closed</string>
+    <string name="terminal_ended">Shell exited (exit %1$d)</string>
+    <string name="terminal_failed">Terminal error: %1$s</string>
 </resources>
