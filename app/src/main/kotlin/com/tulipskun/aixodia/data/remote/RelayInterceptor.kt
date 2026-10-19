@@ -28,10 +28,22 @@ class RelayInterceptor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val req = chain.request()
         val r = relay ?: return chain.proceed(req)
-        if (!r.isOnline) return chain.proceed(req)
 
         val daemonUrl = runCatching { runBlocking { settings.current().daemonUrl } }.getOrNull()
         val path = daemonUrl?.let { relayPath(req.url.toString(), it) } ?: return chain.proceed(req)
+        if (!r.isOnline) {
+            // The engine is reachable only through the relay: there is no
+            // address to call directly. Calling it anyway turns a dead relay
+            // into a request that hangs until the timeout, which reads as a
+            // slow server rather than as "the connection is down".
+            return Response.Builder()
+                .request(req)
+                .protocol(Protocol.HTTP_1_1)
+                .code(503)
+                .message("relay offline")
+                .body("{\"error\":\"relay offline\"}".toResponseBody("application/json".toMediaType()))
+                .build()
+        }
         val body = req.body?.let { b ->
             val buffer = Buffer()
             b.writeTo(buffer)
