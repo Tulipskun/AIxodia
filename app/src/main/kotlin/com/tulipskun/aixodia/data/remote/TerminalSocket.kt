@@ -118,6 +118,21 @@ class TerminalSocket(
     // against the new session.
     private var dialJob: Job? = null
 
+    init {
+        // The engine's half of the relay can drop and re-register while the
+        // phone's socket never moves (the worker tells us with presence
+        // false/true). Every stream id lives in that engine-side relay session,
+        // so at that moment all of them are dead even though ours look open.
+        // Presence coming back is the signal to reattach the shell on screen.
+        scope.launch {
+            var wasUp = relay?.enginePresent?.value ?: true
+            relay?.enginePresent?.collect { up ->
+                if (up && !wasUp && wanted) reconnectLocked()
+                wasUp = up
+            }
+        }
+    }
+
     // Whether the window wants a terminal. open() sets it, close() clears it.
     // Unlike [isLive] it stays true while dial() is still waiting for the relay
     // address, which is the state a fresh sign-in starts in.
@@ -215,6 +230,10 @@ class TerminalSocket(
     /** Switches to an already-known session id and re-dials. Used by the tab row. */
     fun switchSession(id: String) {
         if (id.isBlank()) return
+        // Tapping the tab that is already attached must not close and re-open
+        // the stream: that replays the screen (RIS + ring) and, in the status
+        // line, looked like a counter going up on every tap.
+        if (id == _activeSessionId.value && sid != null && _state.value == TermState.OPEN) return
         retarget = id
         _activeSessionId.value = id
         scope.launch {
@@ -457,7 +476,10 @@ class TerminalSocket(
             sid = opened
             backoff = RETRY_MS
             _state.value = TermState.OPEN
-            _detail.value = "terminal stream $opened"
+            // No stream id here: it is an implementation detail that changes on
+            // every attach, and the ready frame (above) already names the shell
+            // and its directory. Printing it made a healthy terminal look like
+            // it was counting attempts every time a tab was tapped.
 
             val shellEnded = ended.await()
             if (sid == opened) sid = null
