@@ -464,7 +464,9 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
                 var nl = rest.indexOf('\n')
                 while (nl >= 0) {
                     val line = rest.substring(0, nl)
-                    socket.send((line + "\n").toByteArray())
+                    // CR, not LF: this is the same byte the terminal's Enter
+                    // sends, so an empty line submits exactly like a real one.
+                    socket.send((line + "\r").toByteArray())
                     onSend()
                     rest = rest.substring(nl + 1)
                     nl = rest.indexOf('\n')

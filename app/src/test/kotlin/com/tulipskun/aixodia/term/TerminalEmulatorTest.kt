@@ -180,6 +180,30 @@ class TerminalEmulatorTest {
     }
 
     @Test
+    fun wheelReportsGoToTheProgram() {
+        val (term, _) = emulator()
+        term.send("\u001b[?1000h\u001b[?1006h")
+        assertEquals(
+            "\u001b[<64;4;5M",
+            term.mouseReport(64, 3, 4, release = false)!!.toString(Charsets.US_ASCII),
+        )
+        assertEquals(
+            "\u001b[<65;4;5M",
+            term.mouseReport(65, 3, 4, release = false)!!.toString(Charsets.US_ASCII),
+        )
+    }
+
+    @Test
+    fun alternateScreenFlagTracksTheSwitch() {
+        val (term, _) = emulator()
+        assertFalse(term.alternateScreen)
+        term.send("\u001b[?1049h")
+        assertTrue(term.alternateScreen)
+        term.send("\u001b[?1049l")
+        assertFalse(term.alternateScreen)
+    }
+
+    @Test
     fun resetClearsEverything() {
         val (term, _) = emulator()
         term.send("junk\u001b[?1000h\u001b[31m")

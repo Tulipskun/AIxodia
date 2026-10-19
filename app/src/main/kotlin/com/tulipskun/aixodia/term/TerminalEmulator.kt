@@ -34,6 +34,9 @@ class TerminalEmulator(
     var buffer: TerminalBuffer = normal
         private set
 
+    /** True while a full-screen program has the alternate screen up. */
+    val alternateScreen: Boolean get() = activeAlternate
+
     // ---- current pen -------------------------------------------------------
     private var fg = TerminalColors.DEFAULT_FG
     private var bg = TerminalColors.DEFAULT_BG

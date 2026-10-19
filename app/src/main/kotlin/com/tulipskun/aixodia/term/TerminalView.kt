@@ -89,7 +89,7 @@ class TerminalView @JvmOverloads constructor(
     private var downX = 0f
     private var downTime = 0L
     private var dragging = false
-    private var mouseButtonDown = false
+    private var wheelAccum = 0f
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
@@ -378,6 +378,9 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val em = emulator ?: return false
+        // When the program wants the mouse — or is on the alternate screen, as
+        // full-screen apps are — a drag is a wheel, not a scroll of our history.
+        val wheelMode = em.mouseReporting() || em.alternateScreen
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 requestFocus()
@@ -388,32 +391,25 @@ class TerminalView @JvmOverloads constructor(
                 downX = event.x
                 downTime = event.eventTime
                 dragging = false
-                mouseButtonDown = false
+                wheelAccum = 0f
                 velocityTracker.clear()
                 velocityTracker.addMovement(event)
-                if (em.mouseReporting() && event.pointerCount == 1) {
-                    sendMouse(em, event, button = 0, release = false)
-                    mouseButtonDown = true
-                }
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // A second finger always means "scroll", even when the program
-                // wants the mouse for one finger.
-                dragging = true
+                // A second finger is always a scroll.
                 lastTouchY = event.y
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 velocityTracker.addMovement(event)
-                if (em.mouseReporting() && event.pointerCount == 1 && mouseButtonDown) {
-                    if (em.mouseTracking >= 3) sendMouse(em, event, button = 0, release = false)
-                    return true
-                }
                 val dy = lastTouchY - event.y
                 if (kotlin.math.abs(event.y - downY) > touchSlop) dragging = true
                 lastTouchY = event.y
-                if (dragging) {
+                if (wheelMode) {
+                    wheelAccum += dy
+                    dispatchWheel(em, event)
+                } else if (dragging) {
                     scrollTopPx += dy
                     clampScroll()
                     invalidate()
@@ -422,13 +418,15 @@ class TerminalView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP -> {
                 velocityTracker.addMovement(event)
-                if (em.mouseReporting() && event.pointerCount == 1 && mouseButtonDown) {
-                    sendMouse(em, event, button = 0, release = true)
-                    mouseButtonDown = false
-                    return true
-                }
                 val quick = event.eventTime - downTime < 200
-                if (dragging) {
+                if (wheelMode) {
+                    // A tap is a click. A drag has already gone out as wheel
+                    // notches, so it must not also fire a click.
+                    if (!dragging && quick && em.mouseReporting()) {
+                        sendMouse(em, event, button = 0, release = false)
+                        sendMouse(em, event, button = 0, release = true)
+                    }
+                } else if (dragging) {
                     velocityTracker.computeCurrentVelocity(1000)
                     val vy = -velocityTracker.yVelocity
                     scroller.fling(
@@ -436,21 +434,46 @@ class TerminalView @JvmOverloads constructor(
                         0, 0, 0, maxScroll().coerceAtLeast(0),
                     )
                     postInvalidateOnAnimation()
-                } else if (quick && !em.mouseReporting()) {
-                    // A tap on a terminal with no mouse mode is how you ask for
-                    // the keyboard; nothing is sent to the shell.
+                } else if (quick) {
                     showSoftKeyboard()
                     onUserInteraction?.invoke()
                 }
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
-                mouseButtonDown = false
                 dragging = false
                 return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    /** Hands accumulated vertical motion to the program as wheel notches. */
+    private fun dispatchWheel(em: TerminalEmulator, event: MotionEvent) {
+        val step = (cellHeight * 2f).coerceAtLeast(1f)
+        val col = (event.x / cellWidth).toInt().coerceIn(0, em.columns - 1)
+        val row = (event.y / cellHeight).toInt().coerceIn(0, em.rows - 1)
+        // Dragging up (dy > 0) means "show me later content", which is wheel
+        // down; dragging down is wheel up.
+        while (wheelAccum >= step) {
+            sendWheel(em, 65, col, row)
+            wheelAccum -= step
+        }
+        while (wheelAccum <= -step) {
+            sendWheel(em, 64, col, row)
+            wheelAccum += step
+        }
+    }
+
+    private fun sendWheel(em: TerminalEmulator, button: Int, col: Int, row: Int) {
+        if (em.mouseReporting()) {
+            em.mouseReport(button, col, row, release = false)?.let { inputSink?.invoke(it) }
+        } else if (em.alternateScreen) {
+            // No mouse mode but a full-screen program: the terminal convention
+            // is that the wheel arrives as an arrow key.
+            val bytes = if (button == 65) "\u001b[B" else "\u001b[A"
+            inputSink?.invoke(bytes.toByteArray(Charsets.US_ASCII))
+        }
     }
 
     private fun sendMouse(em: TerminalEmulator, event: MotionEvent, button: Int, release: Boolean) {
