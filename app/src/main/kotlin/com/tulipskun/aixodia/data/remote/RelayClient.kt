@@ -52,6 +52,30 @@ interface TermStream {
     fun onClosed()
 }
 
+/** Which vocabulary an inbound frame speaks. */
+internal enum class RelayFrameKind { CONTROL, RPC, TERM, CHAT }
+
+/**
+ * Two vocabularies arrive on this socket and they do not mix.
+ *
+ * The relay's own control frames carry "ctl" ({"ctl":"presence","engine":true},
+ * {"ctl":"superseded-phone"}), while the engine's frames carry "ch"
+ * ({"ch":"chat"...}, {"ch":"rpc"...}, {"ch":"term"...}). A frame with neither is
+ * a chat frame, because that is what the engine sends for the streamed answer.
+ *
+ * Reading only "ch" is how a phone ends up connected but never ONLINE: the
+ * presence frame has no "ch", so it looks like a chat frame, the engine is
+ * never noticed, and the chat hello is never sent.
+ */
+internal fun relayFrameKind(ctl: String?, ch: String?): RelayFrameKind {
+    if (!ctl.isNullOrEmpty()) return RelayFrameKind.CONTROL
+    return when (ch) {
+        "rpc" -> RelayFrameKind.RPC
+        "term" -> RelayFrameKind.TERM
+        else -> RelayFrameKind.CHAT
+    }
+}
+
 /**
  * The app's one connection: every byte to the engine travels here.
  *
@@ -233,11 +257,15 @@ class RelayClient(private val settings: SettingsStore) {
 
     private fun onText(text: String) {
         val o = runCatching { JSONObject(text) }.getOrNull()
-        when (o?.optString("ch").orEmpty()) {
-            "rpc" -> onRpc(o!!)
-            "ctl" -> onCtl(o!!)
-            "term" -> onTerm(o!!)
-            else -> {
+        if (o == null) {
+            _frames.tryEmit(AiOutput(kind = "error", text = "unreadable frame: ${text.take(120)}"))
+            return
+        }
+        when (relayFrameKind(o.optString("ctl").ifEmpty { null }, o.optString("ch").ifEmpty { null })) {
+            RelayFrameKind.CONTROL -> onCtl(o)
+            RelayFrameKind.RPC -> onRpc(o)
+            RelayFrameKind.TERM -> onTerm(o)
+            RelayFrameKind.CHAT -> {
                 val frame = runCatching { outAdapter.fromJson(text) }.getOrNull()
                 _frames.tryEmit(
                     frame ?: AiOutput(kind = "error", text = "unreadable frame: ${text.take(120)}")
@@ -253,6 +281,12 @@ class RelayClient(private val settings: SettingsStore) {
                 _engine.value = here
                 _state.value = if (here) ConnState.ONLINE else ConnState.CONNECTING
                 if (here) hello()
+            }
+            // Another phone took the room. The relay closes this socket right
+            // after, and the close handler takes it from there.
+            "superseded-phone" -> {
+                Log.i(TAG, "another phone took the room")
+                _engine.value = false
             }
             // `superseded` and `superseded-phone` close the socket right after;
             // the close handler takes it from there.

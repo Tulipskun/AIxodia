@@ -23,6 +23,11 @@ class AixodiaApp : Application() {
         // the app is in the background (a kernel ends, a new one is pushed), and
         // the chat should be current on the next open without anyone asking.
         container.discovery.start()
+        // The socket is opened here too, not by a screen: the address only
+        // exists after discovery has read it, and the relay waits for that
+        // address by itself. A phone that only opens the settings screen would
+        // otherwise never dial at all.
+        container.relay.connect()
     }
 }
 
