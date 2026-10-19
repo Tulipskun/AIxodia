@@ -4,10 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.ViewGroup
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -134,23 +131,12 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         em
     }
 
-    var leaving by remember { mutableStateOf(false) }
-    var appeared by remember { mutableStateOf(false) }
-
     DisposableEffect(Unit) {
         socket.open()
         onDispose {
             // The shell outlives this window; its modes must outlive it too.
             socket.rememberModes(socket.activeSessionId.value, emulator.snapshotModes())
             socket.close()
-        }
-    }
-
-    LaunchedEffect(Unit) { appeared = true }
-    LaunchedEffect(leaving) {
-        if (leaving) {
-            delay(240)
-            onClose()
         }
     }
 
@@ -214,109 +200,107 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
     }
 
-    AnimatedVisibility(
-        visible = appeared && !leaving,
-        enter = slideInHorizontally(animationSpec = tween(220), initialOffsetX = { it }),
-        exit = slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { it }),
-    ) {
-        Surface(color = Ink, modifier = Modifier.fillMaxSize()) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    // The system bars set the floor and the ceiling. The nav bar
-                    // keeps its strip or it covers the composer.
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
-            ) {
-                // The header and the session tabs stay put even with the
-                // keyboard up: closing a shell is not something the keyboard
-                // should take away. The terminal gives up the room instead.
-                TerminalHeader(
-                    status = statusLine(state, errorRes, ready, ended) +
-                        (if (detail.isNotBlank()) "  ·  $detail" else ""),
-                    canRestart = state == TermState.CLOSED || state == TermState.ENDED,
-                    onRestart = {
-                        ended = null
-                        ready = null
-                        emulator.hardReset()
-                        terminalView.value?.scrollToBottom()
-                        terminalView.value?.requestFocus()
-                        socket.newSession()
-                    },
-                    onCloseSession = {
-                        ended = null
-                        ready = null
-                        emulator.hardReset()
-                        terminalView.value?.scrollToBottom()
-                        terminalView.value?.requestFocus()
-                        socket.closeSession()
-                    },
-                    onClose = { leaving = true },
+    // A plain Box, not AnimatedVisibility + Surface: both of those put a
+    // graphicsLayer around the tree, and an embedded platform view does not
+    // share Compose's layers. On the device that drew the terminal from the
+    // top of the window — over the header — while Compose still owned the taps.
+    Box(Modifier.fillMaxSize().background(Ink)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                // The system bars set the floor and the ceiling. The nav bar
+                // keeps its strip or it covers the composer.
+                .windowInsetsPadding(WindowInsets.safeDrawing),
+        ) {
+            // The header and the session tabs stay put even with the
+            // keyboard up: closing a shell is not something the keyboard
+            // should take away. The terminal gives up the room instead.
+            TerminalHeader(
+                status = statusLine(state, errorRes, ready, ended) +
+                    (if (detail.isNotBlank()) "  ·  $detail" else ""),
+                canRestart = state == TermState.CLOSED || state == TermState.ENDED,
+                onRestart = {
+                    ended = null
+                    ready = null
+                    emulator.hardReset()
+                    terminalView.value?.scrollToBottom()
+                    terminalView.value?.requestFocus()
+                    socket.newSession()
+                },
+                onCloseSession = {
+                    ended = null
+                    ready = null
+                    emulator.hardReset()
+                    terminalView.value?.scrollToBottom()
+                    terminalView.value?.requestFocus()
+                    socket.closeSession()
+                },
+                onClose = onClose,
+            )
+            TerminalSessionBar(socket = socket)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                TerminalHost(
+                    view = terminalView,
+                    emulator = emulator,
+                    socket = socket,
+                    ctrlOn = ctrlOn,
+                    altOn = altOn,
+                    atBottom = atBottom,
                 )
-                TerminalSessionBar(socket = socket)
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    TerminalHost(
-                        view = terminalView,
-                        emulator = emulator,
-                        socket = socket,
-                        ctrlOn = ctrlOn,
-                        altOn = altOn,
-                        atBottom = atBottom,
-                    )
-                    // Only while there is history above: a terminal at the
-                    // prompt needs no button.
-                    if (!atBottom.value) {
-                        Surface(
-                            color = Color(0xFF1A222C),
-                            shape = RoundedCornerShape(50),
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 12.dp, bottom = 12.dp)
-                                .clickable {
-                                    terminalView.value?.scrollToBottom()
-                                },
-                        ) {
-                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.KeyboardArrowDown,
-                                    contentDescription = "Scroll to bottom",
-                                    tint = InkText,
-                                )
-                            }
+                // Only while there is history above: a terminal at the
+                // prompt needs no button.
+                if (!atBottom.value) {
+                    Surface(
+                        color = Color(0xFF1A222C),
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 12.dp)
+                            .clickable {
+                                terminalView.value?.scrollToBottom()
+                            },
+                    ) {
+                        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Scroll to bottom",
+                                tint = InkText,
+                            )
                         }
                     }
                 }
-                TerminalKeys(
-                    ctrlOn = ctrlOn.value,
-                    altOn = altOn.value,
-                    onCtrl = {
-                        val v = !ctrlOn.value
-                        ctrlOn.value = v
-                        terminalView.value?.setLatchedMods(v, altOn.value)
-                        terminalView.value?.requestFocus()
-                    },
-                    onAlt = {
-                        val v = !altOn.value
-                        altOn.value = v
-                        terminalView.value?.setLatchedMods(ctrlOn.value, v)
-                        terminalView.value?.requestFocus()
-                    },
-                    onKey = { bytes ->
-                        socket.send(bytes)
-                        // Tapping a key must not take the keyboard with it.
-                        terminalView.value?.requestFocus()
-                    },
-                )
-                TerminalComposer(
-                    socket = socket,
-                    onSend = {
-                        if (ctrlOn.value || altOn.value) {
-                            ctrlOn.value = false
-                            altOn.value = false
-                            terminalView.value?.setLatchedMods(false, false)
-                        }
-                    },
-                )
             }
+            TerminalKeys(
+                ctrlOn = ctrlOn.value,
+                altOn = altOn.value,
+                onCtrl = {
+                    val v = !ctrlOn.value
+                    ctrlOn.value = v
+                    terminalView.value?.setLatchedMods(v, altOn.value)
+                    terminalView.value?.requestFocus()
+                },
+                onAlt = {
+                    val v = !altOn.value
+                    altOn.value = v
+                    terminalView.value?.setLatchedMods(ctrlOn.value, v)
+                    terminalView.value?.requestFocus()
+                },
+                onKey = { bytes ->
+                    socket.send(bytes)
+                    // Tapping a key must not take the keyboard with it.
+                    terminalView.value?.requestFocus()
+                },
+            )
+            TerminalComposer(
+                socket = socket,
+                onSend = {
+                    if (ctrlOn.value || altOn.value) {
+                        ctrlOn.value = false
+                        altOn.value = false
+                        terminalView.value?.setLatchedMods(false, false)
+                    }
+                },
+            )
         }
     }
 }
