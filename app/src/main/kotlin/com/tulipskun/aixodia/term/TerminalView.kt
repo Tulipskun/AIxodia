@@ -18,6 +18,9 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 
+/** How long the layout must hold still before the shell is told its new size. */
+private const val RESIZE_SETTLE_MS = 120L
+
 /**
  * Draws a [TerminalEmulator] and turns fingers and keys into bytes. Everything
  * here is the app's own: the grid is painted with a [Paint], the keyboard is a
@@ -127,9 +130,29 @@ class TerminalView @JvmOverloads constructor(
     // geometry
     // =======================================================================
 
+    /**
+     * The keyboard slides in over several frames and the view is re-measured
+     * on each one. Telling the shell to resize every time makes a full-screen
+     * program repaint its whole screen for every frame of the animation, which
+     * is exactly when it must feel smooth. Wait for the layout to settle, then
+     * resize once.
+     */
+    private val settledResize = Runnable { resizeToView() }
+    private var sizedAtLeastOnce = false
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        resizeToView()
+        if (sizedAtLeastOnce) {
+            removeCallbacks(settledResize)
+            postDelayed(settledResize, RESIZE_SETTLE_MS)
+        } else {
+            // The first measurement is not an animation: a terminal that waits
+            // to tell the shell its real size starts at 80x24 and grows.
+            sizedAtLeastOnce = true
+            resizeToView()
+        }
+        // The canvas fills the new area immediately; the grid catches up.
+        invalidate()
     }
 
     private fun resizeToView() {
@@ -596,6 +619,7 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        removeCallbacks(settledResize)
         velocityTracker.recycle()
     }
 

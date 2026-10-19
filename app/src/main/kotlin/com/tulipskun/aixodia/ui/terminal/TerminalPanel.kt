@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -48,7 +47,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -216,11 +214,6 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
     }
 
-    // While the soft keyboard is up the title and the session tabs step aside:
-    // they are the least useful chrome exactly when the screen is at its
-    // scarcest, and the terminal gets the room instead.
-    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-
     AnimatedVisibility(
         visible = appeared && !leaving,
         enter = slideInHorizontally(animationSpec = tween(220), initialOffsetX = { it }),
@@ -234,31 +227,32 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     // keeps its strip or it covers the composer.
                     .windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
-                if (!imeVisible) {
-                    TerminalHeader(
-                        status = statusLine(state, errorRes, ready, ended) +
-                            (if (detail.isNotBlank()) "  ·  $detail" else ""),
-                        canRestart = state == TermState.CLOSED || state == TermState.ENDED,
-                        onRestart = {
-                            ended = null
-                            ready = null
-                            emulator.hardReset()
-                            terminalView.value?.scrollToBottom()
-                            terminalView.value?.requestFocus()
-                            socket.newSession()
-                        },
-                        onCloseSession = {
-                            ended = null
-                            ready = null
-                            emulator.hardReset()
-                            terminalView.value?.scrollToBottom()
-                            terminalView.value?.requestFocus()
-                            socket.closeSession()
-                        },
-                        onClose = { leaving = true },
-                    )
-                    TerminalSessionBar(socket = socket)
-                }
+                // The header and the session tabs stay put even with the
+                // keyboard up: closing a shell is not something the keyboard
+                // should take away. The terminal gives up the room instead.
+                TerminalHeader(
+                    status = statusLine(state, errorRes, ready, ended) +
+                        (if (detail.isNotBlank()) "  ·  $detail" else ""),
+                    canRestart = state == TermState.CLOSED || state == TermState.ENDED,
+                    onRestart = {
+                        ended = null
+                        ready = null
+                        emulator.hardReset()
+                        terminalView.value?.scrollToBottom()
+                        terminalView.value?.requestFocus()
+                        socket.newSession()
+                    },
+                    onCloseSession = {
+                        ended = null
+                        ready = null
+                        emulator.hardReset()
+                        terminalView.value?.scrollToBottom()
+                        terminalView.value?.requestFocus()
+                        socket.closeSession()
+                    },
+                    onClose = { leaving = true },
+                )
+                TerminalSessionBar(socket = socket)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     TerminalHost(
                         view = terminalView,
