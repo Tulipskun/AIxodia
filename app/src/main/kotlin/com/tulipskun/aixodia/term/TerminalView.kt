@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.text.InputType
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -18,8 +19,13 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 
-/** How long the layout must hold still before the shell is told its new size. */
-private const val RESIZE_SETTLE_MS = 120L
+/**
+ * The shortest gap between two size reports to the shell: about 30 fps. Every
+ * report makes a full-screen program repaint, so the rate is capped — but the
+ * cap is small enough that the grid keeps up with the keyboard instead of
+ * arriving after it.
+ */
+private const val RESIZE_THROTTLE_MS = 32L
 
 /**
  * Draws a [TerminalEmulator] and turns fingers and keys into bytes. Everything
@@ -132,23 +138,32 @@ class TerminalView @JvmOverloads constructor(
 
     /**
      * The keyboard slides in over several frames and the view is re-measured
-     * on each one. Telling the shell to resize every time makes a full-screen
-     * program repaint its whole screen for every frame of the animation, which
-     * is exactly when it must feel smooth. Wait for the layout to settle, then
-     * resize once.
+     * on each one. Telling the shell to resize on every frame makes a
+     * full-screen program repaint its whole screen each time, so the reports
+     * are rate-limited instead of sent raw. But waiting for the layout to stop
+     * moving makes the keyboard feel like it is dragging the terminal behind
+     * it, so the floor is one frame: a burst of size changes collapses to one
+     * report per [RESIZE_THROTTLE_MS], and the last one lands as the layout
+     * settles.
      */
-    private val settledResize = Runnable { resizeToView() }
+    private val pendingResize = Runnable {
+        lastResizeAt = SystemClock.uptimeMillis()
+        resizeToView()
+    }
     private var sizedAtLeastOnce = false
+    private var lastResizeAt = 0L
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (sizedAtLeastOnce) {
-            removeCallbacks(settledResize)
-            postDelayed(settledResize, RESIZE_SETTLE_MS)
+            removeCallbacks(pendingResize)
+            val sinceLast = SystemClock.uptimeMillis() - lastResizeAt
+            postDelayed(pendingResize, (RESIZE_THROTTLE_MS - sinceLast).coerceAtLeast(0L))
         } else {
             // The first measurement is not an animation: a terminal that waits
             // to tell the shell its real size starts at 80x24 and grows.
             sizedAtLeastOnce = true
+            lastResizeAt = SystemClock.uptimeMillis()
             resizeToView()
         }
         // The canvas fills the new area immediately; the grid catches up.
@@ -619,7 +634,7 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        removeCallbacks(settledResize)
+        removeCallbacks(pendingResize)
         velocityTracker.recycle()
     }
 
