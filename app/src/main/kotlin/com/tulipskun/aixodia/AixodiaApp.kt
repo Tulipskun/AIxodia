@@ -5,6 +5,7 @@ import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.remote.RelayClient
 import com.tulipskun.aixodia.data.remote.TerminalSocket
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import kotlinx.coroutines.CoroutineScope
@@ -30,9 +31,11 @@ class AppContainer(app: Application) {
 
     val db: AppDatabase = AppDatabase.get(app)
     val settings = SettingsStore(app)
-    val historyApi = HistoryApi(settings)
-    val socket = AiDirectSocket(settings)
-    val terminal = TerminalSocket(settings)
+    // One socket for the whole app: chat, terminal and the HTTP API all ride it.
+    val relay = RelayClient(settings)
+    val historyApi = HistoryApi(settings, relay)
+    val socket = AiDirectSocket(settings, relay)
+    val terminal = TerminalSocket(settings, relay)
     val repo = ChatRepository(db, historyApi, socket)
     val discovery = DaemonDiscovery(settings, historyApi, socket, scope)
 }

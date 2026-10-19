@@ -82,20 +82,24 @@ data class SessionRow(
     @Json(name = "updated_at") val updatedAt: Long = 0,
 )
 
-class HistoryApi(private val settings: SettingsStore) {
+class HistoryApi(
+    private val settings: SettingsStore,
+    private val relay: RelayClient? = null,
+) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     // History is Cloudflare D1 read directly; everything in this class
-    // that still goes over HTTP talks to the daemon through its tunnel.
+    // that still talks to the daemon goes over the app's one relay socket.
     private val d1 = D1Api(settings)
     // The settings calls are not all instant: asking the daemon to re-check its
-    // providers means waiting for the gateways to answer, through a tunnel that
-    // can take seconds per round trip. The default 10s read timeout cut those
-    // calls off halfway and left the screen with nothing to show.
+    // providers means waiting for the gateways to answer, through a connection
+    // that can take seconds per round trip. The default 10s read timeout cut
+    // those calls off halfway and left the screen with nothing to show.
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(150, TimeUnit.SECONDS)
+        .addInterceptor(RelayInterceptor(settings, relay))
         .build()
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
@@ -655,6 +659,27 @@ class HistoryApi(private val settings: SettingsStore) {
         runCatching {
             val query = "session_id=" + URLEncoder.encode(sessionId, "UTF-8") +
                 "&name=" + URLEncoder.encode(name, "UTF-8")
+            // Over the relay there is no address to stream to: the file is sent
+            // as rpc frames, which the engine joins before it hands the request
+            // to its own upload handler.
+            val online = relay?.takeIf { it.isOnline }
+            if (online != null) {
+                val bytes = open()?.use { it.readBytes() } ?: return@runCatching null
+                val reply = online.rpc(
+                    "POST",
+                    "/v1/attachments?$query",
+                    bytes,
+                    mapOf("Content-Type" to mime),
+                )
+                if (!reply.isSuccessful) return@runCatching null
+                val o = JSONObject(reply.text())
+                return@runCatching com.tulipskun.aixodia.data.model.AttachmentRef(
+                    name = o.optString("name"),
+                    path = o.optString("path"),
+                    mime = o.optString("mime"),
+                    size = o.optLong("size"),
+                )
+            }
             val body = object : RequestBody() {
                 override fun contentType(): MediaType? = mime.toMediaTypeOrNull()
                 override fun writeTo(sink: BufferedSink) {
