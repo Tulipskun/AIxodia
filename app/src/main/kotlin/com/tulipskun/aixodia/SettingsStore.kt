@@ -153,6 +153,31 @@ class SettingsStore(private val ctx: Context) {
         ctx.ds.edit { it[terminalSessionIds] = ids.joinToString(",") }
     }
 
+    /**
+     * Adds one known shell id in a single DataStore edit. Two ready frames can
+     * land together (a new shell and a reattach), and the old read-modify-write
+     * let one of them overwrite the other's tab.
+     */
+    suspend fun addTerminalSessionId(id: String) {
+        val clean = id.trim()
+        if (clean.isEmpty()) return
+        ctx.ds.edit { prefs ->
+            val ids = (prefs[terminalSessionIds] ?: "").split(",").map { it.trim() }.filter { it.isNotBlank() }
+            if (clean !in ids) prefs[terminalSessionIds] = (ids + clean).joinToString(",")
+        }
+    }
+
+    /** Drops one shell id and clears "current" only when it was that shell. */
+    suspend fun removeTerminalSessionId(id: String) {
+        val clean = id.trim()
+        if (clean.isEmpty()) return
+        ctx.ds.edit { prefs ->
+            val ids = (prefs[terminalSessionIds] ?: "").split(",").map { it.trim() }.filter { it.isNotBlank() && it != clean }
+            prefs[terminalSessionIds] = ids.joinToString(",")
+            if ((prefs[terminalSessionId] ?: "").trim() == clean) prefs.remove(terminalSessionId)
+        }
+    }
+
     suspend fun clearTerminalSessionId() {
         ctx.ds.edit { it.remove(terminalSessionId) }
     }

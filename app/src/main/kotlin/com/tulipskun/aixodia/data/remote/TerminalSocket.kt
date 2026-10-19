@@ -26,6 +26,14 @@ private const val TAG = "TerminalSocket"
 /** The gap between open attempts. Discovery polls every 30s, so this covers it. */
 private const val RETRY_MS = 1_500L
 
+/**
+ * How long a freshly opened stream may stay silent before it is treated as
+ * dead. The engine answers an open with ready (or error) at once; no answer
+ * means the frame or the stream id was stale, and dialing again with a new id
+ * is the only way out.
+ */
+private const val READY_TIMEOUT = 10_000L
+
 /** Where the terminal window stands, for the header line. */
 enum class TermState { CLOSED, CONNECTING, OPEN, ENDED }
 
@@ -262,10 +270,7 @@ class TerminalSocket(
         scope.launch {
             if (id.isNotBlank()) {
                 sessionModes.remove(id)
-                val ids = settings.currentTerminalSessionIds().toMutableList()
-                ids.remove(id)
-                settings.saveTerminalSessionIds(ids)
-                settings.clearTerminalSessionId()
+                settings.removeTerminalSessionId(id)
             }
             _sessions.value = settings.currentTerminalSessionIds()
         }
@@ -398,6 +403,9 @@ class TerminalSocket(
             // its own (exit or error frame), false when the link dropped. That
             // is the difference between "show the result" and "dial again".
             val ended = CompletableDeferred<Boolean>()
+            // Completed by any control frame; dial() only waits for it to
+            // tell "the engine answered" from "the open was swallowed".
+            val readyFrame = CompletableDeferred<Unit>()
             var mySid = -2
             val stream = object : TermStream {
                 // A stream that is no longer the current one must not touch
@@ -418,16 +426,19 @@ class TerminalSocket(
                             // something to retry, so dial() stops here.
                             _state.value = TermState.ENDED
                             _events.trySend(ev)
+                            readyFrame.complete(Unit)
                             ended.complete(true)
                         }
 
                         is TermEvent.Failed -> {
                             _state.value = TermState.ENDED
                             _events.trySend(ev)
+                            readyFrame.complete(Unit)
                             ended.complete(true)
                         }
 
                         is TermEvent.Ready -> {
+                            readyFrame.complete(Unit)
                             if (ev.id.isNotBlank()) {
                                 // Synchronously, so a retry inside dial() and
                                 // the tabs see the id before the DataStore
@@ -436,10 +447,8 @@ class TerminalSocket(
                                 _activeSessionId.value = ev.id
                                 scope.launch {
                                     settings.saveTerminalSessionId(ev.id)
-                                    val ids = settings.currentTerminalSessionIds().toMutableList()
-                                    if (ev.id !in ids) ids.add(ev.id)
-                                    settings.saveTerminalSessionIds(ids)
-                                    _sessions.value = ids
+                                    settings.addTerminalSessionId(ev.id)
+                                    _sessions.value = settings.currentTerminalSessionIds()
                                 }
                             }
                             _state.value = TermState.OPEN
@@ -460,6 +469,7 @@ class TerminalSocket(
                 }
 
                 override fun onClosed() {
+                    readyFrame.complete(Unit)
                     ended.complete(false)
                     if (stale()) return
                     sid = null
@@ -481,6 +491,22 @@ class TerminalSocket(
             // and its directory. Printing it made a healthy terminal look like
             // it was counting attempts every time a tab was tapped.
 
+            // A stream the engine never answers is dead even though the relay
+            // socket is up: the open frame can be swallowed by a stale engine-
+            // side stream id (the phone starts its ids over when its process
+            // restarts). Dial again with a new id rather than waiting forever.
+            if (withTimeoutOrNull(READY_TIMEOUT) { readyFrame.await() } == null) {
+                if (sid == opened) {
+                    closeStream(opened)
+                    sid = null
+                }
+                if (closing) return
+                _state.value = TermState.CONNECTING
+                _error.value = 0
+                _detail.value = "no answer from the engine; retrying"
+                delay(RETRY_MS)
+                continue
+            }
             val shellEnded = ended.await()
             if (sid == opened) sid = null
             if (closing) return

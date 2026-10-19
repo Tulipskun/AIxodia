@@ -129,7 +129,11 @@ class RelayClient(private val settings: SettingsStore) {
 
     private val pending = ConcurrentHashMap<String, CompletableDeferred<RpcReply>>()
     private val streams = ConcurrentHashMap<Int, TermStream>()
-    private val nextStream = AtomicInteger(1)
+    // Stream ids are 16-bit and only need to be unique to this socket. Starting
+    // at a random point keeps a fresh app process from reusing ids the engine
+    // still remembers from the previous one (it only drops them when its own
+    // relay session restarts), which used to make the first few opens vanish.
+    private val nextStream = AtomicInteger(1 + Random.nextInt(0xffff))
 
     @Volatile
     private var ws: WebSocket? = null
