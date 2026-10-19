@@ -343,6 +343,10 @@ class RelayClient(private val settings: SettingsStore) {
                     .header("Authorization", "Bearer ${c.token}")
                     .build()
                 val ready = CompletableDeferred<Unit>()
+                // Completed by a failure or a close: the loop waits on the socket
+                // itself, not on the reported state, because losing the engine
+                // (presence false) leaves the socket up and must not redial.
+                val down = CompletableDeferred<Unit>()
                 ws = client.newWebSocket(req, object : WebSocketListener() {
                     override fun onOpen(w: WebSocket, r: Response) {
                         _lastError.value = 0
@@ -364,6 +368,7 @@ class RelayClient(private val settings: SettingsStore) {
                         _state.value = ConnState.OFFLINE
                         _lastError.value = describe(r, t)
                         lost("socket failed")
+                        down.complete(Unit)
                     }
 
                     override fun onClosed(w: WebSocket, code: Int, reason: String) {
@@ -373,6 +378,7 @@ class RelayClient(private val settings: SettingsStore) {
                             _lastError.value = R.string.offline_closed
                         }
                         lost("socket closed")
+                        down.complete(Unit)
                     }
 
                     override fun onClosing(w: WebSocket, code: Int, reason: String) {
@@ -381,11 +387,13 @@ class RelayClient(private val settings: SettingsStore) {
                 })
                 ready.await()
                 opened = true
-                while (wantOpen && _state.value == ConnState.ONLINE) delay(500)
+                down.await()
             } catch (_: Exception) {
                 // fall through to backoff
             }
-            if (!opened && _state.value != ConnState.ONLINE) {
+            ws?.close(1000, "reconnect")
+            ws = null
+            if (!opened) {
                 _state.value = ConnState.OFFLINE
             }
             if (!wantOpen) break
