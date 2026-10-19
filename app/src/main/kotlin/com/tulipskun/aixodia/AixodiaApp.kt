@@ -1,6 +1,8 @@
 package com.tulipskun.aixodia
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.Network
 import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
@@ -43,4 +45,20 @@ class AppContainer(app: Application) {
     val terminal = TerminalSocket(settings, relay)
     val repo = ChatRepository(db, historyApi, socket)
     val discovery = DaemonDiscovery(settings, historyApi, socket, terminal, scope)
+
+    // A phone that moves from Wi-Fi to cellular leaves the old socket bound to
+    // a dead interface. Rediscovering the address does not help — the address
+    // is stable — so the link itself is redialed as soon as a network exists.
+    // The callback lives as long as the process, like the relay it wakes.
+    private val networks = app.getSystemService(ConnectivityManager::class.java)
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            relay.reconnectIfDown()
+            terminal.reconnect()
+        }
+    }
+
+    init {
+        networks?.registerDefaultNetworkCallback(networkCallback)
+    }
 }

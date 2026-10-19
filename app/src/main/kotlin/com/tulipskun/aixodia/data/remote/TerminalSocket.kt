@@ -344,7 +344,11 @@ class TerminalSocket(
             // Reattach to a surviving shell when we have its id; otherwise the
             // engine hands back a fresh one in its ready frame.
             val wantedId = settings.currentTerminalSessionId()
-            val (cols, rows) = pendingSize ?: (80 to 24)
+            // Zero when the view has not been laid out yet: the engine then
+            // keeps the shell's current size instead of forcing 80x24 onto a
+            // running program. The view sends the real size as soon as it is
+            // measured, which resizes the pty and repaints a full-screen app.
+            val (cols, rows) = pendingSize ?: (0 to 0)
             _detail.value = "opening terminal stream"
             // Completed once the stream goes away: true when the shell ended on
             // its own (exit or error frame), false when the link dropped. That

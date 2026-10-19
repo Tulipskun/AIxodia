@@ -318,7 +318,7 @@ class TerminalEmulator(
             'E'.code -> { carriageReturn(); index(); state = ST_GROUND }
             'M'.code -> { reverseIndex(); state = ST_GROUND }
             'H'.code -> { tabStops[buffer.cursorCol] = true; state = ST_GROUND }
-            'c'.code -> { reset(); state = ST_GROUND }
+            'c'.code -> { reset(); output.onScreenChanged(); state = ST_GROUND }
             '('.code, ')'.code, '*'.code, '+'.code -> state = ST_ESC_INTERMEDIATE
             '#'.code, ' '.code, '%'.code -> state = ST_ESC_INTERMEDIATE
             '='.code -> { applicationKeypad = true; state = ST_GROUND }

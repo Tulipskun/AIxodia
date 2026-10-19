@@ -33,6 +33,22 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * A link that died while the app was in the background must not have to wait
+     * for a ping timeout to be noticed: coming back to the foreground is exactly
+     * when the socket is likely stale, so an offline one is redialed at once and
+     * an open terminal window re-dials too.
+     */
+    override fun onResume() {
+        super.onResume()
+        val c = (application as AixodiaApp).container
+        val relayWasOnline = c.relay.isOnline
+        c.relay.reconnectIfDown()
+        // Only force the terminal when the link really was down: a quick trip to
+        // another app should not clear and replay a healthy screen.
+        if (!relayWasOnline) c.terminal.reconnect()
+    }
+
+    /**
      * Debug-only seeding so a device (or emulator) can be configured for a test
      * without hand-typing on a phone:
      *

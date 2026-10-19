@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,7 +89,14 @@ internal fun relayFrameKind(ctl: String?, ch: String?): RelayFrameKind {
 class RelayClient(private val settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
-        .pingInterval(java.time.Duration.ofSeconds(20))
+        // A ping every ten seconds fails a socket the network dropped within
+        // about one interval, instead of the twenty seconds (plus the timeout
+        // after it) that made a reconnect feel slow.
+        .pingInterval(java.time.Duration.ofSeconds(10))
+        .connectTimeout(java.time.Duration.ofSeconds(8))
+        // Liveness for a long-lived socket is the pings, not the read timeout:
+        // a read timeout here would tear down an idle-but-healthy link.
+        .readTimeout(java.time.Duration.ZERO)
         .build()
     private val outAdapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         .adapter(AiOutput::class.java)
@@ -132,6 +140,11 @@ class RelayClient(private val settings: SettingsStore) {
     @Volatile
     private var backoffMs = 1000L
 
+    // Lets reconnect() cut a backoff sleep short. Without it a redial asked for
+    // now still waited out the remaining delay — up to half a minute — which is
+    // part of why a reconnect felt slow. Conflated: one pending wake is enough.
+    private val wake = Channel<Unit>(Channel.CONFLATED)
+
     val isOnline: Boolean get() = _state.value == ConnState.ONLINE
 
     /** Starts the single connection (idempotent). */
@@ -156,6 +169,19 @@ class RelayClient(private val settings: SettingsStore) {
         ws?.cancel()
         ws = null
         _state.value = ConnState.OFFLINE
+        // Wake the loop if it is sleeping between attempts, so "immediately"
+        // means immediately and not "after the rest of the backoff".
+        wake.trySend(Unit)
+    }
+
+    /**
+     * Re-dials at once when the link is down and leaves a healthy socket alone.
+     * Called when the app returns to the foreground or the network comes back,
+     * where a dead link should not have to be noticed by a timeout first.
+     */
+    fun reconnectIfDown() {
+        if (!wantOpen || isOnline) return
+        reconnect()
     }
 
     /** Sends one chat frame, adding the channel the engine routes on. */
@@ -221,7 +247,7 @@ class RelayClient(private val settings: SettingsStore) {
         streams[sid] = listener
         val frame = JSONObject()
             .put("ch", "ctl").put("act", "open").put("id", id)
-            .put("sid", sid).put("cols", cols.coerceAtLeast(1)).put("rows", rows.coerceAtLeast(1))
+            .put("sid", sid).put("cols", cols).put("rows", rows)
         if (!w.send(frame.toString())) {
             streams.remove(sid)
             return null
@@ -450,8 +476,9 @@ class RelayClient(private val settings: SettingsStore) {
             }
             if (!wantOpen) break
             _state.value = ConnState.OFFLINE
-            delay(backoffMs + Random.nextLong(0, 400))
-            backoffMs = min(backoffMs * 2, 30_000L)
+            // Wait out the backoff, but let reconnect() end the wait early.
+            withTimeoutOrNull(backoffMs + Random.nextLong(0, 400)) { wake.receive() }
+            backoffMs = min(backoffMs * 2, 8_000L)
         }
         _state.value = ConnState.OFFLINE
     }

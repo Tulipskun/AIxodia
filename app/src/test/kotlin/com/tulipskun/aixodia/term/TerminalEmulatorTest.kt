@@ -265,11 +265,16 @@ class TerminalEmulatorTest {
 
     @Test
     fun resetClearsEverything() {
-        val (term, _) = emulator()
+        val (term, out) = emulator()
         term.send("junk\u001b[?1000h\u001b[31m")
+        val redrawsBefore = out.redraws
+        // The engine prefixes every attach replay with RIS, so the screen must
+        // both clear and ask to be redrawn: a cleared buffer the view never
+        // hears about still shows the old pixels.
         term.send("\u001bc")
         assertEquals(" ", term.textAt(0, 0))
         assertFalse(term.mouseReporting())
         assertEquals(TerminalColors.DEFAULT_FG, term.buffer.lines[0].fg[0])
+        assertTrue(out.redraws > redrawsBefore)
     }
 }
