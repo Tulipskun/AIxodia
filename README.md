@@ -86,12 +86,10 @@ older release, so exactly one download is ever current. The shared key plus a
 rising versionCode means an install updates over the previous APK — no
 uninstall, cache kept.
 
-The key is not in this repository. It lives in the private
-[`Tulipskun/aixodia-keys`](https://github.com/Tulipskun/aixodia-keys) repo, which
-also carries the passwords and the fingerprint to verify an APK against — see
-[`docs/signing.md`](docs/signing.md):
-
-    /path/to/aixodia-keys/fetch.sh .   # installs app/aixodia-debug.keystore
+The key is not in this repository: it lives in the private
+`Tulipskun/aixodia-keys` repo, whose `fetch.sh` installs `app/aixodia-debug.keystore`
+(alias `aixodia-debug`, password `aixodiadebug`, SHA-1
+`A5:5B:56:94:85:81:23:4D:83:58:86:C1:E7:90:98:95:FA:C3:2B:41`).
 
 ## Test it right now
 
