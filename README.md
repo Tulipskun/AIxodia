@@ -86,6 +86,13 @@ older release, so exactly one download is ever current. The shared key plus a
 rising versionCode means an install updates over the previous APK — no
 uninstall, cache kept.
 
+The key is not in this repository. It lives in the private
+[`Tulipskun/aixodia-keys`](https://github.com/Tulipskun/aixodia-keys) repo, which
+also carries the passwords and the fingerprint to verify an APK against — see
+[`docs/signing.md`](docs/signing.md):
+
+    /path/to/aixodia-keys/fetch.sh .   # installs app/aixodia-debug.keystore
+
 ## Test it right now
 
 Start the daemon (`Tulipskun/ai-engine`, mobile enabled), paste the Cloudflare API
