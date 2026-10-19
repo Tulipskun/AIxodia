@@ -241,6 +241,7 @@ fun ChatScreen(
     val liveReasoning by vm.liveReasoning.collectAsStateWithLifecycle()
     val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
+    val liveUsage by vm.liveUsage.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
     // differs: Anthropic has no reasoning count to show.
     val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initialValue = TokenField.DEFAULT)
@@ -575,7 +576,7 @@ fun ChatScreen(
                         // because it is about the conversation, not about any one
                         // turn in it — and it is the one thing that has to stay
                         // visible while the thread scrolls.
-                        val totals = remember(messages) { sessionTotals(messages) }
+                        val totals = remember(messages, liveUsage) { sessionTotals(messages, liveUsage) }
                         SessionStrip(
                             totals = totals,
                             // A turn in flight has no stored duration yet, so it

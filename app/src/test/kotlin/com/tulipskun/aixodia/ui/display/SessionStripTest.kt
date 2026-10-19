@@ -133,6 +133,48 @@ class SessionStripTest {
     }
 
     @Test
+    fun `a turn in flight adds its running total on top of the thread`() {
+        // A tool-using turn makes several provider rounds; the engine restates
+        // the summed cost after each one, and the strip draws it before the
+        // turn's own row exists.
+        val totals = sessionTotals(
+            listOf(msg(1, "model", tokensIn = 10_000, cacheRead = 8_000, tokensOut = 100, durationMs = 5_000, inputIncludesCache = true)),
+            LiveUsage(seq = 3, promptTokens = 12_000, cacheRead = 9_000, outputTokens = 250, inputIncludesCache = true),
+        )
+        assertEquals(22_000, totals.promptTokens)
+        assertEquals(17_000, totals.cacheRead)
+        assertEquals(5_000, totals.freshInput)
+        assertEquals(350, totals.outTokens)
+        assertEquals(totals.promptTokens, totals.cacheRead + totals.freshInput)
+        // The running total reports no duration of its own; the committed
+        // thread's clock is what stands.
+        assertEquals(5_000L, totals.totalMs)
+    }
+
+    @Test
+    fun `a live turn's own row is not counted beside it`() {
+        // The answer can reach the thread a moment before the running total is
+        // released. The row is skipped by seq, so the turn is counted once.
+        val totals = sessionTotals(
+            listOf(
+                msg(1, "model", tokensIn = 3_000, cacheRead = 1_000, tokensOut = 40, inputIncludesCache = true),
+                msg(3, "model", tokensIn = 12_000, cacheRead = 9_000, tokensOut = 250, inputIncludesCache = true, durationMs = 9_000),
+            ),
+            LiveUsage(seq = 3, promptTokens = 12_000, cacheRead = 9_000, outputTokens = 250, inputIncludesCache = true),
+        )
+        assertEquals(15_000, totals.promptTokens)
+        assertEquals(10_000, totals.cacheRead)
+        assertEquals(5_000, totals.freshInput)
+        assertEquals(290, totals.outTokens)
+    }
+
+    @Test
+    fun `no live turn leaves the thread's totals untouched`() {
+        val messages = listOf(msg(1, "model", tokensIn = 500, tokensOut = 5, inputIncludesCache = true))
+        assertEquals(sessionTotals(messages), sessionTotals(messages, null))
+    }
+
+    @Test
     fun `the daemon's role is folded into this app's own word`() {
         assertEquals("model", normalizedRole("assistant"))
         assertEquals("model", normalizedRole(""))
