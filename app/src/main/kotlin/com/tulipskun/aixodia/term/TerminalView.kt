@@ -422,7 +422,11 @@ class TerminalView @JvmOverloads constructor(
                 if (wheelMode) {
                     // A tap is a click. A drag has already gone out as wheel
                     // notches, so it must not also fire a click.
-                    if (!dragging && quick && (em.mouseReporting() || em.fullScreenDetected)) {
+                    // On the alternate screen with no mouse mode the program
+                    // deliberately did not ask for clicks; only the mid-stream
+                    // case is a guess.
+                    val guessedMouse = em.fullScreenDetected && !em.alternateScreen
+                    if (!dragging && quick && (em.mouseReporting() || guessedMouse)) {
                         sendMouse(em, event, button = 0, release = false)
                         sendMouse(em, event, button = 0, release = true)
                     }
@@ -468,17 +472,17 @@ class TerminalView @JvmOverloads constructor(
     private fun sendWheel(em: TerminalEmulator, button: Int, col: Int, row: Int) {
         if (em.mouseReporting()) {
             em.mouseReport(button, col, row, release = false)?.let { inputSink?.invoke(it) }
+        } else if (em.alternateScreen) {
+            // No mouse mode but a full-screen program: the terminal convention
+            // is that the wheel arrives as an arrow key.
+            val bytes = if (button == 65) "\u001b[B" else "\u001b[A"
+            inputSink?.invoke(bytes.toByteArray(Charsets.US_ASCII))
         } else if (em.fullScreenDetected) {
             // The session was attached mid-stream and the mouse mode was in the
             // part of the output the engine no longer had. Modern full-screen
             // programs (opencode, the TUIs this terminal exists for) speak SGR,
             // and one that never wanted the mouse ignores it.
             inputSink?.invoke(em.wheelReport(button, col, row))
-        } else if (em.alternateScreen) {
-            // No mouse mode but a full-screen program: the terminal convention
-            // is that the wheel arrives as an arrow key.
-            val bytes = if (button == 65) "\u001b[B" else "\u001b[A"
-            inputSink?.invoke(bytes.toByteArray(Charsets.US_ASCII))
         }
     }
 
