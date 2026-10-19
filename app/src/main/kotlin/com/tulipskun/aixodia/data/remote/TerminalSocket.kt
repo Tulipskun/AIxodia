@@ -5,7 +5,6 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,14 +12,11 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okio.ByteString
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 
 private const val TAG = "TerminalSocket"
 
@@ -35,33 +31,29 @@ sealed interface TermEvent {
     /** The shell is up: what it is and where it starts. */
     data class Ready(val shell: String, val cwd: String, val cols: Int, val rows: Int) : TermEvent
 
-    /** The shell ended on its own, with this exit code. The socket closes after. */
+    /** The shell ended on its own, with this exit code. The stream closes after. */
     data class Exit(val code: Int) : TermEvent
 
-    /** Something failed after the handshake; the socket closes after this too. */
+    /** Something failed after the handshake; the stream closes after this too. */
     data class Failed(val message: String) : TermEvent
 }
 
 /**
- * One terminal: its own WebSocket to the engine's `/terminal`, its own shell on
- * the host, its own life.
+ * One terminal, carried as a stream inside the app's single relay socket.
  *
- * Separate from [AiDirectSocket] on purpose. That socket is the app's chat and
- * stays up for the whole run; this one exists only while the terminal window is
- * open, because every connection is a real shell process on the machine. Closing
- * the window hangs up, and the engine ends that shell and nothing else.
+ * It used to be its own WebSocket to `/terminal`. That needed a second
+ * handshake and a second reachable path, and it was the first thing to break
+ * when the engine moved behind the relay. Now the stream is opened with a
+ * control frame and addressed by id, so it lives and dies with the terminal
+ * window while the socket underneath stays up.
  */
-class TerminalSocket(private val settings: SettingsStore) {
+class TerminalSocket(
+    private val settings: SettingsStore,
+    private val relay: RelayClient? = null,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val resizeAdapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         .adapter(ResizeFrame::class.java)
-
-    private val client = OkHttpClient.Builder()
-        // The engine pings every 30s and Cloudflare's edge drops an idle socket
-        // after about 100s. The app's own ping keeps a quiet terminal — sitting
-        // at a prompt — comfortably alive from this side too.
-        .pingInterval(java.time.Duration.ofSeconds(20))
-        .build()
 
     private val _state = MutableStateFlow(TermState.CLOSED)
     val state: StateFlow<TermState> = _state
@@ -72,8 +64,6 @@ class TerminalSocket(private val settings: SettingsStore) {
 
     // A channel, not a StateFlow: terminal output is a stream, and a dropped
     // frame would leave the screen showing something the shell never printed.
-    // Nothing is consumed until the page can render it, so a shell that answers
-    // before the WebView is ready is not lost.
     private val _output = Channel<ByteArray>(Channel.UNLIMITED)
     val output: Flow<ByteArray> = _output.receiveAsFlow()
 
@@ -81,20 +71,20 @@ class TerminalSocket(private val settings: SettingsStore) {
     val events: Flow<TermEvent> = _events.receiveAsFlow()
 
     @Volatile
-    private var ws: WebSocket? = null
+    private var sid: Int? = null
 
-    // Touched from the socket's own callback thread as well as the UI's, so the
-    // two flags that decide what a close means have to be visible across threads.
+    // Visible across threads: the socket callback and the UI both decide what a
+    // close means.
     @Volatile
     private var closing = false
 
-    /** The last size the page asked for, resent when the socket comes up. */
+    /** The last size the page asked for, sent when the stream opens. */
     @Volatile
     private var pendingSize: Pair<Int, Int>? = null
 
-    /** Dials the terminal, if it is not already dialing or up. */
+    /** Opens the stream, if it is not already dialing or up. */
     fun open() {
-        if (ws != null) return
+        if (sid != null) return
         closing = false
         _error.value = 0
         _state.value = TermState.CONNECTING
@@ -103,40 +93,37 @@ class TerminalSocket(private val settings: SettingsStore) {
 
     /**
      * Ends the current shell and opens a new one. Used after an exit or an
-     * error, where the socket is already gone and only a fresh connection can
-     * give back a prompt.
+     * error, where only a fresh stream can give back a prompt.
      */
     fun restart() {
         close()
         open()
     }
 
-    /** Hangs up. The engine kills that shell; nothing is left running. */
+    /** Hangs up. The engine ends that shell; nothing is left running. */
     fun close() {
         closing = true
-        ws?.close(1000, "window closed")
-        ws = null
+        sid?.let { relay?.closeTerminal(it) }
+        sid = null
         _state.value = TermState.CLOSED
     }
 
     /**
      * Keystrokes to the shell, exactly as typed: control characters are bytes,
-     * not commands (Ctrl-C is 0x03). False when the socket is not up.
+     * not commands (Ctrl-C is 0x03). False when the stream is not up.
      */
     fun send(bytes: ByteArray): Boolean {
         if (bytes.isEmpty()) return false
-        return ws?.send(ByteString.of(*bytes)) == true
+        val id = sid ?: return false
+        return relay?.termSend(id, bytes) == true
     }
 
     /** Tells the shell its window changed, so full-screen programs redraw. */
     fun resize(cols: Int, rows: Int): Boolean {
         if (cols <= 0 || rows <= 0) return false
-        // xterm reports its size as soon as the page is up, which is usually
-        // before the handshake has finished. Keeping it means the shell is never
-        // left at the default 80x24 while the screen draws something else.
         pendingSize = cols to rows
-        val w = ws ?: return false
-        return w.send(resizeFrame(cols, rows))
+        val id = sid ?: return false
+        return relay?.termJSON(id, resizeFrame(cols, rows)) == true
     }
 
     private fun resizeFrame(cols: Int, rows: Int): String =
@@ -151,35 +138,31 @@ class TerminalSocket(private val settings: SettingsStore) {
             _state.value = TermState.CLOSED
             return
         }
-        val url = terminalUrlFor(c.wsUrl)
-        if (url.isBlank() || c.token.isBlank()) {
-            // Same rule as the chat socket: a fresh install has no address yet,
-            // and the terminal waits quietly for discovery instead of dialing
-            // something that was never configured.
+        if (c.wsUrl.isBlank() || c.token.isBlank()) {
             _error.value = R.string.terminal_no_address
             _state.value = TermState.CLOSED
             return
         }
-        val req = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer ${c.token}")
-            .build()
-        val settled = CompletableDeferred<Unit>()
-        ws = client.newWebSocket(req, object : WebSocketListener() {
-            override fun onOpen(w: WebSocket, r: Response) {
-                _state.value = TermState.OPEN
-                // The size the page already reported, now that there is a shell
-                // to tell it to.
-                pendingSize?.let { (cols, rows) -> w.send(resizeFrame(cols, rows)) }
-                settled.complete(Unit)
-            }
-
-            override fun onMessage(w: WebSocket, bytes: ByteString) {
-                _output.trySend(bytes.toByteArray())
-            }
-
-            override fun onMessage(w: WebSocket, text: String) {
-                when (val ev = parseEvent(text)) {
+        val r = relay
+        if (r == null) {
+            _error.value = R.string.terminal_no_address
+            _state.value = TermState.CLOSED
+            return
+        }
+        r.connect()
+        val online = withTimeoutOrNull(15_000) {
+            r.state.first { it == ConnState.ONLINE }
+        } != null
+        if (!online) {
+            _error.value = R.string.terminal_closed
+            _state.value = TermState.ENDED
+            return
+        }
+        val (cols, rows) = pendingSize ?: (80 to 24)
+        val id = "t-" + UUID.randomUUID()
+        val opened = r.openTerminal(id, cols, rows, object : TermStream {
+            override fun onText(json: String) {
+                when (val ev = parseEvent(json)) {
                     is TermEvent.Exit -> {
                         _state.value = TermState.ENDED
                         _events.trySend(ev)
@@ -190,50 +173,39 @@ class TerminalSocket(private val settings: SettingsStore) {
                         _events.trySend(ev)
                     }
 
-                    is TermEvent.Ready -> _events.trySend(ev)
+                    is TermEvent.Ready -> {
+                        _state.value = TermState.OPEN
+                        _events.trySend(ev)
+                    }
 
-                    // An unreadable control frame is not worth ending a working
-                    // shell over; the bytes keep flowing either way.
-                    null -> Log.w(TAG, "unreadable control frame: ${text.take(120)}")
+                    null -> Log.w(TAG, "unreadable control frame: ${json.take(120)}")
                 }
             }
 
-            override fun onFailure(w: WebSocket, t: Throwable, r: Response?) {
-                Log.w(TAG, "terminal socket failure", t)
-                settled.complete(Unit)
-                ws = null
+            override fun onBytes(bytes: ByteArray) {
+                _output.trySend(bytes)
+            }
+
+            override fun onClosed() {
+                sid = null
                 if (closing) return
                 _state.value = TermState.ENDED
-                _error.value = when (r?.code) {
-                    401 -> R.string.offline_token_rejected
-                    else -> R.string.terminal_closed
-                }
-            }
-
-            override fun onClosed(w: WebSocket, code: Int, reason: String) {
-                settled.complete(Unit)
-                ws = null
-                if (closing) return
-                if (_state.value == TermState.OPEN) {
-                    // The engine hung up without an exit frame: the shell is
-                    // gone either way, so say so rather than spinners forever.
-                    _state.value = TermState.ENDED
-                    _error.value = R.string.terminal_closed
-                }
-            }
-
-            override fun onClosing(w: WebSocket, code: Int, reason: String) {
-                w.close(code, reason)
+                _error.value = R.string.terminal_closed
             }
         })
-        settled.await()
+        if (opened == null) {
+            _error.value = R.string.terminal_closed
+            _state.value = TermState.ENDED
+            return
+        }
+        sid = opened
     }
 
     companion object {
         /**
-         * The terminal lives on the same tunnel as the chat: `wss://host/ws` ->
-         * `wss://host/terminal`. Only the path differs, so the address discovery
-         * already keeps current is the address this uses.
+         * The direct-terminal address of the pre-relay engine. Kept because the
+         * mapping is still the documented one for local runs of the engine; the
+         * app itself no longer dials it.
          */
         fun terminalUrlFor(wsUrl: String): String {
             val clean = wsUrl.trim().trimEnd('/')

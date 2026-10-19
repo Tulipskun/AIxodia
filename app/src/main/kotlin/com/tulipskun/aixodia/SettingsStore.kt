@@ -150,13 +150,22 @@ class SettingsStore(private val ctx: Context) {
     suspend fun isConfigured(): Boolean = current().token.isNotBlank()
 
     companion object {
-        /** https://x.trycloudflare.com -> wss://x.trycloudflare.com/ws */
+        /**
+         * https://host/room/name -> wss://host/room/name
+         *
+         * The path is the room and it must survive: the relay pairs the engine
+         * and the phone inside that one Durable Object, so dropping the path
+         * would dial the worker's root and pair with nothing.
+         */
         fun wsUrlFor(address: String): String {
             val clean = address.trim().trimEnd('/')
             if (clean.isEmpty()) return ""
-            val host = clean.substringAfter("://", clean).substringBefore('/')
-            val scheme = if (clean.startsWith("http://")) "ws" else "wss"
-            return "$scheme://$host/ws"
+            val scheme = when {
+                clean.startsWith("https://") -> "wss"
+                clean.startsWith("http://") -> "ws"
+                else -> return ""
+            }
+            return "$scheme://" + clean.substringAfter("://")
         }
     }
 }
