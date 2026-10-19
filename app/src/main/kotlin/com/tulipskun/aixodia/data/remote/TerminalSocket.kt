@@ -5,6 +5,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.term.TerminalModes
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,6 +97,21 @@ class TerminalSocket(private val settings: SettingsStore) {
     // before the panel is up is not lost.
     private val _output = Channel<ByteArray>(Channel.UNLIMITED)
     val output: Flow<ByteArray> = _output.receiveAsFlow()
+
+    /**
+     * The last modes seen for a session. The engine replays only the tail of a
+     * session's output, so a window that reattaches to a running program gets
+     * pixels but not the mode sequences that said "this is a full-screen app
+     * with the mouse on". The panel puts these back before the replay is drawn.
+     */
+    private val sessionModes = java.util.concurrent.ConcurrentHashMap<String, TerminalModes>()
+
+    fun rememberedModes(id: String): TerminalModes? =
+        if (id.isBlank()) null else sessionModes[id]
+
+    fun rememberModes(id: String, modes: TerminalModes) {
+        if (id.isNotBlank()) sessionModes[id] = modes
+    }
 
     private val _events = Channel<TermEvent>(Channel.UNLIMITED)
     val events: Flow<TermEvent> = _events.receiveAsFlow()
@@ -213,6 +229,7 @@ class TerminalSocket(private val settings: SettingsStore) {
         val id = _activeSessionId.value
         scope.launch {
             if (id.isNotBlank()) {
+                sessionModes.remove(id)
                 val ids = settings.currentTerminalSessionIds().toMutableList()
                 ids.remove(id)
                 settings.saveTerminalSessionIds(ids)

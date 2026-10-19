@@ -128,7 +128,12 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
             }
         }
         // A placeholder size until the view is measured and reports the real one.
-        TerminalEmulator(80, 24, out)
+        val em = TerminalEmulator(80, 24, out)
+        // Reattaching to a session that is already running: put its modes back
+        // before the engine's replay lands, so a full-screen program keeps its
+        // alternate screen and a swipe stays a wheel.
+        socket.rememberedModes(socket.activeSessionId.value)?.let(em::applyModes)
+        em
     }
 
     var leaving by remember { mutableStateOf(false) }
@@ -136,7 +141,11 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
 
     DisposableEffect(Unit) {
         socket.open()
-        onDispose { socket.close() }
+        onDispose {
+            // The shell outlives this window; its modes must outlive it too.
+            socket.rememberModes(socket.activeSessionId.value, emulator.snapshotModes())
+            socket.close()
+        }
     }
 
     LaunchedEffect(Unit) { appeared = true }
@@ -195,9 +204,13 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val lastSession = remember { mutableStateOf<String?>(null) }
     LaunchedEffect(activeSessionId) {
         if (lastSession.value != null && activeSessionId != lastSession.value) {
+            // Keep the modes of the screen being left, then put back the ones
+            // of the session being joined (if this app has seen them before).
+            lastSession.value?.let { socket.rememberModes(it, emulator.snapshotModes()) }
             ended = null
             ready = null
             emulator.hardReset()
+            socket.rememberedModes(activeSessionId)?.let(emulator::applyModes)
             terminalView.value?.scrollToBottom()
         }
         if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId

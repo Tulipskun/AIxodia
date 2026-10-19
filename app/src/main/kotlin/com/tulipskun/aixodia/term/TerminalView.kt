@@ -380,7 +380,7 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator ?: return false
         // When the program wants the mouse — or is on the alternate screen, as
         // full-screen apps are — a drag is a wheel, not a scroll of our history.
-        val wheelMode = em.mouseReporting() || em.alternateScreen
+        val wheelMode = em.mouseReporting() || em.alternateScreen || em.fullScreenDetected
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 requestFocus()
@@ -422,7 +422,7 @@ class TerminalView @JvmOverloads constructor(
                 if (wheelMode) {
                     // A tap is a click. A drag has already gone out as wheel
                     // notches, so it must not also fire a click.
-                    if (!dragging && quick && em.mouseReporting()) {
+                    if (!dragging && quick && (em.mouseReporting() || em.fullScreenDetected)) {
                         sendMouse(em, event, button = 0, release = false)
                         sendMouse(em, event, button = 0, release = true)
                     }
@@ -468,6 +468,12 @@ class TerminalView @JvmOverloads constructor(
     private fun sendWheel(em: TerminalEmulator, button: Int, col: Int, row: Int) {
         if (em.mouseReporting()) {
             em.mouseReport(button, col, row, release = false)?.let { inputSink?.invoke(it) }
+        } else if (em.fullScreenDetected) {
+            // The session was attached mid-stream and the mouse mode was in the
+            // part of the output the engine no longer had. Modern full-screen
+            // programs (opencode, the TUIs this terminal exists for) speak SGR,
+            // and one that never wanted the mouse ignores it.
+            inputSink?.invoke(em.wheelReport(button, col, row))
         } else if (em.alternateScreen) {
             // No mouse mode but a full-screen program: the terminal convention
             // is that the wheel arrives as an arrow key.
@@ -479,7 +485,9 @@ class TerminalView @JvmOverloads constructor(
     private fun sendMouse(em: TerminalEmulator, event: MotionEvent, button: Int, release: Boolean) {
         val col = (event.x / cellWidth).toInt().coerceIn(0, em.columns - 1)
         val row = (event.y / cellHeight).toInt().coerceIn(0, em.rows - 1)
-        em.mouseReport(button, col, row, release)?.let { inputSink?.invoke(it) }
+        val report = em.mouseReport(button, col, row, release)
+            ?: if (em.fullScreenDetected) em.sgrReport(button, col, row, release) else null
+        report?.let { inputSink?.invoke(it) }
     }
 
     override fun computeScroll() {

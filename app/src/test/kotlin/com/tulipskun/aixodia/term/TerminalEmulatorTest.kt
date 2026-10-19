@@ -204,6 +204,66 @@ class TerminalEmulatorTest {
     }
 
     @Test
+    fun fullScreenIsDetectedFromAbsoluteCursorMoves() {
+        val (term, _) = emulator()
+        // A prompt may park the cursor once; three moves down the screen is a
+        // program drawing a UI.
+        term.send("\u001b[1;1H")
+        assertFalse(term.fullScreenDetected)
+        term.send("\u001b[5;1H\u001b[6;1H\u001b[7;1H")
+        assertTrue(term.fullScreenDetected)
+    }
+
+    @Test
+    fun alternateScreenCountsAsFullScreen() {
+        val (term, _) = emulator()
+        term.send("\u001b[?1049h")
+        assertTrue(term.fullScreenDetected)
+    }
+
+    @Test
+    fun modesSurviveAReattach() {
+        // What a fresh emulator gets when the engine replays the tail of a
+        // session that started long ago.
+        val saved = TerminalModes(
+            mouseTracking = 4,
+            mouseSgr = true,
+            alternate = true,
+            applicationCursorKeys = true,
+            bracketedPaste = true,
+            cursorVisible = false,
+            fullScreen = true,
+        )
+        val (term, _) = emulator()
+        term.applyModes(saved)
+        assertTrue(term.mouseReporting())
+        assertTrue(term.alternateScreen)
+        assertTrue(term.fullScreenDetected)
+        assertFalse(term.cursorVisible)
+        assertEquals(saved, term.snapshotModes())
+        // And a wheel is still a wheel.
+        assertEquals(
+            "\u001b[<65;4;5M",
+            term.mouseReport(65, 3, 4, release = false)!!.toString(Charsets.US_ASCII),
+        )
+    }
+
+    @Test
+    fun wheelCanBeEncodedWithoutTheMouseMode() {
+        val (term, _) = emulator()
+        // No ?1000h was seen (the session was attached mid-stream), but a
+        // full-screen program speaks SGR and understands this.
+        assertEquals(
+            "\u001b[<64;1;1M",
+            term.wheelReport(64, 0, 0).toString(Charsets.US_ASCII),
+        )
+        assertEquals(
+            "\u001b[<0;2;3m",
+            term.sgrReport(0, 1, 2, release = true).toString(Charsets.US_ASCII),
+        )
+    }
+
+    @Test
     fun resetClearsEverything() {
         val (term, _) = emulator()
         term.send("junk\u001b[?1000h\u001b[31m")

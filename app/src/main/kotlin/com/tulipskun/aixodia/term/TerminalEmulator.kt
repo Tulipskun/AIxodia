@@ -1,6 +1,27 @@
 package com.tulipskun.aixodia.term
 
 /**
+ * The terminal modes a program can set, kept so they can be put back when the
+ * terminal reattaches to a session that is already running.
+ *
+ * The engine only replays the tail of a session's output. A full-screen program
+ * (opencode, vim) turned on its mouse, alternate screen and cursor keys when it
+ * started — long before the tail — so without this the fresh emulator would
+ * think it is at a plain prompt and scroll its own history instead of the
+ * program's.
+ */
+data class TerminalModes(
+    val mouseTracking: Int = 0,
+    val mouseSgr: Boolean = false,
+    val mouseUtf8: Boolean = false,
+    val alternate: Boolean = false,
+    val applicationCursorKeys: Boolean = false,
+    val bracketedPaste: Boolean = false,
+    val cursorVisible: Boolean = true,
+    val fullScreen: Boolean = false,
+)
+
+/**
  * A VT/ANSI terminal emulator, written here so the app owns it outright: the
  * bytes from the shell go in, a grid of cells comes out, and a small view draws
  * it. There is no dependancy to match a version against and no web engine in
@@ -36,6 +57,16 @@ class TerminalEmulator(
 
     /** True while a full-screen program has the alternate screen up. */
     val alternateScreen: Boolean get() = activeAlternate
+
+    /**
+     * True once the output has painted cells anywhere but the top-left, which
+     * is what a full-screen program does and a shell prompt does not. It is
+     * used when the session was attached mid-stream and the mode sequences that
+     * would have told us "this is a TUI, the mouse is on" are no longer in the
+     * replay.
+     */
+    var fullScreenDetected = false
+        private set
 
     // ---- current pen -------------------------------------------------------
     private var fg = TerminalColors.DEFAULT_FG
@@ -87,6 +118,7 @@ class TerminalEmulator(
 
     private var tabStops = BooleanArray(cols) { it % 8 == 0 }
     private var activeAlternate = false
+    private var absoluteCsiCount = 0
 
     // ---- parser state ------------------------------------------------------
     private var state = ST_GROUND
@@ -381,6 +413,12 @@ class TerminalEmulator(
                 val r = param(0, 1) - 1
                 val c = param(1, 1) - 1
                 setCursor(c, if (originMode) r + buffer.scrollTop else r)
+                // A prompt occasionally parks the cursor, but a program that
+                // keeps placing it further down the screen is painting a UI.
+                if (r > 0 || c > 0) {
+                    absoluteCsiCount++
+                    if (absoluteCsiCount >= 3) fullScreenDetected = true
+                }
             }
             'J' -> { buffer.eraseInDisplay(param(0, 0), fg, bg); wrapPending = false }
             'K' -> {
@@ -539,10 +577,15 @@ class TerminalEmulator(
         if (on) {
             if (save) saveCursor()
             activeAlternate = true
+            fullScreenDetected = true
             buffer = alternate
             alternate.reset()
         } else {
             activeAlternate = false
+            // The program that was painting a UI has finished; a swipe over the
+            // prompt should scroll our own history again.
+            fullScreenDetected = false
+            absoluteCsiCount = 0
             buffer = normal
             if (save) restoreCursor()
         }
@@ -583,6 +626,8 @@ class TerminalEmulator(
         cursorStyle = 0
         tabStops = BooleanArray(columns) { it % 8 == 0 }
         wrapPending = false
+        fullScreenDetected = false
+        absoluteCsiCount = 0
     }
 
     /**
@@ -626,6 +671,38 @@ class TerminalEmulator(
     /** True when the program asked for the mouse, so a tap should be a click. */
     fun mouseReporting(): Boolean = mouseTracking != 0
 
+    /** The modes to restore if this session is reattached (see [TerminalModes]). */
+    fun snapshotModes(): TerminalModes = TerminalModes(
+        mouseTracking = mouseTracking,
+        mouseSgr = mouseSgr,
+        mouseUtf8 = mouseUtf8,
+        alternate = activeAlternate,
+        applicationCursorKeys = applicationCursorKeys,
+        bracketedPaste = bracketedPaste,
+        cursorVisible = cursorVisible,
+        fullScreen = fullScreenDetected,
+    )
+
+    /**
+     * Puts back the modes of a session that is already running. Called on a
+     * fresh emulator before the engine's replay is written, so the replay lands
+     * on the screen and in the mode the program expects.
+     */
+    fun applyModes(modes: TerminalModes) {
+        mouseTracking = modes.mouseTracking
+        mouseSgr = modes.mouseSgr
+        mouseUtf8 = modes.mouseUtf8
+        applicationCursorKeys = modes.applicationCursorKeys
+        bracketedPaste = modes.bracketedPaste
+        cursorVisible = modes.cursorVisible
+        fullScreenDetected = modes.fullScreen
+        if (modes.alternate != activeAlternate) {
+            activeAlternate = modes.alternate
+            buffer = if (modes.alternate) alternate else normal
+            wrapPending = false
+        }
+    }
+
     /**
      * A mouse report, or null when the program has not asked for the mouse.
      * [button] uses the xterm codes (0 left, 1 middle, 2 right, 3 release,
@@ -642,11 +719,27 @@ class TerminalEmulator(
         val x = col + 1
         val y = row + 1
         return if (mouseSgr) {
-            val suffix = if (release) 'm' else 'M'
-            "\u001b[<$cb;$x;$y$suffix".toByteArray(Charsets.US_ASCII)
+            sgrMouse(cb, x, y, release)
         } else {
             byteArrayOf(0x1B, '['.code.toByte(), 'M'.code.toByte(), (cb + 32).toByte(), (32 + x).toByte(), (32 + y).toByte())
         }
+    }
+
+    /**
+     * A wheel notch in the SGR encoding, used even when the mouse mode was not
+     * seen because the session was attached mid-stream. A program that never
+     * enabled the mouse simply ignores it.
+     */
+    fun wheelReport(button: Int, col: Int, row: Int): ByteArray =
+        sgrReport(button, col, row, release = false)
+
+    /** An SGR mouse report regardless of the mode, for a reattached TUI. */
+    fun sgrReport(button: Int, col: Int, row: Int, release: Boolean): ByteArray =
+        sgrMouse(button, col + 1, row + 1, release)
+
+    private fun sgrMouse(cb: Int, x: Int, y: Int, release: Boolean): ByteArray {
+        val suffix = if (release) 'm' else 'M'
+        return "\u001b[<$cb;$x;$y$suffix".toByteArray(Charsets.US_ASCII)
     }
 
     companion object {
