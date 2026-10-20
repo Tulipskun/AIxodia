@@ -85,7 +85,11 @@ class DaemonDiscovery(
             }
             try {
                 val node = history.node()
-                val started = node?.startedAt ?: 0L
+                // Only a live daemon counts. The row may be rewritten by a
+                // process whose first heartbeat has not landed yet; recording
+                // that started early would hide the replacement when it comes
+                // online a poll later.
+                val started = if (node?.online == true) node.startedAt else 0L
                 val replaced = started > 0L && lastStartedAt > 0L && started != lastStartedAt
                 if (started > 0L) lastStartedAt = started
                 when (val action = decide(current.daemonUrl, node)) {
