@@ -59,10 +59,17 @@ class D1Api(private val settings: SettingsStore) {
     private suspend fun exec(token: String, target: Target, sql: String, params: List<String>): Rows =
         withContext(Dispatchers.IO) {
             val payload = JSONObject().put("sql", sql).put("params", JSONArray(params)).toString()
-            val req = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url("$API_BASE/accounts/${target.accountId}/d1/database/${target.databaseId}/query")
-                .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
+            if (token.contains(":")) {
+                val parts = token.split(":", limit = 2)
+                reqBuilder.header("X-Auth-Email", parts[0])
+                reqBuilder.header("X-Auth-Key", parts[1])
+            } else {
+                reqBuilder.header("Authorization", "Bearer $token")
+            }
+            val req = reqBuilder
                 .post(payload.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
@@ -90,11 +97,17 @@ class D1Api(private val settings: SettingsStore) {
 
     /** A plain Cloudflare API GET, used only by discovery. */
     private suspend fun get(token: String, path: String): JSONObject = withContext(Dispatchers.IO) {
-        val req = Request.Builder()
+        val reqBuilder = Request.Builder()
             .url(API_BASE + path)
-            .header("Authorization", "Bearer $token")
             .header("Accept", "application/json")
-            .build()
+        if (token.contains(":")) {
+            val parts = token.split(":", limit = 2)
+            reqBuilder.header("X-Auth-Email", parts[0])
+            reqBuilder.header("X-Auth-Key", parts[1])
+        } else {
+            reqBuilder.header("Authorization", "Bearer $token")
+        }
+        val req = reqBuilder.build()
         client.newCall(req).execute().use { r ->
             val text = r.body?.string().orEmpty()
             val env = runCatching { JSONObject(text) }.getOrNull()
