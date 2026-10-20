@@ -135,8 +135,13 @@ class D1Api(private val settings: SettingsStore) {
         val token = stored.token
         if (token.isBlank()) throw IllegalStateException("Cloudflare API token not set")
 
-        val verify = get(token, "/user/tokens/verify")
-        val status = verify.optJSONObject("result")?.optString("status").orEmpty()
+        // /user/tokens/verify only answers for user-owned tokens. An account-owned
+        // token is a normal server credential and answers 401 there even when it
+        // is valid; the /accounts call below is the real proof. A user token that
+        // was revoked or disabled still answers "not active" and is rejected.
+        val status = runCatching {
+            get(token, "/user/tokens/verify").optJSONObject("result")?.optString("status").orEmpty()
+        }.getOrDefault("")
         if (status.isNotEmpty() && status != "active") {
             throw IllegalStateException("token status $status")
         }
