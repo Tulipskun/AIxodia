@@ -60,6 +60,14 @@ class DaemonDiscovery(
     /** How often to read the row. The daemon beats every 30s, so faster is waste. */
     private val pollMs = 30_000L
 
+    /**
+     * The engine instance whose address was last read. A different started
+     * means the daemon was replaced: every relay stream the phone had —
+     * terminals included — died with the old process, even though the address
+     * did not change and the relay may never have shown the engine as absent.
+     */
+    private var lastStartedAt = 0L
+
     fun start() {
         scope.launch { loop() }
     }
@@ -77,6 +85,9 @@ class DaemonDiscovery(
             }
             try {
                 val node = history.node()
+                val started = node?.startedAt ?: 0L
+                val replaced = started > 0L && lastStartedAt > 0L && started != lastStartedAt
+                if (started > 0L) lastStartedAt = started
                 when (val action = decide(current.daemonUrl, node)) {
                     is Discovery.Adopt -> {
                         Log.i(TAG, "daemon moved: adopting ${action.url}")
@@ -99,6 +110,14 @@ class DaemonDiscovery(
                     }
 
                     Discovery.Keep -> {
+                        // Same address, new process: reattach the open shell to
+                        // the engine that is serving now. Without this the panel
+                        // sits on a stream the old process took with it, and
+                        // tapping that tab does nothing because it looks open.
+                        if (replaced) {
+                            Log.i(TAG, "daemon restarted at $started; reattaching the terminal")
+                            terminal.reconnect()
+                        }
                         _state.value = DiscoveryState(
                             phase = DiscoveryPhase.CONNECTED,
                             tunnelUrl = node?.tunnelUrl.orEmpty().ifBlank { current.daemonUrl },
@@ -115,6 +134,7 @@ class DaemonDiscovery(
                             tunnelUrl = current.daemonUrl,
                             online = false,
                         )
+                        backoff = pollMs
                     }
                 }
             } catch (e: Exception) {
@@ -126,9 +146,12 @@ class DaemonDiscovery(
                     tunnelUrl = current.daemonUrl,
                     error = e.message?.take(120).orEmpty(),
                 )
+                // Only a failed read backs off. Letting the doubling run on
+                // success stretched the poll from 30 seconds to five minutes,
+                // so a replaced engine went unnoticed long after it was back.
+                backoff = min(backoff * 2, 5 * 60_000L)
             }
             delay(backoff + Random.nextLong(0, 2_000))
-            backoff = min(backoff * 2, 5 * 60_000L)
         }
     }
 
