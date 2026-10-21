@@ -816,10 +816,17 @@ class TerminalView @JvmOverloads constructor(
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
+        // A terminal must not be treated as a password field. The visible-
+        // password variation used to suppress suggestions, but some OEM
+        // keyboards/screenshot services (vivo/iQOO among them) then refuse a
+        // screenshot of the whole screen while the keyboard is up. A normal
+        // text field with suggestions disabled keeps the IME quiet without
+        // claiming the content is a secret.
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
-            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
-            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_FULLSCREEN
+            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
+            EditorInfo.IME_FLAG_NO_FULLSCREEN or
+            EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
         return TerminalInputConnection(this, false)
     }
 
