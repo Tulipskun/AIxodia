@@ -385,6 +385,39 @@ class ChatRepository(
     suspend fun maxSeq(sid: String): Long = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
 
     /**
+     * True when the last committed question has no answer after it. A pending
+     * row is not included: it has not reached the daemon yet, and flushPending
+     * owns it. This is the "the app was closed or the socket died mid-turn"
+     * test the recovery pass uses before retrying.
+     */
+    suspend fun hasUnfinishedTurn(sid: String): Boolean {
+        if (sid.isBlank()) return false
+        val rows = try { db.messages().allNow(sid) } catch (_: Exception) { return false }
+        val lastUser = rows.indexOfLast { it.role == "user" }
+        if (lastUser < 0 || rows[lastUser].pending) return false
+        return rows.drop(lastUser + 1).none { it.isStoredAnswer() }
+    }
+
+    /** When the last committed question was written, or 0 when there is none. */
+    suspend fun lastUserCreatedAt(sid: String): Long {
+        if (sid.isBlank()) return 0L
+        return try {
+            db.messages().allNow(sid).lastOrNull { it.role == "user" }?.createdAt ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    private fun MessageEntity.isStoredAnswer(): Boolean {
+        if (role != "model" && role != "assistant") return false
+        // The engine's final answer carries usage or the answer block id.
+        // Narration before a tool round carries neither, so a turn that died
+        // after narrating is still seen as unfinished.
+        return model.isNotBlank() || durationMs > 0L || tokensIn > 0 || tokensOut > 0 ||
+            block.contains("\"id\":\"answer\"") || block.contains("\"id\": \"answer\"")
+    }
+
+    /**
      * Records each request's own thinking time on the rows that request made.
      * The closing answer gets the last request's figure, and every tool call
      * gets the figure of the request that produced it, keyed by call id. This
@@ -447,9 +480,10 @@ class ChatRepository(
                     if (last.pending) return false
                     val clientMsgId = "$sid:${System.currentTimeMillis()}"
                     db.messages().upsert(last.copy(pending = true, clientMsgId = clientMsgId, createdAt = System.currentTimeMillis()))
-                    if (socket.send(sid, clean, clientMsgId, attachments)) {
-                        db.messages().markAcked(clientMsgId)
-                    }
+                    // The frame reaching OkHttp's queue is not the daemon
+                    // accepting it. Keep the row pending until the ack frame
+                    // arrives; if the socket dies now, the reconnect flushes it.
+                    socket.send(sid, clean, clientMsgId, attachments)
                     return true
                 }
             }
@@ -471,11 +505,10 @@ class ChatRepository(
                 clientMsgId = clientMsgId,
             )
         )
-        val queued = socket.send(sid, clean, clientMsgId, attachments)
-        if (queued) {
-            db.messages().markAcked(clientMsgId)
-        }
-        // queued == false → stays pending, the state collector retries it.
+        // queued == false → stays pending. queued == true also stays pending
+        // until the daemon's ack: a close between send and ack must not lose
+        // the question. The state collector flushes unacked rows on reconnect.
+        socket.send(sid, clean, clientMsgId, attachments)
         return true
     }
 
@@ -490,9 +523,9 @@ class ChatRepository(
             }
             for (m in rows) {
                 if (m.clientMsgId.isBlank()) continue
-                if (socket.send(m.sessionId, m.text, m.clientMsgId)) {
-                    db.messages().markAcked(m.clientMsgId)
-                }
+                // Ack, not send, clears pending. A frame written into a dying
+                // socket is still retried on the next reconnect.
+                socket.send(m.sessionId, m.text, m.clientMsgId)
             }
         }
     }

@@ -16,6 +16,8 @@ import com.tulipskun.aixodia.ui.display.LiveUsage
 import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.toolStepFor
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -250,6 +252,13 @@ class ChatViewModel(
      * in flight.
      */
     private var turnBaseSeq = -1L
+    /**
+     * The reconnect watch: after a dropped socket it polls D1 until the turn
+     * that kept running on the daemon lands, and retries a turn that really
+     * died. One job per chat, cancelled as soon as the answer arrives.
+     */
+    private var recoveryJob: Job? = null
+    private var lastRecoveryRetry = 0L
     val selectedProvider = MutableStateFlow("")
     val selectedModel = MutableStateFlow("")
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
@@ -277,6 +286,9 @@ class ChatViewModel(
                 selectedModel.value = model
                 hasStoredRoute.value = true
             }
+            // A cold start can already have an online socket, so the
+            // connection collector never sees an OFFLINE -> ONLINE edge.
+            recoverInterruptedTurn()
         }
         // The start time comes from the daemon's D1 row, read once (and again
         // whenever the socket comes back). Uptime is then counted on the phone,
@@ -290,7 +302,41 @@ class ChatViewModel(
             refreshDaemonStart()
         }
         viewModelScope.launch {
-            repo.connState.collect { if (it == ConnState.ONLINE) refreshDaemonStart() }
+            var wasOnline = repo.connState.value == ConnState.ONLINE
+            repo.connState.collect { state ->
+                if (state == ConnState.ONLINE) {
+                    refreshDaemonStart()
+                    // First open and every reconnect share this path: a turn
+                    // that was cut off either lands in D1 shortly or is retried.
+                    if (!wasOnline) recoverInterruptedTurn()
+                }
+                wasOnline = state == ConnState.ONLINE
+            }
+        }
+        // A reconnect does not replay the daemon's `done` frame, so the live
+        // bubble would stay busy forever even after the answer is in D1. The
+        // committed answer after the last question is the signal to hand over.
+        viewModelScope.launch {
+            messages.collect { rows ->
+                if (!busy.value) return@collect
+                val lastUser = rows.indexOfLast { it.role == "user" }
+                if (lastUser < 0) return@collect
+                // Narration before a tool round is stored as an assistant row
+                // too. Only the closing answer carries usage, duration, or the
+                // engine's `answer` block id.
+                val answered = rows.drop(lastUser + 1).any {
+                    (it.role == "model" || it.role == "assistant") &&
+                        (it.model.isNotBlank() || it.durationMs > 0L ||
+                            it.tokensIn > 0 || it.tokensOut > 0 ||
+                            it.block.contains("\"id\":\"answer\"") ||
+                            it.block.contains("\"id\": \"answer\""))
+                }
+                if (answered) {
+                    recoveryJob?.cancel()
+                    errorCard.value = ""
+                    clearLiveTurn()
+                }
+            }
         }
         viewModelScope.launch {
             repo.liveFrames.collect { f ->
@@ -305,6 +351,17 @@ class ChatViewModel(
                     "trace" -> onTrace(f)
                     "done" -> onTurnDone(f)
                     "error" -> {
+                        // A resend can reach the daemon while the original turn
+                        // still runs. That is not a failure: the ack cleared the
+                        // pending row, and the reconnect watch will collect the
+                        // answer when it lands.
+                        if (f.text.contains("turn_in_progress") ||
+                            f.text.contains("already running for this chat")
+                        ) {
+                            notice.value = "The daemon is still working on this chat…"
+                            recoverInterruptedTurn()
+                            return@collect
+                        }
                         // The rows the failed attempt already stored are here
                         // now. Stamp the thought times they did get before the
                         // live timeline that measured them is cleared.
@@ -766,6 +823,51 @@ class ChatViewModel(
     }
 
     /**
+     * After a reconnect, a turn started before the drop may still be running on
+     * the daemon. Poll the authoritative store instead of assuming the missing
+     * `done` frame means failure. If the question is still unanswered after a
+     * grace period, ask the daemon to resume it; the gateway refuses a second
+     * concurrent turn, and that refusal just means the first one is alive.
+     */
+    private fun recoverInterruptedTurn() {
+        if (sessionId.isBlank() || recoveryJob?.isActive == true) return
+        recoveryJob = viewModelScope.launch {
+            var attempts = 0
+            // Give the socket's own refresh/verify a moment to land an answer
+            // that was written while the phone was away.
+            delay(4_000)
+            repeat(72) { // six minutes at five-second intervals
+                val sid = sessionId
+                if (sid.isBlank() || repo.isDraft(sid)) return@launch
+                runCatching { repo.refreshLatest(sid) }
+                if (!repo.hasUnfinishedTurn(sid)) {
+                    if (busy.value) {
+                        errorCard.value = ""
+                        clearLiveTurn()
+                    }
+                    return@launch
+                }
+                val now = System.currentTimeMillis()
+                val age = now - repo.lastUserCreatedAt(sid)
+                if (age >= 15_000L && attempts < 3 && now - lastRecoveryRetry >= 45_000L) {
+                    attempts++
+                    lastRecoveryRetry = now
+                    if (busy.value) clearLiveTurn()
+                    beginLiveTurn()
+                    turnBaseSeq = repo.maxSeq(sid)
+                    notice.value = "Retrying the unfinished message…"
+                    if (!repo.retryTurn(sid)) {
+                        clearLiveTurn()
+                        notice.value = "Could not retry — the daemon is offline"
+                        return@launch
+                    }
+                }
+                delay(5_000)
+            }
+        }
+    }
+
+    /**
      * Takes the in-flight turn off the screen: the streamed text, the tool
      * cards, the status line and the busy flag. Any rows the turn produced are
      * already in D1; this only clears the live copy, so it is safe to call
@@ -1019,16 +1121,19 @@ class ChatViewModel(
     }
 
     fun send(text: String) {
-        if (conn.value != ConnState.ONLINE) {
-            notice.value = "Not connected to the daemon"
-            return
-        }
         val attachments = pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
-        beginLiveTurn()
+        val online = conn.value == ConnState.ONLINE
+        if (!online && attachments.isNotEmpty()) {
+            notice.value = "Connect to the daemon before sending attachments"
+            return
+        }
+        if (online) beginLiveTurn()
         viewModelScope.launch {
             val wasDraft = repo.isDraft(sessionId)
-            if (wasDraft && !repo.ensureRemoteSession(sessionId, text.trim().take(60))) {
+            // Offline text is queued locally; a New chat is created when the
+            // reconnect flush actually has a socket to send it through.
+            if (online && wasDraft && !repo.ensureRemoteSession(sessionId, text.trim().take(60))) {
                 clearLiveTurn()
                 val msg = "Could not start this chat on the daemon. Check the connection and try again."
                 errorCard.value = msg
@@ -1038,11 +1143,11 @@ class ChatViewModel(
             // A model chosen before the first message was kept on the phone:
             // now that the chat exists, pin it before the turn goes out.
             val pendingRoute = draftRoute
-            if (wasDraft && pendingRoute != null) {
+            if (online && wasDraft && pendingRoute != null) {
                 runCatching { repo.setSessionModel(sessionId, pendingRoute.first, pendingRoute.second) }
                 draftRoute = null
             }
-            turnBaseSeq = repo.maxSeq(sessionId)
+            if (online) turnBaseSeq = repo.maxSeq(sessionId)
             val fresh = try {
                 repo.send(sessionId, text.trim(), attachments)
             } catch (err: Exception) {
@@ -1053,7 +1158,11 @@ class ChatViewModel(
                 return@launch
             }
             pendingAttachments.value = emptyList()
-            if (!fresh) notice.value = "Already sent, waiting for reply"
+            if (!online) {
+                notice.value = "Queued — it will send when the daemon reconnects"
+            } else if (!fresh) {
+                notice.value = "Already sent, waiting for reply"
+            }
         }
     }
 
@@ -1090,6 +1199,8 @@ class ChatViewModel(
      */
     fun newChat() {
         viewModelScope.launch {
+            recoveryJob?.cancel()
+            recoveryJob = null
             runCatching { repo.createDraftSession() }
                 .onSuccess {
                     sessionId = it
@@ -1106,6 +1217,8 @@ class ChatViewModel(
     fun openChat(id: String) {
         if (id == sessionId) return
         viewModelScope.launch {
+            recoveryJob?.cancel()
+            recoveryJob = null
             repo.selectSession(id)
             sessionId = id
             selectedProvider.value = ""
@@ -1119,6 +1232,7 @@ class ChatViewModel(
                 selectedModel.value = model
                 hasStoredRoute.value = true
             }
+            recoverInterruptedTurn()
         }
     }
 

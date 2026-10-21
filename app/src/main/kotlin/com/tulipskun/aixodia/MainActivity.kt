@@ -63,6 +63,10 @@ class MainActivity : ComponentActivity() {
         // quick trip to another app should not clear and replay a healthy
         // screen.
         if (!relayWasOnline) c.terminal.reconnect() else c.terminal.onForeground(away)
+        // Chat frames are not replayed by a dead-but-still-"online" socket. A
+        // long background trip redials on purpose, which makes the repository
+        // refresh D1, flush unacked rows, and run the unfinished-turn recovery.
+        if (!relayWasOnline || away >= 30_000L) c.socket.reconnect()
     }
 
     /**
