@@ -157,6 +157,9 @@ class TerminalSocket(
     // against the new session.
     private var dialJob: Job? = null
 
+    // The periodic tab refresh, so a slow list call cannot queue one per tick.
+    private var refreshJob: Job? = null
+
     init {
         // The engine's half of the relay can drop and re-register while the
         // phone's socket never moves (the worker tells us with presence
@@ -264,8 +267,8 @@ class TerminalSocket(
      */
     fun refreshSessions() {
         val r = relay ?: return
-        if (r.state.value != ConnState.ONLINE) return
-        scope.launch {
+        if (r.state.value != ConnState.ONLINE || refreshJob?.isActive == true) return
+        refreshJob = scope.launch {
             val lostActive = syncSessions(r, settings.currentTerminalSessionId())
             // The shell on screen disappeared between polls. A live stream
             // may not know yet (the engine dropped the pty but its reader has
