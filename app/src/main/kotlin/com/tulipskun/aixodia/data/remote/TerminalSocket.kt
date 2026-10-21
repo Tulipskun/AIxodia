@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 
 private const val TAG = "TerminalSocket"
 
@@ -43,7 +44,14 @@ enum class TermState { CLOSED, CONNECTING, OPEN, ENDED }
  */
 sealed interface TermEvent {
     /** The shell is up: what it is and where it starts. */
-    data class Ready(val shell: String, val cwd: String, val cols: Int, val rows: Int, val id: String = "") : TermEvent
+    data class Ready(
+        val shell: String,
+        val cwd: String,
+        val cols: Int,
+        val rows: Int,
+        val id: String = "",
+        val pid: Int = 0,
+    ) : TermEvent
 
     /** The shell ended on its own, with this exit code. The stream closes after. */
     data class Exit(val code: Int) : TermEvent
@@ -78,6 +86,10 @@ class TerminalSocket(
     /** Known session ids on the engine, in creation order. */
     private val _sessions = MutableStateFlow<List<String>>(emptyList())
     val sessions: StateFlow<List<String>> = _sessions
+
+    /** The pid the engine named for each known session id. */
+    private val _sessionPids = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val sessionPids: StateFlow<Map<String, Int>> = _sessionPids
 
     /** The id the next dial will try to reattach to (empty = ask for a new one). */
     private val _activeSessionId = MutableStateFlow("")
@@ -176,6 +188,7 @@ class TerminalSocket(
                 else -> _activeSessionId.value = target
             }
             _sessions.value = settings.currentTerminalSessionIds()
+            _sessionPids.value = settings.currentTerminalSessionPids()
         }
         // A stream left over from a previous session that died silently (app
         // backgrounded, Doze, dropped Wi-Fi) would make this return without
@@ -273,6 +286,7 @@ class TerminalSocket(
                 settings.removeTerminalSessionId(id)
             }
             _sessions.value = settings.currentTerminalSessionIds()
+            _sessionPids.value = settings.currentTerminalSessionPids()
         }
         close()
         // Show it as finished, not as the brief CLOSED of a window that is about
@@ -343,6 +357,58 @@ class TerminalSocket(
         relay?.closeTerminal(id)
     }
 
+    /**
+     * Aligns the tab list and pid labels with the engine's live shells. An
+     * engine too old to serve /v1/terminals answers 404; the saved tabs are
+     * then left alone, which is the old behaviour.
+     *
+     * A shell id is not a shell: after the engine restarts, the same saved id
+     * would make acquireSession start a brand-new shell under the tab the user
+     * thought was still running. Dropping ids the engine no longer reports is
+     * what makes a reconnect land on the right shell — or on a new tab when
+     * that shell really is gone.
+     */
+    private suspend fun syncSessions(r: RelayClient, savedId: String) {
+        val reply = withTimeoutOrNull(5_000) { r.rpc("GET", "/v1/terminals") } ?: return
+        if (!reply.isSuccessful) return
+        val array = runCatching {
+            JSONObject(reply.text()).optJSONArray("terminals")
+        }.getOrNull() ?: return
+
+        val ids = mutableListOf<String>()
+        val pids = mutableMapOf<String, Int>()
+        for (i in 0 until array.length()) {
+            val o = array.optJSONObject(i) ?: continue
+            val id = o.optString("id").trim()
+            if (id.isEmpty() || !o.optBoolean("alive", true)) continue
+            ids += id
+            val pid = o.optInt("pid", 0)
+            if (pid > 0) pids[id] = pid
+        }
+
+        // The engine's answer is the whole truth: persist it in one edit so a
+        // crash between the list and the map cannot leave them disagreeing.
+        settings.saveTerminalSessionIds(ids)
+        settings.saveTerminalSessionPids(pids)
+        _sessions.value = ids
+        _sessionPids.value = pids
+
+        val explicit = retarget
+        if (explicit == null) {
+            val active = _activeSessionId.value.ifBlank { savedId }
+            _activeSessionId.value = when {
+                active.isNotBlank() && active in ids -> active
+                ids.isNotEmpty() -> ids.last()
+                else -> ""
+            }
+        } else if (explicit.isNotBlank() && explicit !in ids) {
+            // The tab being switched to is gone: ask for a new shell rather
+            // than spawning one behind the old label.
+            retarget = ""
+            _activeSessionId.value = ""
+        }
+    }
+
     private suspend fun dial() {
         var backoff = RETRY_MS
         while (!closing) {
@@ -390,9 +456,19 @@ class TerminalSocket(
                 continue
             }
 
+            // Reconcile the tabs with the shells the engine actually holds. A
+            // saved id that survived an engine restart would otherwise be
+            // reattached into a brand-new shell under an old tab, and the tab
+            // would keep claiming to be the shell the user left. The list also
+            // carries each shell's pid, so the labels are right before the
+            // ready frame arrives.
+            syncSessions(r, settings.currentTerminalSessionId())
+
             // Reattach to a surviving shell when we have its id; otherwise the
-            // engine hands back a fresh one in its ready frame.
-            val wantedId = retarget ?: settings.currentTerminalSessionId()
+            // engine hands back a fresh one in its ready frame. syncSessions
+            // has already put the saved id (or the newest live one) in
+            // activeSessionId when it still exists on the engine.
+            val wantedId = retarget ?: _activeSessionId.value
             // Zero when the view has not been laid out yet: the engine then
             // keeps the shell's current size instead of forcing 80x24 onto a
             // running program. The view sends the real size as soon as it is
@@ -448,7 +524,17 @@ class TerminalSocket(
                                 scope.launch {
                                     settings.saveTerminalSessionId(ev.id)
                                     settings.addTerminalSessionId(ev.id)
+                                    if (ev.pid > 0) settings.saveTerminalSessionPid(ev.id, ev.pid)
                                     _sessions.value = settings.currentTerminalSessionIds()
+                                    _sessionPids.value = settings.currentTerminalSessionPids()
+                                }
+                            } else if (ev.pid > 0) {
+                                // A ready frame without an id cannot happen on
+                                // the relay path; keep the pid for the active
+                                // tab anyway rather than dropping the identity.
+                                val id = _activeSessionId.value
+                                if (id.isNotBlank()) {
+                                    _sessionPids.value = _sessionPids.value + (id to ev.pid)
                                 }
                             }
                             _state.value = TermState.OPEN
@@ -553,7 +639,7 @@ internal fun parseEvent(text: String): TermEvent? {
         null
     } ?: return null
     return when (f.type) {
-        "ready" -> TermEvent.Ready(f.shell.orEmpty(), f.cwd.orEmpty(), f.cols ?: 0, f.rows ?: 0, f.id.orEmpty())
+        "ready" -> TermEvent.Ready(f.shell.orEmpty(), f.cwd.orEmpty(), f.cols ?: 0, f.rows ?: 0, f.id.orEmpty(), f.pid ?: 0)
         "exit" -> TermEvent.Exit(f.code ?: 0)
         "error" -> TermEvent.Failed(f.error.orEmpty())
         else -> null
@@ -574,6 +660,7 @@ internal data class ControlFrame(
     val code: Int?,
     val error: String?,
     val id: String?,
+    val pid: Int?,
 )
 
 /** `{"type":"resize","cols":100,"rows":30}` — both sizes are always sent. */

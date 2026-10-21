@@ -45,6 +45,14 @@ class TerminalSocketTest {
     }
 
     @Test
+    fun readyFrameCarriesTheShellPid() {
+        val ev = parseEvent(
+            """{"type":"ready","shell":"/bin/bash","cwd":"/root","cols":100,"rows":30,"id":"t-1","pid":4242}"""
+        )
+        assertEquals(TermEvent.Ready("/bin/bash", "/root", 100, 30, "t-1", 4242), ev)
+    }
+
+    @Test
     fun exitFrameCarriesTheCode() {
         assertEquals(TermEvent.Exit(3), parseEvent("""{"type":"exit","code":3}"""))
     }

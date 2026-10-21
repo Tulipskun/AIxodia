@@ -571,6 +571,7 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
 @Composable
 private fun TerminalSessionBar(socket: TerminalSocket) {
     val sessions by socket.sessions.collectAsStateWithLifecycle()
+    val pids by socket.sessionPids.collectAsStateWithLifecycle()
     val active by socket.activeSessionId.collectAsStateWithLifecycle()
     FlowRow(
         Modifier
@@ -580,7 +581,12 @@ private fun TerminalSessionBar(socket: TerminalSocket) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         sessions.forEachIndexed { i, id ->
-            val label = "Shell ${i + 1}"
+            // The pid is what makes a tab a shell and not a position: closing
+            // Shell 2 used to renumber Shell 3, so "Shell 1" no longer told
+            // you which process a reconnect would land on. Both are shown —
+            // the number for quick tapping, the pid for identity.
+            val pid = pids[id]
+            val label = if (pid != null && pid > 0) "Shell ${i + 1} · pid $pid" else "Shell ${i + 1}"
             // Only the session that is actually attached is selected. Falling
             // back to "the last tab" when nothing is attached marked a closed
             // tab as the live one.
@@ -623,7 +629,11 @@ private fun statusLine(
 ): String = when {
     ended is TermEvent.Exit -> stringResource(R.string.terminal_ended, ended.code)
     ended is TermEvent.Failed -> stringResource(R.string.terminal_failed, ended.message)
-    state == TermState.OPEN -> listOfNotNull(ready?.shell, ready?.cwd)
+    state == TermState.OPEN -> listOfNotNull(
+        ready?.shell,
+        ready?.cwd,
+        ready?.pid?.takeIf { it > 0 }?.let { "pid $it" },
+    )
         .filter { it.isNotBlank() }
         .joinToString("  ")
     state == TermState.CONNECTING -> stringResource(R.string.terminal_connecting)

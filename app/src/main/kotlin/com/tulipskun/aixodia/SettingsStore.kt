@@ -32,6 +32,9 @@ class SettingsStore(private val ctx: Context) {
     private val sessionId = stringPreferencesKey("session_id")
     private val terminalSessionId = stringPreferencesKey("terminal_session_id")
     private val terminalSessionIds = stringPreferencesKey("terminal_session_ids")
+    // id -> pid of each live shell, so a tab can say which process it is and a
+    // reconnect can show the same identity before the engine's ready frame.
+    private val terminalSessionPids = stringPreferencesKey("terminal_session_pids")
     // The daemon's start time, kept so the header's uptime counter has a number
     // the moment the app opens — the D1 query that confirms it has not landed yet.
     private val daemonStartedAt = stringPreferencesKey("daemon_started_at")
@@ -81,6 +84,9 @@ class SettingsStore(private val ctx: Context) {
     /** The cached daemon start time (unix second), 0 when never seen. */
     val terminalSessionIdFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionId] ?: "" }
     val terminalSessionIdsFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionIds] ?: "" }
+    val terminalSessionPidsFlow: Flow<Map<String, Int>> = ctx.ds.data.map {
+        parseSessionPids(it[terminalSessionPids].orEmpty())
+    }
     val daemonStartedAtFlow: Flow<Long> =
         ctx.ds.data.map { it[daemonStartedAt]?.toLongOrNull() ?: 0L }
 
@@ -144,6 +150,7 @@ class SettingsStore(private val ctx: Context) {
     suspend fun currentTerminalSessionId(): String = terminalSessionIdFlow.first()
     suspend fun currentTerminalSessionIds(): List<String> =
         terminalSessionIdsFlow.first().split(",").map { it.trim() }.filter { it.isNotBlank() }
+    suspend fun currentTerminalSessionPids(): Map<String, Int> = terminalSessionPidsFlow.first()
 
     suspend fun saveTerminalSessionId(id: String) {
         ctx.ds.edit { it[terminalSessionId] = id.trim() }
@@ -151,6 +158,22 @@ class SettingsStore(private val ctx: Context) {
 
     suspend fun saveTerminalSessionIds(ids: List<String>) {
         ctx.ds.edit { it[terminalSessionIds] = ids.joinToString(",") }
+    }
+
+    /** Replaces the whole id -> pid map, as the engine's live list says. */
+    suspend fun saveTerminalSessionPids(pids: Map<String, Int>) {
+        ctx.ds.edit { it[terminalSessionPids] = formatSessionPids(pids) }
+    }
+
+    /** Remembers the pid the engine named for one shell. */
+    suspend fun saveTerminalSessionPid(id: String, pid: Int) {
+        val clean = id.trim()
+        if (clean.isEmpty() || pid <= 0) return
+        ctx.ds.edit { prefs ->
+            val pids = parseSessionPids(prefs[terminalSessionPids].orEmpty()).toMutableMap()
+            pids[clean] = pid
+            prefs[terminalSessionPids] = formatSessionPids(pids)
+        }
     }
 
     /**
@@ -174,6 +197,9 @@ class SettingsStore(private val ctx: Context) {
         ctx.ds.edit { prefs ->
             val ids = (prefs[terminalSessionIds] ?: "").split(",").map { it.trim() }.filter { it.isNotBlank() && it != clean }
             prefs[terminalSessionIds] = ids.joinToString(",")
+            val pids = parseSessionPids(prefs[terminalSessionPids].orEmpty()).toMutableMap()
+            pids.remove(clean)
+            prefs[terminalSessionPids] = formatSessionPids(pids)
             if ((prefs[terminalSessionId] ?: "").trim() == clean) prefs.remove(terminalSessionId)
         }
     }
@@ -218,6 +244,28 @@ class SettingsStore(private val ctx: Context) {
         }
     }
 }
+
+/**
+ * "t-1=4242,t-2=4243" -> {t-1: 4242, t-2: 4243}. Kept as one preference so a
+ * whole engine list lands in a single DataStore edit.
+ */
+private fun parseSessionPids(raw: String): Map<String, Int> {
+    if (raw.isBlank()) return emptyMap()
+    val out = LinkedHashMap<String, Int>()
+    for (entry in raw.split(',')) {
+        val at = entry.lastIndexOf('=')
+        if (at <= 0) continue
+        val id = entry.substring(0, at).trim()
+        val pid = entry.substring(at + 1).trim().toIntOrNull() ?: continue
+        if (id.isNotEmpty() && pid > 0) out[id] = pid
+    }
+    return out
+}
+
+private fun formatSessionPids(pids: Map<String, Int>): String =
+    pids.entries
+        .filter { it.key.isNotBlank() && it.value > 0 }
+        .joinToString(",") { "${it.key}=${it.value}" }
 
 data class ConnConfig(
     val endpoint: String,
