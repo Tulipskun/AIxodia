@@ -312,6 +312,12 @@ class ChatViewModel(
      * died. One job per chat, cancelled as soon as the answer arrives.
      */
     private var recoveryJob: Job? = null
+    /**
+     * The switch in flight. A second tap must cancel the first one before it
+     * reaches the daemon, otherwise the older switch can set the socket and the
+     * route back to the chat the reader already left.
+     */
+    private var switchJob: Job? = null
     private var lastRecoveryRetry = 0L
     val selectedProvider = MutableStateFlow("")
     val selectedModel = MutableStateFlow("")
@@ -1262,6 +1268,7 @@ class ChatViewModel(
      * server that a later tap can find stale.
      */
     fun newChat() {
+        switchJob?.cancel()
         viewModelScope.launch {
             recoveryJob?.cancel()
             recoveryJob = null
@@ -1281,17 +1288,28 @@ class ChatViewModel(
 
     fun openChat(id: String) {
         if (id == sessionId) return
-        viewModelScope.launch {
+        switchJob?.cancel()
+        switchJob = viewModelScope.launch {
             recoveryJob?.cancel()
             recoveryJob = null
-            repo.selectSession(id)
+            // Switch the visible window from Room before touching the network.
+            // repo.selectSession used to be first and waited for a D1 refresh,
+            // so the drawer closed on the old chat and the new one appeared
+            // only when that round trip finished. The cached page is local and
+            // can be on screen in the same frame as the tap.
             sessionId = id
             startWindow(id)
+            if (sessionId != id) return@launch
             selectedProvider.value = ""
             selectedModel.value = ""
             hasStoredRoute.value = false
             draftRoute = null
             settings.saveSession(id)
+            if (sessionId != id) return@launch
+            // Now make it the daemon's current chat and pull the network tail;
+            // openSession's remote work runs in the repository's own scope.
+            repo.selectSession(id)
+            if (sessionId != id) return@launch
             // The header shows this chat's model, not the daemon default.
             runCatching { repo.sessionRoute(id) }.getOrNull()?.let { (provider, model) ->
                 selectedProvider.value = provider
@@ -1307,6 +1325,7 @@ class ChatViewModel(
     }
 
     fun deleteChat(id: String) {
+        switchJob?.cancel()
         viewModelScope.launch {
             repo.deleteSession(id)
             if (id == sessionId) {

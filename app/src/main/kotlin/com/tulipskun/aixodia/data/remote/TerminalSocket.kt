@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
@@ -92,6 +94,10 @@ class TerminalSocket(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val resizeAdapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         .adapter(ResizeFrame::class.java)
+
+    // The initial dial and the periodic refresh both reconcile the tab list.
+    // Serializing them keeps an older answer from overwriting a newer one.
+    private val sessionSync = Mutex()
 
     private val _state = MutableStateFlow(TermState.CLOSED)
     val state: StateFlow<TermState> = _state
@@ -191,17 +197,30 @@ class TerminalSocket(
     @Volatile
     private var retarget: String? = null
 
+    // Whether this open has already reconciled against /v1/terminals. It is
+    // what stops the saved-state read below from overwriting an answer that
+    // arrived first, when the list no longer has the saved shell.
+    @Volatile
+    private var sessionsSynced = false
+
     /** Opens the stream, if it is not already dialing or up. */
     fun open() {
         wanted = true
+        sessionsSynced = false
         scope.launch {
-            when (val target = retarget) {
-                null -> _activeSessionId.value = settings.currentTerminalSessionId()
-                "" -> _activeSessionId.value = ""
-                else -> _activeSessionId.value = target
+            // The initial dialog and the first reconcile both touch the tab
+            // list. Holding the same lock as syncSessions keeps whichever runs
+            // second from painting stale saved ids over the engine's answer.
+            sessionSync.withLock {
+                if (sessionsSynced) return@withLock
+                when (val target = retarget) {
+                    null -> _activeSessionId.value = settings.currentTerminalSessionId()
+                    "" -> _activeSessionId.value = ""
+                    else -> _activeSessionId.value = target
+                }
+                _sessions.value = settings.currentTerminalSessionIds()
+                _sessionPids.value = settings.currentTerminalSessionPids()
             }
-            _sessions.value = settings.currentTerminalSessionIds()
-            _sessionPids.value = settings.currentTerminalSessionPids()
         }
         // A stream left over from a previous session that died silently (app
         // backgrounded, Doze, dropped Wi-Fi) would make this return without
@@ -234,6 +253,33 @@ class TerminalSocket(
     }
 
     /**
+     * Re-reads the engine's list of live shells while the window is open. The
+     * initial dial already does this once; a shell can be killed from another
+     * terminal, or another phone can open one, long after that. Without this
+     * poll the tab row kept a dead pid and a tap reattached the same dead id.
+     *
+     * It is deliberately silent: a failed list (relay briefly offline, an old
+     * engine without /v1/terminals) leaves the current tabs alone, exactly as
+     * the dial's reconcile does.
+     */
+    fun refreshSessions() {
+        val r = relay ?: return
+        if (r.state.value != ConnState.ONLINE) return
+        scope.launch {
+            val lostActive = syncSessions(r, settings.currentTerminalSessionId())
+            // The shell on screen disappeared between polls. A live stream
+            // may not know yet (the engine dropped the pty but its reader has
+            // not delivered the exit), so replace it with the newest surviving
+            // tab, or a fresh shell when none are left.
+            if (lostActive && wanted &&
+                (_state.value == TermState.OPEN || _state.value == TermState.CONNECTING)
+            ) {
+                reconnectLocked()
+            }
+        }
+    }
+
+    /**
      * Called when the activity comes back. A stream that survived a long
      * absence can look OPEN while Android has already dropped every byte, so
      * rebuild it once; the engine replays RIS, the modes and the ring, which is
@@ -241,6 +287,9 @@ class TerminalSocket(
      * current screen untouched.
      */
     fun onForeground(awayMs: Long) {
+        // The list also changes while the app is away (an exit, a kill, a tab
+        // opened from another phone), so reconcile it even for a short absence.
+        refreshSessions()
         if (!shouldReattachAfterBackground(_state.value, wanted, awayMs)) return
         reconnectLocked()
     }
@@ -393,46 +442,65 @@ class TerminalSocket(
      * what makes a reconnect land on the right shell — or on a new tab when
      * that shell really is gone.
      */
-    private suspend fun syncSessions(r: RelayClient, savedId: String) {
-        val reply = withTimeoutOrNull(5_000) { r.rpc("GET", "/v1/terminals") } ?: return
-        if (!reply.isSuccessful) return
-        val array = runCatching {
-            JSONObject(reply.text()).optJSONArray("terminals")
-        }.getOrNull() ?: return
+    private suspend fun syncSessions(r: RelayClient, savedId: String): Boolean =
+        sessionSync.withLock {
+            val reply = withTimeoutOrNull(5_000) { r.rpc("GET", "/v1/terminals") }
+                ?: return@withLock false
+            if (!reply.isSuccessful) return@withLock false
+            val array = runCatching {
+                JSONObject(reply.text()).optJSONArray("terminals")
+            }.getOrNull() ?: return@withLock false
 
-        val ids = mutableListOf<String>()
-        val pids = mutableMapOf<String, Int>()
-        for (i in 0 until array.length()) {
-            val o = array.optJSONObject(i) ?: continue
-            val id = o.optString("id").trim()
-            if (id.isEmpty() || !o.optBoolean("alive", true)) continue
-            ids += id
-            val pid = o.optInt("pid", 0)
-            if (pid > 0) pids[id] = pid
-        }
-
-        // The engine's answer is the whole truth: persist it in one edit so a
-        // crash between the list and the map cannot leave them disagreeing.
-        settings.saveTerminalSessionIds(ids)
-        settings.saveTerminalSessionPids(pids)
-        _sessions.value = ids
-        _sessionPids.value = pids
-
-        val explicit = retarget
-        if (explicit == null) {
-            val active = _activeSessionId.value.ifBlank { savedId }
-            _activeSessionId.value = when {
-                active.isNotBlank() && active in ids -> active
-                ids.isNotEmpty() -> ids.last()
-                else -> ""
+            val ids = mutableListOf<String>()
+            val pids = mutableMapOf<String, Int>()
+            for (i in 0 until array.length()) {
+                val o = array.optJSONObject(i) ?: continue
+                val id = o.optString("id").trim()
+                // The engine already checks the pid; the alive flag keeps an
+                // older engine's finished rows out of the tabs as well.
+                if (id.isEmpty() || !o.optBoolean("alive", true)) continue
+                ids += id
+                val pid = o.optInt("pid", 0)
+                if (pid > 0) pids[id] = pid
             }
-        } else if (explicit.isNotBlank() && explicit !in ids) {
-            // The tab being switched to is gone: ask for a new shell rather
-            // than spawning one behind the old label.
-            retarget = ""
-            _activeSessionId.value = ""
+
+            // The engine's answer is the whole truth: persist it in one edit so
+            // a crash between the list and the map cannot leave them
+            // disagreeing. Unchanged polls do not write DataStore.
+            if (settings.currentTerminalSessionIds() != ids) {
+                settings.saveTerminalSessionIds(ids)
+            }
+            if (settings.currentTerminalSessionPids() != pids) {
+                settings.saveTerminalSessionPids(pids)
+            }
+            _sessions.value = ids
+            _sessionPids.value = pids
+            sessionsSynced = true
+
+            val before = _activeSessionId.value
+            // Only an id that was actually attached is "lost". A stale saved
+            // id that no stream ever used just means this window has none.
+            var lost = before.isNotBlank() && before !in ids
+
+            val explicit = retarget
+            if (explicit == null) {
+                val active = before.ifBlank { savedId }
+                _activeSessionId.value = when {
+                    active.isNotBlank() && active in ids -> active
+                    ids.isNotEmpty() -> ids.last()
+                    else -> ""
+                }
+            } else if (explicit.isNotBlank() && explicit !in ids) {
+                // The tab being switched to is gone: ask for a new shell rather
+                // than spawning one behind the old label.
+                retarget = ""
+                _activeSessionId.value = ""
+            } else if (explicit.isEmpty()) {
+                // A brand-new shell is being requested, not a lost one.
+                lost = false
+            }
+            lost
         }
-    }
 
     private suspend fun dial() {
         var backoff = RETRY_MS

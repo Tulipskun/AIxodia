@@ -216,34 +216,57 @@ class ChatRepository(
         _active.value = sid
         val local = try { db.sessions().get(sid) } catch (_: Exception) { null }
         if (local == null) {
-            val row = try { history.sessions() } catch (_: Exception) { emptyList() }.firstOrNull { it.id == sid }
-            val usage = row?.usage?.toStoredTotals()
-            db.sessions().upsert(
-                SessionEntity(
-                    id = sid,
-                    title = row?.title?.ifBlank { sid } ?: sid,
-                    model = row?.model ?: "",
-                    lastAt = (row?.updatedAt ?: 0) * 1000,
-                    usageKnown = usage != null,
-                    usagePromptTokens = usage?.promptTokens ?: 0,
-                    usageCacheRead = usage?.cacheRead ?: 0,
-                    usageFreshInput = usage?.freshInput ?: 0,
-                    usageOutTokens = usage?.outTokens ?: 0,
-                    usageTotalMs = usage?.totalMs ?: 0,
-                    usageLastTurnMs = usage?.lastTurnMs ?: 0,
-                )
-            )
+            // A chat can be opened from another device before its row reaches
+            // this phone. Make a placeholder from the id now so the drawer and
+            // the thread have somewhere to land; the real title, model and
+            // usage arrive below without holding up the switch.
+            try {
+                db.sessions().upsert(SessionEntity(id = sid, title = sid))
+            } catch (_: Exception) { }
         }
-        db.sessions().clearUnread(sid)
-        // A draft has no D1 row to read or verify; asking would only log a 404.
-        if (local?.remote != false) {
-            // One newest-page read on open; loadOlder backfills the rest on demand.
-            refreshLatest(sid)
-            scope.launch { verify(sid) }
-        }
+        try { db.sessions().clearUnread(sid) } catch (_: Exception) { }
+
+        // The local part of a switch finishes here: socket, window floor and
+        // the cached page. The network tail is pulled afterwards, so tapping a
+        // chat does not sit on a D1 round trip before the screen changes.
         socket.switchSession(sid)
         socket.open(sid, db.messages().maxSeq(sid))
         flushPending()
+
+        // A draft has no D1 row to read or verify; asking would only log a 404.
+        if (local?.remote != false) {
+            scope.launch {
+                if (local == null) seedRemoteSession(sid)
+                // One newest-page read on open; loadOlder backfills the rest on demand.
+                refreshLatest(sid)
+                verify(sid)
+            }
+        }
+    }
+
+    /** Fills a placeholder row with the daemon's title, model and summed usage. */
+    private suspend fun seedRemoteSession(sid: String) {
+        val row = try {
+            history.sessions().firstOrNull { it.id == sid }
+        } catch (_: Exception) {
+            null
+        } ?: return
+        val usage = row.usage?.toStoredTotals()
+        db.sessions().upsert(
+            SessionEntity(
+                id = sid,
+                title = row.title.ifBlank { sid },
+                model = row.model,
+                lastAt = row.updatedAt * 1000,
+                usageKnown = usage != null,
+                usagePromptTokens = usage?.promptTokens ?: 0,
+                usageCacheRead = usage?.cacheRead ?: 0,
+                usageFreshInput = usage?.freshInput ?: 0,
+                usageOutTokens = usage?.outTokens ?: 0,
+                usageTotalMs = usage?.totalMs ?: 0,
+                usageLastTurnMs = usage?.lastTurnMs ?: 0,
+            )
+        )
     }
 
     /**

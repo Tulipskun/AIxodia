@@ -159,6 +159,16 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         }
     }
 
+    // Shells can be killed (or opened from another phone) while this window is
+    // up. Re-read the engine's live list periodically so a dead tab disappears
+    // and a freed/replaced id is never offered for reattach.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(5_000)
+            socket.refreshSessions()
+        }
+    }
+
     // Output is raw bytes and can arrive in many small writes per keystroke.
     // They are gathered for a few milliseconds and written once, on the main
     // thread — the emulator and the view both belong to it.
