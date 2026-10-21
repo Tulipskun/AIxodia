@@ -10,6 +10,7 @@ import com.tulipskun.aixodia.SettingsStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -78,14 +79,36 @@ internal fun relayFrameKind(ctl: String?, ch: String?): RelayFrameKind {
     }
 }
 
+/** A link that stayed up this long counts as healthy again. */
+internal const val RELAY_STABLE_MS = 10_000L
+
+/** First delay before a redial, and the ceiling the doubling stops at. */
+internal const val RELAY_BASE_BACKOFF_MS = 1_000L
+internal const val RELAY_MAX_BACKOFF_MS = 8_000L
+
+/**
+ * The delay before the next redial.
+ *
+ * A socket that stayed up counts as a healthy link, so the next failure starts
+ * from the base delay. One that opened and died at once does not: resetting the
+ * delay on every `onOpen` — which is what this replaces — turned a server that
+ * accepts and immediately drops the socket (an engine restarting, a tunnel
+ * handing back a dead edge) into a one-second retry loop that never slowed
+ * down. The engine's own relay loop measures health the same way.
+ */
+internal fun nextBackoffMs(currentMs: Long, upMs: Long): Long =
+    if (upMs >= RELAY_STABLE_MS) RELAY_BASE_BACKOFF_MS
+    else min(maxOf(currentMs, RELAY_BASE_BACKOFF_MS) * 2, RELAY_MAX_BACKOFF_MS)
+
 /**
  * The app's one connection: every stream to the engine travels here.
  *
  * It dials the engine's `/room` socket on the current tunnel URL. Chat frames,
  * the terminal's bytes and the multiplexed terminal control frames all share
  * the socket, so a phone needs one handshake, one token and one reconnect loop.
- * The engine answers HTTP calls as rpc frames on the same socket, which is why
- * HistoryApi's plain requests no longer need a transport of their own.
+ * The engine also answers HTTP calls as rpc frames on the same socket, which is
+ * what TerminalSocket uses for /v1/terminals; HistoryApi keeps its own plain
+ * HTTP client against the tunnel, so the two paths coexist.
  */
 class RelayClient(private val settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -145,6 +168,24 @@ class RelayClient(private val settings: SettingsStore) {
     @Volatile
     private var backoffMs = 1000L
 
+    // The one dialing loop. Kept so connect() can tell a live loop from one
+    // that a disconnect() is still winding down: launching a second loop for
+    // the same client leaves two sockets racing to own `ws`.
+    private var loopJob: Job? = null
+
+    // The attempt the loop is waiting on right now (null between attempts).
+    // disconnect() completes it, because a socket that was already closed or
+    // cancelled may never call its listener back, and a loop parked forever on
+    // that callback is a loop that never notices the client was reopened.
+    @Volatile
+    private var attempt: CompletableDeferred<Unit>? = null
+
+    // When the current socket opened, for the backoff policy: a socket that
+    // opened and died at once is not a healthy link, so it must not reset the
+    // delay and turn a flapping server into a one-second retry loop.
+    @Volatile
+    private var openedAtMs = 0L
+
     // Lets reconnect() cut a backoff sleep short. Without it a redial asked for
     // now still waited out the remaining delay — up to half a minute — which is
     // part of why a reconnect felt slow. Conflated: one pending wake is enough.
@@ -154,13 +195,26 @@ class RelayClient(private val settings: SettingsStore) {
 
     /** Starts the single connection (idempotent). */
     fun connect() {
-        if (wantOpen) return
+        val running = loopJob?.isActive == true
+        if (running && wantOpen) return
         wantOpen = true
-        scope.launch { loop() }
+        if (running) {
+            // A disconnect() set wantOpen false and left the loop waiting for
+            // an attempt that is over. Reusing that loop — instead of starting
+            // a second one — is what keeps one socket owning `ws`; completing
+            // its wait is what lets it dial again now.
+            attempt?.complete(Unit)
+            wake.trySend(Unit)
+            return
+        }
+        loopJob = scope.launch { loop() }
     }
 
     fun disconnect() {
         wantOpen = false
+        // Nothing else may wake the loop: the socket this attempt waited on is
+        // being dropped, and its close callback is not guaranteed to arrive.
+        attempt?.complete(Unit)
         ws?.close(1000, "ui")
         ws = null
         lost("closed")
@@ -439,7 +493,7 @@ class RelayClient(private val settings: SettingsStore) {
                         // been told which half of the room this is.
                         w.send("""{"role":"phone"}""")
                         _state.value = ConnState.CONNECTING
-                        backoffMs = 1000L
+                        openedAtMs = System.currentTimeMillis()
                         ready.complete(Unit)
                     }
 
@@ -477,9 +531,11 @@ class RelayClient(private val settings: SettingsStore) {
                         w.close(code, reason)
                     }
                 })
+                attempt = down
                 ready.await()
                 opened = true
                 down.await()
+                attempt = null
             } catch (_: Exception) {
                 // fall through to backoff
             }
@@ -490,9 +546,13 @@ class RelayClient(private val settings: SettingsStore) {
             }
             if (!wantOpen) break
             _state.value = ConnState.OFFLINE
+            // How long the socket that just ended had been up. Zero when it
+            // never opened; the retry policy needs that distinction.
+            val upMs = if (opened && openedAtMs > 0L) System.currentTimeMillis() - openedAtMs else 0L
+            openedAtMs = 0L
             // Wait out the backoff, but let reconnect() end the wait early.
             withTimeoutOrNull(backoffMs + Random.nextLong(0, 400)) { wake.receive() }
-            backoffMs = min(backoffMs * 2, 8_000L)
+            backoffMs = nextBackoffMs(backoffMs, upMs)
         }
         _state.value = ConnState.OFFLINE
     }

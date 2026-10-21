@@ -114,12 +114,18 @@ class DaemonDiscovery(
                     }
 
                     Discovery.Keep -> {
-                        // Same address, new process: reattach the open shell to
-                        // the engine that is serving now. Without this the panel
-                        // sits on a stream the old process took with it, and
-                        // tapping that tab does nothing because it looks open.
+                        // Same address, new process: every stream the phone had
+                        // died with the old process. The socket is redialed as
+                        // well as the terminal, because a turn streamed on that
+                        // socket stops arriving the moment the engine is
+                        // replaced, and waiting for the ping to notice costs up
+                        // to a ping interval of watching a dead thread. Without
+                        // the terminal half the panel sits on a stream the old
+                        // process took with it, and tapping that tab does
+                        // nothing because it still looks open.
                         if (replaced) {
-                            Log.i(TAG, "daemon restarted at $started; reattaching the terminal")
+                            Log.i(TAG, "daemon restarted at $started; redialing the socket and terminal")
+                            socket.reconnect()
                             terminal.reconnect()
                         }
                         _state.value = DiscoveryState(

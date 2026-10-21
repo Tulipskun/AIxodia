@@ -738,11 +738,16 @@ class TerminalSocket(
                 _state.value = TermState.CONNECTING
                 _error.value = 0
                 _detail.value = "no answer from the engine; redialing"
-                // The relay can still look ONLINE while its socket points at a
-                // quick-tunnel host that died with the old engine. Dialing
-                // again over that same socket would just lose the open frame
-                // forever, so replace the socket as well as the stream.
-                r.reconnect()
+                // Only replace the socket when the link itself is not up. While
+                // the relay is ONLINE the engine answered the presence frame, so
+                // a swallowed open is a stream id the engine no longer knows: a
+                // new id on the same socket is enough, and tearing the socket
+                // down would drop a chat turn that is streaming on it for a
+                // terminal that never attached. When the state is not ONLINE
+                // the socket may point at a tunnel edge that died with the old
+                // engine, and redialing the stream alone would lose the open
+                // frame forever.
+                if (r.state.value != ConnState.ONLINE) r.reconnect()
                 delay(RETRY_MS)
                 continue
             }
