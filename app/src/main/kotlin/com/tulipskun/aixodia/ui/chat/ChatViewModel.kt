@@ -272,6 +272,10 @@ class ChatViewModel(
     val selectedModel = MutableStateFlow("")
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
     val hasStoredRoute = MutableStateFlow(false)
+    /** A route chosen for a New chat, saved to the daemon with its first send. */
+    private var draftRoute: Pair<String, String>? = null
+    /** A sub-agent choice made before the New chat has a server row. */
+    private var draftSubAgent: Triple<String, String, Boolean>? = null
 
     init {
         // A fresh install has no settings yet, and every call here is network
@@ -969,6 +973,14 @@ class ChatViewModel(
             return
         }
         viewModelScope.launch {
+            // A New chat has no server row yet. Keep the choice here; send
+            // pins it in the same breath as creating the row.
+            if (repo.isDraft(sessionId)) {
+                draftRoute = provider to model
+                hasStoredRoute.value = true
+                notice.value = "Using $provider / $model for this chat"
+                return@launch
+            }
             val ok = runCatching { repo.setSessionModel(sessionId, provider, model) }.getOrDefault(false)
             if (ok) {
                 hasStoredRoute.value = true
@@ -986,6 +998,14 @@ class ChatViewModel(
             return
         }
         viewModelScope.launch {
+            if (repo.isDraft(sessionId)) {
+                draftRoute = null
+                selectedProvider.value = ""
+                selectedModel.value = ""
+                hasStoredRoute.value = false
+                notice.value = "Cleared this chat model lock — using agent default"
+                return@launch
+            }
             val ok = runCatching { repo.clearSessionModel(sessionId) }.getOrDefault(false)
             if (ok) {
                 selectedProvider.value = ""
@@ -1130,8 +1150,41 @@ class ChatViewModel(
         if (text.isBlank() && attachments.isEmpty()) return
         beginLiveTurn()
         viewModelScope.launch {
+            val wasDraft = repo.isDraft(sessionId)
+            if (wasDraft && !repo.ensureRemoteSession(sessionId, text.trim().take(60))) {
+                clearLiveTurn()
+                val msg = "Could not start this chat on the daemon. Check the connection and try again."
+                errorCard.value = msg
+                notice.value = msg
+                return@launch
+            }
+            // A model chosen before the first message was kept on the phone:
+            // now that the chat exists, pin it before the turn goes out.
+            val pendingRoute = draftRoute
+            if (wasDraft && pendingRoute != null) {
+                runCatching { repo.setSessionModel(sessionId, pendingRoute.first, pendingRoute.second) }
+                draftRoute = null
+            }
+            val pendingSub = draftSubAgent
+            if (wasDraft && pendingSub != null) {
+                runCatching {
+                    repo.saveSessionAgentConfig(
+                        sessionId, "", "", false,
+                        pendingSub.first, pendingSub.second, pendingSub.third, false,
+                    )
+                }
+                draftSubAgent = null
+            }
             turnBaseSeq = repo.maxSeq(sessionId)
-            val fresh = repo.send(sessionId, text.trim(), attachments)
+            val fresh = try {
+                repo.send(sessionId, text.trim(), attachments)
+            } catch (err: Exception) {
+                clearLiveTurn()
+                val msg = "Could not start this chat on the daemon. Check the connection and try again."
+                errorCard.value = msg
+                notice.value = msg
+                return@launch
+            }
             pendingAttachments.value = emptyList()
             if (!fresh) notice.value = "Already sent, waiting for reply"
         }
@@ -1148,8 +1201,13 @@ class ChatViewModel(
             return
         }
         if (sessionId.isBlank()) return
-        beginLiveTurn()
         viewModelScope.launch {
+            if (repo.isDraft(sessionId)) {
+                errorCard.value = ""
+                notice.value = "This chat has not started yet — send the message again"
+                return@launch
+            }
+            beginLiveTurn()
             turnBaseSeq = repo.maxSeq(sessionId)
             if (!repo.retryTurn(sessionId)) {
                 notice.value = "Could not ask the daemon to retry"
@@ -1158,15 +1216,21 @@ class ChatViewModel(
         }
     }
 
-    /** "New chat" — the only session action that needs no argument. */
+    /**
+     * "New chat" opens a phone-only draft. The daemon session is created by
+     * [send] with the first message, so an empty chat never leaves a row on the
+     * server that a later tap can find stale.
+     */
     fun newChat() {
         viewModelScope.launch {
-            runCatching { repo.createSession("") }
+            runCatching { repo.createDraftSession() }
                 .onSuccess {
                     sessionId = it
                     selectedProvider.value = ""
                     selectedModel.value = ""
                     hasStoredRoute.value = false
+                    draftRoute = null
+                    draftSubAgent = null
                     settings.saveSession(it)
                 }
                 .onFailure { notice.value = "Failed to create a new chat: ${it.message}" }
@@ -1181,6 +1245,8 @@ class ChatViewModel(
             selectedProvider.value = ""
             selectedModel.value = ""
             hasStoredRoute.value = false
+            draftRoute = null
+            draftSubAgent = null
             settings.saveSession(id)
             // The header shows this chat's model, not the daemon default.
             runCatching { repo.sessionRoute(id) }.getOrNull()?.let { (provider, model) ->
@@ -1204,6 +1270,8 @@ class ChatViewModel(
                 selectedProvider.value = ""
                 selectedModel.value = ""
                 hasStoredRoute.value = false
+                draftRoute = null
+                draftSubAgent = null
                 settings.saveSession(next)
                 runCatching { repo.sessionRoute(next) }.getOrNull()?.let { (provider, model) ->
                     selectedProvider.value = provider
@@ -1270,10 +1338,12 @@ class ChatViewModel(
     // as sub_enabled with no route change.
     fun setSubAgent(provider: String, model: String, enabled: Boolean) {
         viewModelScope.launch {
-            val ok = runCatching {
+            val draft = repo.isDraft(sessionId)
+            val ok = draft || runCatching {
                 repo.saveSessionAgentConfig(sessionId, "", "", false, provider, model, enabled, false)
             }.getOrDefault(false)
             if (ok) {
+                if (draft) draftSubAgent = Triple(provider, model, enabled)
                 subAgentProvider.value = provider
                 subAgentModel.value = model
                 subAgentEnabled.value = enabled
@@ -1293,16 +1363,18 @@ class ChatViewModel(
 
     fun clearSubAgent() {
         viewModelScope.launch {
-            val ok = runCatching {
+            val draft = repo.isDraft(sessionId)
+            val ok = draft || runCatching {
                 repo.saveSessionAgentConfig(sessionId, "", "", false, "", "", null, true)
             }.getOrDefault(false)
             if (ok) {
+                if (draft) draftSubAgent = null
                 subAgentProvider.value = ""
                 subAgentModel.value = ""
                 subAgentPinned.value = false
                 // Re-read the effective values so the toggle shows what the
                 // agent's global sub-agent is, not the flag the chat had.
-                loadSubAgentConfig()
+                if (!draft) loadSubAgentConfig()
                 notice.value = "Sub agent now uses the agent default"
             } else {
                 notice.value = "Failed to clear sub agent"

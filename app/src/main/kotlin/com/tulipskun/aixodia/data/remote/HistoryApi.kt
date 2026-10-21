@@ -221,16 +221,23 @@ class HistoryApi(
         }.getOrNull()
     }
 
-    /** Creates the chat on the daemon; returns its id (engine-generated) or "". */
+    /**
+     * Creates the chat on the daemon and returns its id, or "" on failure.
+     * [id] is a locally-created draft id when the phone is promoting a New
+     * chat on its first send; the daemon keeps that id so no local rows have
+     * to move. Blank asks the daemon to generate one.
+     */
     suspend fun createSession(id: String, title: String): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext ""
         runCatching {
-            val body = JSONObject().put("title", title).toString()
+            val body = JSONObject().put("title", title)
+            if (id.isNotBlank()) body.put("id", id)
+            val request = body.toString()
             val req = Request.Builder().url("$base/v1/sessions")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json".toMediaType()))
+                .post(request.toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
                 val text = r.body?.string().orEmpty()

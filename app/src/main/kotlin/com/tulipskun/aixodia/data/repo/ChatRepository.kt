@@ -146,7 +146,18 @@ class ChatRepository(
         val ids = rows.map { it.id }.toSet()
         val pending = try { db.messages().allPending().map { it.sessionId }.toSet() } catch (_: Exception) { emptySet() }
         for (local in try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }) {
-            if (local.id !in ids && local.id !in pending) {
+            if (local.id in ids) {
+                // A draft whose create reached D1 just before the app died is
+                // already a server chat; stop treating it as local-only.
+                if (!local.remote) {
+                    try { db.sessions().upsert(local.copy(remote = true)) } catch (_: Exception) { }
+                }
+                continue
+            }
+            // A New chat that has never sent its first message is deliberately
+            // absent from D1. Keeping it is what makes "New chat" instant.
+            if (!local.remote) continue
+            if (local.id !in pending) {
                 try { db.messages().deleteSession(local.id) } catch (_: Exception) { }
                 try { db.sessions().delete(local.id) } catch (_: Exception) { }
             }
@@ -179,7 +190,8 @@ class ChatRepository(
 
     suspend fun openSession(sid: String) {
         _active.value = sid
-        if (db.sessions().get(sid) == null) {
+        val local = try { db.sessions().get(sid) } catch (_: Exception) { null }
+        if (local == null) {
             val row = try { history.sessions() } catch (_: Exception) { emptyList() }.firstOrNull { it.id == sid }
             db.sessions().upsert(
                 SessionEntity(
@@ -191,23 +203,55 @@ class ChatRepository(
             )
         }
         db.sessions().clearUnread(sid)
-        // One newest-page read on open; loadOlder backfills the rest on demand.
-        refreshLatest(sid)
-        scope.launch { verify(sid) }
+        // A draft has no D1 row to read or verify; asking would only log a 404.
+        if (local?.remote != false) {
+            // One newest-page read on open; loadOlder backfills the rest on demand.
+            refreshLatest(sid)
+            scope.launch { verify(sid) }
+        }
         socket.switchSession(sid)
         socket.open(sid, db.messages().maxSeq(sid))
         flushPending()
     }
 
-    suspend fun createSession(title: String): String {
-        // Engine is the source of truth now: ask it for an id, fall back to
-        // a local one only when the daemon is unreachable.
-        val engineId = try { history.createSession("", title.ifBlank { "New chat" }) } catch (_: Exception) { "" }
-        val id = engineId.ifBlank { "s" + System.currentTimeMillis().toString(36) +
-            java.util.UUID.randomUUID().toString().take(4) }
-        db.sessions().upsert(SessionEntity(id = id, title = title.ifBlank { "New chat" }))
+    /**
+     * The screen's New chat: a phone-only row with a client id. Nothing goes to
+     * the daemon until [ensureRemoteSession] promotes it on the first send.
+     */
+    suspend fun createDraftSession(title: String = ""): String {
+        val id = "s" + System.currentTimeMillis().toString(36) +
+            java.util.UUID.randomUUID().toString().replace("-", "").take(8)
+        db.sessions().upsert(
+            SessionEntity(id = id, title = title.ifBlank { "New chat" }, remote = false)
+        )
         openSession(id)
         return id
+    }
+
+    /** True while [sid] is a New chat the daemon has not been told about yet. */
+    suspend fun isDraft(sid: String): Boolean =
+        try { db.sessions().get(sid)?.remote == false } catch (_: Exception) { false }
+
+    /**
+     * Creates the server row for a local draft, keeping its id. Idempotent on
+     * the engine, so a retried promote cannot make a second chat. Returns false
+     * when the daemon is unreachable or an older daemon ignored the id.
+     */
+    suspend fun ensureRemoteSession(sid: String, title: String): Boolean {
+        if (sid.isBlank()) return false
+        val local = try { db.sessions().get(sid) } catch (_: Exception) { null }
+        if (local != null && local.remote) return true
+        val engineId = try {
+            history.createSession(sid, title.ifBlank { "New chat" })
+        } catch (_: Exception) {
+            ""
+        }
+        if (engineId != sid) return false
+        db.sessions().upsert(
+            (local ?: SessionEntity(id = sid, title = title.ifBlank { "New chat" }))
+                .copy(remote = true)
+        )
+        return true
     }
 
     /**
@@ -221,9 +265,11 @@ class ChatRepository(
             return preferred
         }
         // Prefer a session that already has messages, else start a new chat.
+        // A fresh chat is local-only, so opening the app never creates a daemon
+        // session before the person has actually said something.
         val rows = try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }
         val withContent = rows.firstOrNull { db.messages().count(it.id) > 0 } ?: rows.firstOrNull()
-        val id = withContent?.id ?: return createSession("")
+        val id = withContent?.id ?: return createDraftSession()
         openSession(id)
         return id
     }
@@ -244,7 +290,7 @@ class ChatRepository(
         db.sessions().delete(id)
         if (_active.value == id) {
             val next = try { db.sessions().observeAll().firstOrNull() } catch (_: Exception) { null }
-            val nextId = next?.id ?: createSession("")
+            val nextId = next?.id ?: createDraftSession()
             _active.value = nextId
             socket.switchSession(nextId)
         }
@@ -390,6 +436,12 @@ class ChatRepository(
     ): Boolean {
         val clean = text.trim()
         if (clean.isEmpty() && attachments.isEmpty()) return true
+        // A New chat gets its server row on the first real send, not when the
+        // button was pressed. If the daemon cannot take it, throw instead of
+        // queueing a message into a session that does not exist there.
+        if (socket.state.value == ConnState.ONLINE && isDraft(sid) && !ensureRemoteSession(sid, clean.take(60))) {
+            throw IllegalStateException("Could not start this chat on the daemon")
+        }
         try {
             val lastSeq = db.messages().maxSeq(sid)
             if (lastSeq > 0) {
@@ -432,10 +484,18 @@ class ChatRepository(
 
     suspend fun flushPending() {
         val pending = db.messages().allPending()
-        for (m in pending) {
-            if (m.clientMsgId.isBlank()) continue
-            if (socket.send(m.sessionId, m.text, m.clientMsgId)) {
-                db.messages().markAcked(m.clientMsgId)
+        for ((sid, rows) in pending.groupBy { it.sessionId }) {
+            // A message queued offline may belong to a chat whose first send
+            // never reached the daemon. Create the row before flushing into it.
+            if (isDraft(sid)) {
+                val title = rows.firstOrNull { it.text.isNotBlank() }?.text?.take(60).orEmpty()
+                if (!ensureRemoteSession(sid, title)) continue
+            }
+            for (m in rows) {
+                if (m.clientMsgId.isBlank()) continue
+                if (socket.send(m.sessionId, m.text, m.clientMsgId)) {
+                    db.messages().markAcked(m.clientMsgId)
+                }
             }
         }
     }
