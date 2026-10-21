@@ -403,6 +403,10 @@ fun ChatScreen(
             listState.scrollToItem(listTotal - 1)
             lastScrolledTail = tail
         } else if (tail != lastScrolledTail) {
+            // The same stale-layout case for a new turn: wait until the list
+            // has laid the new row out, otherwise the animation targets the
+            // row before it and the turn stays below the fold.
+            if (listTotal < messages.size) return@LaunchedEffect
             lastScrolledTail = tail
             if (followTail) listState.animateScrollToItem(listTotal - 1)
         }
