@@ -689,6 +689,15 @@ class TerminalSocket(
                 delay(RETRY_MS)
                 continue
             }
+            // The view can be laid out while openTerminal() is in flight. Its
+            // resize is stored but cannot be sent yet (sid is not assigned),
+            // so the open frame carried the size from before the race. Now that
+            // the stream is up, send whatever the view last measured. Without
+            // this the pty stays at 80x24 under a much taller view, and a
+            // full-screen program paints only the top of the screen.
+            sizeToResend(pendingSize, cols, rows)?.let { (latestCols, latestRows) ->
+                r.termJSON(opened, resizeFrame(latestCols, latestRows))
+            }
             val shellEnded = ended.await()
             if (sid == opened) sid = null
             if (closing) return
@@ -722,6 +731,19 @@ class TerminalSocket(
             return "$scheme://$host/terminal"
         }
     }
+}
+
+/**
+ * The size the view measured after the open frame was already sent. A layout
+ * can finish while openTerminal() is in flight; resize() stores that size but
+ * cannot send it until the stream has an id.
+ */
+internal fun sizeToResend(
+    pending: Pair<Int, Int>?,
+    sentCols: Int,
+    sentRows: Int,
+): Pair<Int, Int>? = pending?.takeIf { (cols, rows) ->
+    cols > 0 && rows > 0 && (cols != sentCols || rows != sentRows)
 }
 
 private val controlMoshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()

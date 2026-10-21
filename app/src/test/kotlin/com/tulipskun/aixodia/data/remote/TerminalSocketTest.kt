@@ -87,6 +87,19 @@ class TerminalSocketTest {
     }
 
     @Test
+    fun aSizeMeasuredDuringOpenIsResentOnceTheStreamIsUp() {
+        // The view laid out while openTerminal() was in flight: the open frame
+        // carried the old/default size, so the latest measurement must follow.
+        assertEquals(100 to 40, sizeToResend(100 to 40, sentCols = 0, sentRows = 0))
+        assertEquals(90 to 30, sizeToResend(90 to 30, sentCols = 80, sentRows = 24))
+        // Nothing new to say when the open already carried this exact size.
+        assertNull(sizeToResend(90 to 30, sentCols = 90, sentRows = 30))
+        // A view that has not been measured yet must not force a bogus size.
+        assertNull(sizeToResend(null, sentCols = 0, sentRows = 0))
+        assertNull(sizeToResend(0 to 0, sentCols = 80, sentRows = 24))
+    }
+
+    @Test
     fun resizeFrameCarriesBothDimensions() {
         val adapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
             .adapter(ResizeFrame::class.java)
