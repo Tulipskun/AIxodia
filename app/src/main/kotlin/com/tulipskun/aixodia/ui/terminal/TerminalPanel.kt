@@ -225,7 +225,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     ready = null
                     emulator.hardReset()
                     terminalView.value?.scrollToBottom()
-                    terminalView.value?.requestFocus()
+                    terminalView.value?.keepSoftKeyboard()
                     socket.newSession()
                 }
                 val closeSession = {
@@ -233,7 +233,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     ready = null
                     emulator.hardReset()
                     terminalView.value?.scrollToBottom()
-                    terminalView.value?.requestFocus()
+                    terminalView.value?.keepSoftKeyboard()
                     socket.closeSession()
                 }
 
@@ -306,7 +306,10 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                     Surface(
                                         color = Color(0xFF1A222C),
                                         shape = RoundedCornerShape(50),
-                                        modifier = Modifier.clickable { view.scrollToBottom() },
+                                        modifier = Modifier.clickable {
+                                            view.scrollToBottom()
+                                            view.keepSoftKeyboard()
+                                        },
                                     ) {
                                         Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                                             Icon(
@@ -353,18 +356,18 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                         val v = !ctrlOn.value
                                         ctrlOn.value = v
                                         view.setLatchedMods(v, altOn.value)
-                                        view.requestFocus()
+                                        view.keepSoftKeyboard()
                                     },
                                     onAlt = {
                                         val v = !altOn.value
                                         altOn.value = v
                                         view.setLatchedMods(ctrlOn.value, v)
-                                        view.requestFocus()
+                                        view.keepSoftKeyboard()
                                     },
                                     onKey = { bytes ->
                                         socket.send(bytes)
                                         // Tapping a key must not take the keyboard with it.
-                                        view.requestFocus()
+                                        view.keepSoftKeyboard()
                                     },
                                 )
                                 TerminalComposer(

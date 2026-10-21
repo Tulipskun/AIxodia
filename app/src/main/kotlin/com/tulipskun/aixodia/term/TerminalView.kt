@@ -1,5 +1,7 @@
 package com.tulipskun.aixodia.term
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -8,10 +10,15 @@ import android.graphics.Typeface
 import android.text.InputType
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.ActionMode
+import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
+import com.tulipskun.aixodia.R
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -26,6 +33,17 @@ import android.widget.OverScroller
  * last frame sends one resize, at the size the user will actually type into.
  */
 private const val RESIZE_SETTLE_MS = 140L
+
+/**
+ * How long after a tap on the chrome to ask for the keyboard again. Moving
+ * focus off a text editor makes the system hide the IME on its own; asking
+ * once immediately can race that hide, so the request is repeated a moment
+ * later, once the focus change has settled.
+ */
+private const val KEYBOARD_RESTORE_MS = 120L
+
+private const val MENU_COPY = 1
+private const val MENU_SELECT_ALL = 2
 
 /**
  * Draws a [TerminalEmulator] and turns fingers and keys into bytes. Everything
@@ -101,6 +119,28 @@ class TerminalView @JvmOverloads constructor(
     private var wheelAccum = 0f
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+
+    // Text selection: a long press anchors a selection and raises a floating
+    // action bar with Copy. The anchor (where the gesture began, usually the
+    // start of a word) stays put while the cursor follows the finger.
+    private val selectionPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = 0x664A90D9
+    }
+    private var selecting = false
+    private var selAnchorRow = 0
+    private var selAnchorCol = 0
+    private var selCursorRow = 0
+    private var selCursorCol = 0
+    private var selectionMode: ActionMode? = null
+
+    private val longPress = Runnable { beginSelection(downX, downY) }
+
+    private val restoreKeyboard = Runnable {
+        if (!isAttachedToWindow) return@Runnable
+        if (!isFocused) requestFocus()
+        showSoftKeyboard()
+    }
 
     init {
         isFocusable = true
@@ -273,6 +313,8 @@ class TerminalView @JvmOverloads constructor(
             drawRow(canvas, row, v * cellHeight, v)
         }
 
+        if (selecting) drawSelection(canvas, buffer)
+
         if (em.cursorVisible && hasFocus()) {
             drawCursor(canvas, em, buffer, buffer.cursorRow * cellHeight)
         }
@@ -385,6 +427,232 @@ class TerminalView @JvmOverloads constructor(
     }
 
     // =======================================================================
+    // selection and copy
+    // =======================================================================
+
+    /** The ordered selection: start row/col then end row/col, both inclusive. */
+    private fun orderedSelection(): IntArray {
+        val forward = selAnchorRow < selCursorRow ||
+            (selAnchorRow == selCursorRow && selAnchorCol <= selCursorCol)
+        return if (forward) {
+            intArrayOf(selAnchorRow, selAnchorCol, selCursorRow, selCursorCol)
+        } else {
+            intArrayOf(selCursorRow, selCursorCol, selAnchorRow, selAnchorCol)
+        }
+    }
+
+    private fun drawSelection(canvas: Canvas, buffer: TerminalBuffer) {
+        val count = buffer.lines.size
+        if (count == 0) return
+        val s = orderedSelection()
+        val first = s[0].coerceIn(0, count - 1)
+        val last = s[2].coerceIn(0, count - 1)
+        for (r in first..last) {
+            val row = buffer.lines[r]
+            if (row.columns == 0) continue
+            val from: Int
+            val to: Int
+            if (first == last) {
+                from = s[1].coerceIn(0, row.columns - 1)
+                to = s[3].coerceIn(0, row.columns - 1)
+            } else if (r == first) {
+                from = s[1].coerceIn(0, row.columns - 1)
+                to = row.columns - 1
+            } else if (r == last) {
+                from = 0
+                to = s[3].coerceIn(0, row.columns - 1)
+            } else {
+                from = 0
+                to = row.columns - 1
+            }
+            if (to < from) continue
+            canvas.drawRect(
+                from * cellWidth,
+                r * cellHeight,
+                (to + 1) * cellWidth,
+                (r + 1) * cellHeight,
+                selectionPaint,
+            )
+        }
+    }
+
+    /** Long press: select the word under the finger, or the cell if it is blank. */
+    private fun beginSelection(x: Float, y: Float) {
+        val em = emulator ?: return
+        val buffer = em.buffer
+        if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
+        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
+        val line = buffer.lines[row]
+        if (line.columns == 0) return
+        val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
+
+        var from = col
+        var to = col
+        if (line.hasGlyph(col)) {
+            while (from > 0 && isWordCell(line, from - 1)) from--
+            while (to < line.columns - 1 && isWordCell(line, to + 1)) to++
+        }
+        selAnchorRow = row
+        selAnchorCol = from
+        selCursorRow = row
+        selCursorCol = to
+        selecting = true
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        startSelectionMode()
+        invalidate()
+    }
+
+    private fun isWordCell(row: TerminalRow, col: Int): Boolean {
+        val cp = row.chars[col]
+        if (cp == 0 || cp == TerminalRow.SPACE) return false
+        return !Character.isWhitespace(cp)
+    }
+
+    /** Drag: the cursor follows the finger; the anchor stays where the press began. */
+    private fun extendSelection(x: Float, y: Float) {
+        val em = emulator ?: return
+        val buffer = em.buffer
+        if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
+        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
+        val line = buffer.lines[row]
+        if (line.columns == 0) return
+        val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
+        if (row == selCursorRow && col == selCursorCol) return
+        val rowChanged = row != selCursorRow
+        selCursorRow = row
+        selCursorCol = col
+        if (rowChanged) selectionMode?.invalidate()
+        invalidate()
+    }
+
+    private fun selectAll() {
+        val em = emulator ?: return
+        val buffer = em.buffer
+        if (buffer.lines.isEmpty()) return
+        selecting = true
+        selAnchorRow = 0
+        selAnchorCol = 0
+        selCursorRow = buffer.lines.size - 1
+        selCursorCol = buffer.lines.last().columns - 1
+        invalidate()
+        startSelectionMode()
+        selectionMode?.invalidate()
+    }
+
+    private fun clearSelection() {
+        if (!selecting) return
+        selecting = false
+        invalidate()
+        selectionMode?.finish()
+        selectionMode = null
+    }
+
+    /** Everything between the anchor and the cursor, as the terminal would copy it. */
+    private fun selectedText(): String {
+        val em = emulator ?: return ""
+        val buffer = em.buffer
+        if (buffer.lines.isEmpty()) return ""
+        val s = orderedSelection()
+        val firstRow = s[0].coerceIn(0, buffer.lines.size - 1)
+        val lastRow = s[2].coerceIn(0, buffer.lines.size - 1)
+        val sb = StringBuilder()
+        for (r in firstRow..lastRow) {
+            val row = buffer.lines[r]
+            if (row.columns == 0) continue
+            val from = (if (r == firstRow) s[1] else 0).coerceIn(0, row.columns - 1)
+            val to = (if (r == lastRow) s[3] else row.columns - 1).coerceIn(0, row.columns - 1)
+            val line = StringBuilder()
+            var col = from
+            while (col <= to) {
+                val cp = row.chars[col]
+                when {
+                    cp == 0 -> Unit // a wide glyph's continuation cell
+                    cp == TerminalRow.SPACE -> line.append(' ')
+                    else -> {
+                        line.appendCodePoint(cp)
+                        row.combiningAt(col)?.let { line.append(it) }
+                    }
+                }
+                col += maxOf(1, row.width[col].toInt())
+            }
+            sb.append(line.toString().trimEnd(' '))
+            // A wrapped row is one logical line: join it without a break.
+            if (r < lastRow && !row.wrapped) sb.append('\n')
+        }
+        return sb.toString()
+    }
+
+    private fun copySelection() {
+        val text = selectedText()
+        if (text.isNotEmpty()) {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.setPrimaryClip(ClipData.newPlainText("terminal", text))
+        }
+        clearSelection()
+    }
+
+    private fun startSelectionMode() {
+        if (selectionMode != null) return
+        selectionMode = startActionMode(object : ActionMode.Callback2() {
+            override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+                menu.add(Menu.NONE, MENU_COPY, Menu.NONE, context.getString(R.string.terminal_copy))
+                menu.add(
+                    Menu.NONE,
+                    MENU_SELECT_ALL,
+                    Menu.NONE,
+                    context.getString(R.string.terminal_select_all),
+                )
+                return true
+            }
+
+            override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+
+            override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean = when (item.itemId) {
+                MENU_COPY -> {
+                    copySelection()
+                    true
+                }
+
+                MENU_SELECT_ALL -> {
+                    selectAll()
+                    true
+                }
+
+                else -> false
+            }
+
+            override fun onDestroyActionMode(mode: ActionMode) {
+                if (!selecting) return
+                selecting = false
+                selectionMode = null
+                invalidate()
+            }
+
+            override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
+                if (!selecting) {
+                    outRect.set(0, 0, view.width, view.height)
+                    return
+                }
+                val s = orderedSelection()
+                val first = s[0]
+                val last = s[2]
+                val left = if (first == last) minOf(s[1], s[3]) * cellWidth else 0f
+                val right = if (first == last) {
+                    (maxOf(s[1], s[3]) + 1) * cellWidth
+                } else {
+                    view.width.toFloat()
+                }
+                outRect.set(
+                    left.toInt(),
+                    (first * cellHeight).toInt(),
+                    right.toInt(),
+                    ((last + 1) * cellHeight).toInt(),
+                )
+            }
+        }, ActionMode.TYPE_FLOATING)
+    }
+
+    // =======================================================================
     // touch
     // =======================================================================
 
@@ -395,6 +663,8 @@ class TerminalView @JvmOverloads constructor(
         val wheelMode = em.mouseReporting() || em.alternateScreen || em.fullScreenDetected
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                removeCallbacks(longPress)
+                if (selecting) clearSelection()
                 requestFocus()
                 onUserInteraction?.invoke()
                 scroller.forceFinished(true)
@@ -406,17 +676,30 @@ class TerminalView @JvmOverloads constructor(
                 wheelAccum = 0f
                 velocityTracker.clear()
                 velocityTracker.addMovement(event)
+                // A press that holds still becomes a selection instead of a
+                // mouse click; releasing or moving cancels the timer.
+                postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout().toLong())
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger is always a scroll.
+                removeCallbacks(longPress)
                 lastTouchY = event.y
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (selecting) {
+                    extendSelection(event.x, event.y)
+                    return true
+                }
                 velocityTracker.addMovement(event)
                 val dy = lastTouchY - event.y
-                if (kotlin.math.abs(event.y - downY) > touchSlop) dragging = true
+                if (kotlin.math.abs(event.y - downY) > touchSlop ||
+                    kotlin.math.abs(event.x - downX) > touchSlop
+                ) {
+                    dragging = true
+                    removeCallbacks(longPress)
+                }
                 lastTouchY = event.y
                 if (wheelMode) {
                     wheelAccum += dy
@@ -427,7 +710,14 @@ class TerminalView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPress)
                 velocityTracker.addMovement(event)
+                if (selecting) {
+                    // The finger has left the screen; the selection stays put
+                    // until Copy, Select all, or a tap elsewhere.
+                    extendSelection(event.x, event.y)
+                    return true
+                }
                 val quick = event.eventTime - downTime < 200
                 if (wheelMode) {
                     // A tap is a click. A drag has already gone out as wheel
@@ -440,13 +730,18 @@ class TerminalView @JvmOverloads constructor(
                         sendMouse(em, event, button = 0, release = false)
                         sendMouse(em, event, button = 0, release = true)
                     }
-                } else if (quick) {
-                    showSoftKeyboard()
+                }
+                if (quick) {
+                    // Full-screen programs (opencode) are exactly where typing
+                    // is needed most. Showing the IME here used to be limited
+                    // to the non-mouse branch, so a tap closed the keyboard.
+                    keepSoftKeyboard()
                     onUserInteraction?.invoke()
                 }
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(longPress)
                 dragging = false
                 return true
             }
@@ -591,6 +886,18 @@ class TerminalView @JvmOverloads constructor(
         imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
     }
 
+    /**
+     * Keep the keyboard up after a tap on the chrome (Ctrl, Alt, a key chip).
+     * Taking focus back from the Compose text field is what the system uses as
+     * its cue to hide the IME, so ask again once that focus change settles.
+     */
+    fun keepSoftKeyboard() {
+        if (!isFocused) requestFocus()
+        removeCallbacks(restoreKeyboard)
+        post(restoreKeyboard)
+        postDelayed(restoreKeyboard, KEYBOARD_RESTORE_MS)
+    }
+
     fun hideSoftKeyboard() {
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
         imm.hideSoftInputFromWindow(windowToken, 0)
@@ -599,6 +906,10 @@ class TerminalView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         removeCallbacks(pendingResize)
+        removeCallbacks(longPress)
+        removeCallbacks(restoreKeyboard)
+        selecting = false
+        selectionMode = null
         velocityTracker.recycle()
     }
 

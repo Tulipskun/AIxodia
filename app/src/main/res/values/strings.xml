@@ -92,4 +92,6 @@
     <string name="terminal_closed">Connection closed</string>
     <string name="terminal_ended">Shell exited (exit %1$d)</string>
     <string name="terminal_failed">Terminal error: %1$s</string>
+    <string name="terminal_copy">Copy</string>
+    <string name="terminal_select_all">Select all</string>
 </resources>
