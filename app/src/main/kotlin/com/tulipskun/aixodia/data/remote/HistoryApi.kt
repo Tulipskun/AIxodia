@@ -15,6 +15,7 @@ import com.tulipskun.aixodia.data.model.ModelsPage
 import com.tulipskun.aixodia.data.model.ProvidersPage
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
+import com.tulipskun.aixodia.data.model.StoredTotals
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -79,6 +80,44 @@ data class SessionRow(
     @Json(name = "model") val model: String = "",
     @Json(name = "provider") val provider: String = "",
     @Json(name = "updated_at") val updatedAt: Long = 0,
+    // The engine sums the whole chat's cost over its own turns and sends it
+    // with the session, so the phone draws the strip from metadata instead of
+    // adding up whichever rows it happens to have loaded. Null means the engine
+    // predates this field; the last cached metadata, if any, stays in place.
+    @Json(name = "usage") val usage: SessionUsageRow? = null,
+)
+
+/** A chat's cost as the engine summed it. Mirrors session.SessionUsage. */
+data class SessionUsageRow(
+    @Json(name = "prompt_tokens") val promptTokens: Int = 0,
+    @Json(name = "cache_read") val cacheRead: Int = 0,
+    @Json(name = "fresh_input") val freshInput: Int = 0,
+    @Json(name = "output_tokens") val outTokens: Int = 0,
+    @Json(name = "total_ms") val totalMs: Long = 0,
+    @Json(name = "last_turn_ms") val lastTurnMs: Long = 0,
+)
+
+/** Reads the optional usage object without inventing zeroes for an old engine. */
+private fun sessionUsageRow(o: JSONObject?): SessionUsageRow? {
+    if (o == null) return null
+    return SessionUsageRow(
+        promptTokens = o.optInt("prompt_tokens"),
+        cacheRead = o.optInt("cache_read"),
+        freshInput = o.optInt("fresh_input"),
+        outTokens = o.optInt("output_tokens"),
+        totalMs = o.optLong("total_ms"),
+        lastTurnMs = o.optLong("last_turn_ms"),
+    )
+}
+
+/** The engine's session metadata in the shape the room cache and strip use. */
+fun SessionUsageRow.toStoredTotals(): StoredTotals = StoredTotals(
+    promptTokens = promptTokens,
+    cacheRead = cacheRead,
+    freshInput = freshInput,
+    outTokens = outTokens,
+    lastTurnMs = lastTurnMs,
+    totalMs = totalMs,
 )
 
 /**
@@ -197,6 +236,7 @@ class HistoryApi(
                         provider = o.optString("provider"),
                         model = o.optString("model"),
                         updatedAt = o.optLong("updated_at"),
+                        usage = sessionUsageRow(o.optJSONObject("usage")),
                     ))
                 }
                 out
@@ -231,6 +271,7 @@ class HistoryApi(
                         provider = o.optString("provider"),
                         model = o.optString("model"),
                         updatedAt = o.optLong("updated_at"),
+                        usage = sessionUsageRow(o.optJSONObject("usage")),
                     ))
                 }
                 out

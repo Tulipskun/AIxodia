@@ -56,6 +56,15 @@ class ErrorTextTest {
             friendlyError("chat: model not found"),
         )
 
+    // The status alone is not the failure. A 503 body often names the real
+    // cause (a rejected parameter, an unavailable model, a quota), and hiding
+    // it behind "temporarily unavailable" leaves nothing the user can do.
+    @Test fun upstreamFailureKeepsTheProvidersOwnMessage() =
+        assertEquals(
+            "The provider returned HTTP 503: model claude-x is not available for this key",
+            friendlyError("upstream HTTP 503: model claude-x is not available for this key"),
+        )
+
     @Test fun unknownErrorFallsBack() =
         assertEquals("Failed to send the message. Please try again.", friendlyError("something odd"))
 }

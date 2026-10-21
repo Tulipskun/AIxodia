@@ -11,8 +11,9 @@ D1 REST API (D-011) — there is no Cloudflare Worker in this project.
   transcript; scrolling to the top asks for the next page and keeps the reader's
   place. Pages come from Room when cached and from
   `GET /v1/sessions/{id}/turns?before_seq=…&limit=…` only when they are not. The
-  session's cost strip is summed in SQLite, so it still counts the turns below
-  the loaded window.
+  session's cost strip comes from the engine's session metadata (summed by the
+  engine over every stored turn and cached in Room with the session row), so it
+  counts the turns below the loaded window without the app adding them up.
 - **Messenger UX**: Discord-like session drawer + Telegram-like bubbles, typing/tool status, connection dot, retry, pull-older.
 
 ## Layout

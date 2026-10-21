@@ -230,7 +230,8 @@ fun ChatScreen(
         ChatViewModel(repo, settings, sessId, context.applicationContext)
     }
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
-    val storedTotals by vm.storedTotals.collectAsStateWithLifecycle(initialValue = StoredTotals())
+    val sessionUsage by vm.sessionUsage.collectAsStateWithLifecycle(initialValue = null)
+    val activeSession by vm.activeSession.collectAsStateWithLifecycle()
     val hasOlder by vm.hasOlder.collectAsStateWithLifecycle()
     val loadingOlder by vm.loadingOlder.collectAsStateWithLifecycle()
     val sessions by vm.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -358,12 +359,16 @@ fun ChatScreen(
     val olderHeaderItems = if (showOlderHeader) 1 else 0
     var olderAnchor by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var lastScrolledTail by remember { mutableStateOf<String?>(null) }
-    var firstScrollDone by remember { mutableStateOf(false) }
+    // The chat this list has already anchored. A boolean went wrong when the
+    // screen switched chats: it was already true from the previous chat, so the
+    // new one kept the old scroll position and opened at the top of its thread.
+    var scrolledSession by remember { mutableStateOf<String?>(null) }
     var followTail by remember { mutableStateOf(true) }
     val currentHasOlder by rememberUpdatedState(hasOlder)
     val currentLoadingOlder by rememberUpdatedState(loadingOlder)
     val currentMessages by rememberUpdatedState(messages)
     val currentHeaderItems by rememberUpdatedState(olderHeaderItems)
+    val currentSession by rememberUpdatedState(activeSession)
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -374,16 +379,28 @@ fun ChatScreen(
         }.distinctUntilChanged().collect { followTail = it }
     }
 
-    // Auto-follow the tail for a new turn, and jump to the bottom once when the
-    // cache's newest page first appears. A page prepended above changes the
+    // Auto-follow the tail for a new turn, and jump to the bottom once per chat
+    // when its newest page first appears. A page prepended above changes the
     // item count but not the tail, so it never yanks the reader downwards.
+    // Comparing the chat id rather than a one-shot boolean is what makes a
+    // freshly opened (or switched-to) chat land on its newest row instead of
+    // inheriting the previous chat's position at the top.
     val listTotal = listState.layoutInfo.totalItemsCount
-    LaunchedEffect(messages.lastOrNull()?.id, listTotal) {
+    LaunchedEffect(activeSession, messages.lastOrNull()?.id, listTotal) {
         val tail = messages.lastOrNull()?.id ?: return@LaunchedEffect
         if (listTotal <= 0) return@LaunchedEffect
-        if (!firstScrollDone) {
+        if (scrolledSession != activeSession) {
+            // On a chat switch the new rows can reach composition one frame
+            // before the lazy list has laid them out, so listTotal may still be
+            // the previous chat's smaller count. Mark the chat anchored only
+            // once the layout actually contains every message; otherwise
+            // scrollToItem would clamp to the old end and the next pass would
+            // think it was already done.
+            if (listTotal < messages.size) return@LaunchedEffect
+            scrolledSession = activeSession
+            olderAnchor = null
+            followTail = true
             listState.scrollToItem(listTotal - 1)
-            firstScrollDone = true
             lastScrolledTail = tail
         } else if (tail != lastScrolledTail) {
             lastScrolledTail = tail
@@ -410,7 +427,7 @@ fun ChatScreen(
                 // The first frame sits at index 0 for a moment before the
                 // thread jumps to its newest row; asking then would load a
                 // page nobody scrolled to and pull the view off the tail.
-                if (!firstScrollDone) return@collect
+                if (scrolledSession != currentSession) return@collect
                 if (!currentHasOlder || currentLoadingOlder || olderAnchor != null) return@collect
                 // The header itself plus one row of slack: the page is asked
                 // for before the reader actually runs out of content.
@@ -634,13 +651,13 @@ fun ChatScreen(
                                 onRetry = { vm.refresh() },
                             )
                         }
-                        // What the session has cost, summed from the thread. The
-                        // strip sits above the composer rather than in the thread
-                        // because it is about the conversation, not about any one
-                        // turn in it — and it is the one thing that has to stay
-                        // visible while the thread scrolls.
-                        val totals = remember(storedTotals, liveUsage, messages) {
-                            sessionTotals(storedTotals, liveUsage, messages)
+                        // What the session has cost, as the engine stored it on
+                        // the session. The strip sits above the composer rather
+                        // than in the thread because it is about the conversation,
+                        // not about any one turn in it — and it is the one thing
+                        // that has to stay visible while the thread scrolls.
+                        val totals = remember(sessionUsage, liveUsage, messages) {
+                            sessionTotals(sessionUsage ?: StoredTotals(), liveUsage, messages)
                         }
                         SessionStrip(
                             totals = totals,

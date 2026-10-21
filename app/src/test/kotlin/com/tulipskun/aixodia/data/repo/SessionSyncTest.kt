@@ -2,6 +2,7 @@ package com.tulipskun.aixodia.data.repo
 
 import com.tulipskun.aixodia.data.local.SessionEntity
 import com.tulipskun.aixodia.data.remote.SessionRow
+import com.tulipskun.aixodia.data.remote.SessionUsageRow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,5 +55,35 @@ class SessionSyncTest {
         ).single()
 
         assertEquals("named here", merged.title)
+    }
+
+    @Test fun engineUsageIsCachedAlongsideTheSessionMetadata() {
+        val merged = mergeSessionRows(
+            listOf(local()),
+            listOf(
+                SessionRow(
+                    id = "s1",
+                    title = "server",
+                    updatedAt = 200,
+                    usage = SessionUsageRow(
+                        promptTokens = 40_000,
+                        cacheRead = 30_000,
+                        freshInput = 10_000,
+                        outTokens = 900,
+                        totalMs = 12_000,
+                        lastTurnMs = 4_000,
+                    ),
+                ),
+            ),
+            pending = emptySet(),
+        ).single()
+
+        assertTrue(merged.usageKnown)
+        assertEquals(40_000, merged.usagePromptTokens)
+        assertEquals(30_000, merged.usageCacheRead)
+        assertEquals(10_000, merged.usageFreshInput)
+        assertEquals(900, merged.usageOutTokens)
+        assertEquals(12_000L, merged.usageTotalMs)
+        assertEquals(4_000L, merged.usageLastTurnMs)
     }
 }

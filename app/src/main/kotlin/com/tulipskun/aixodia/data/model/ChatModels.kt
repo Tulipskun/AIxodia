@@ -338,7 +338,11 @@ data class ChatMessage(
  * compare the two without guessing which one contains the other.
  */
 fun ChatMessage.freshInputTokens(): Int =
-    if (inputIncludesCache) (tokensIn - cacheRead).coerceAtLeast(0) else tokensIn
+    // When the provider reports the cache beside the prompt, a cache write is
+    // still input this request had to pay for; only the cache read is reused.
+    // Leaving the write out made the bar's "new" segment undercount the prompt
+    // by exactly the cache it had just created.
+    if (inputIncludesCache) (tokensIn - cacheRead).coerceAtLeast(0) else tokensIn + cacheWrite
 
 fun ChatMessage.totalInputTokens(): Int =
     if (inputIncludesCache) tokensIn else tokensIn + cacheRead + cacheWrite
@@ -374,6 +378,12 @@ data class ChatSession(
     val unread: Int = 0,
     val lastSnippet: String = "",
     val lastAt: Long = 0,
+    /**
+     * The chat's cost as the engine summed it over every turn. Null only until
+     * the first metadata sync, or for an old engine that predates the field;
+     * the strip is drawn from this, never from the page of rows on screen.
+     */
+    val usage: StoredTotals? = null,
 )
 
 /**

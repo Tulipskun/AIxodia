@@ -133,7 +133,13 @@ data class LiveUsage(
     /** The same split [sessionTotals] draws for a stored answer. */
     fun totals(): SessionTotals {
         val prompt = if (inputIncludesCache) promptTokens else promptTokens + cacheRead + cacheWrite
-        val fresh = if (inputIncludesCache) (promptTokens - cacheRead).coerceAtLeast(0) else promptTokens
+        // A cache write is new input too: the prompt was not served from cache
+        // for those tokens, it was written into it.
+        val fresh = if (inputIncludesCache) {
+            (promptTokens - cacheRead).coerceAtLeast(0)
+        } else {
+            promptTokens + cacheWrite
+        }
         return SessionTotals(
             promptTokens = prompt,
             cacheRead = cacheRead,

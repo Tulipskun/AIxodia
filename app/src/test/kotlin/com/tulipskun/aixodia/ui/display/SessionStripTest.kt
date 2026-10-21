@@ -108,6 +108,23 @@ class SessionStripTest {
     }
 
     @Test
+    fun `cache written this turn is new input, not cached input`() {
+        // Anthropic reports the prompt in three parts: uncached input,
+        // cache read, cache creation. The created cache was not reused, so it
+        // belongs in the "new" segment and must keep the split adding up.
+        val m = ChatMessage(
+            id = "m1", sessionId = "s1", seq = 1, role = "model", text = "",
+            createdAt = 0, tokensIn = 50, cacheRead = 10, cacheWrite = 5,
+            tokensOut = 5, inputIncludesCache = false,
+        )
+        val totals = sessionTotals(listOf(m))
+        assertEquals(65, totals.promptTokens)
+        assertEquals(10, totals.cacheRead)
+        assertEquals(55, totals.freshInput)
+        assertEquals(totals.promptTokens, totals.cacheRead + totals.freshInput)
+    }
+
+    @Test
     fun `the last turn is the newest one, not the longest`() {
         val totals = sessionTotals(
             listOf(

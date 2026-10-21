@@ -11,7 +11,6 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.tulipskun.aixodia.data.model.StoredTotals
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "sessions", primaryKeys = ["id"])
@@ -26,6 +25,18 @@ data class SessionEntity(
     // first message yet. The daemon has no row for it, so sync must neither
     // prune it nor make it look like a stale server session.
     val remote: Boolean = true,
+    // The engine sums a chat's cost over every turn and sends it with the
+    // session. Keeping it here means the strip is drawn from metadata even when
+    // the thread holds only its newest page, and that a cold start can show the
+    // last known figures before the network answers. usageKnown separates "no
+    // turns yet" from "this row never received usage".
+    val usageKnown: Boolean = false,
+    val usagePromptTokens: Int = 0,
+    val usageCacheRead: Int = 0,
+    val usageFreshInput: Int = 0,
+    val usageOutTokens: Int = 0,
+    val usageTotalMs: Long = 0,
+    val usageLastTurnMs: Long = 0,
 )
 
 @Entity(tableName = "messages", primaryKeys = ["sessionId", "seq"])
@@ -79,6 +90,10 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
     suspend fun get(id: String): SessionEntity?
 
+    /** The open chat's metadata, including the engine's usage, as it changes. */
+    @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
+    fun observeOne(id: String): Flow<SessionEntity?>
+
     @Query("SELECT * FROM sessions ORDER BY lastAt DESC, id DESC")
     suspend fun observeAll(): List<SessionEntity>
 
@@ -100,9 +115,6 @@ interface SessionDao {
 
 @Dao
 interface MessageDao {
-    @Query("SELECT * FROM messages WHERE sessionId = :sid ORDER BY seq ASC")
-    fun observe(sid: String): Flow<List<MessageEntity>>
-
     /**
      * The visible window: every row from [from] to the newest. The thread draws
      * this, not the whole transcript, so opening a chat with thousands of turns
@@ -161,39 +173,6 @@ interface MessageDao {
 
     @Query("UPDATE messages SET thinkingMs = :ms WHERE sessionId = :sid AND seq = :seq")
     suspend fun stampThinkingAt(sid: String, seq: Long, ms: Long)
-
-    /**
-     * The session's cost, summed in SQLite. The strip above the composer shows
-     * the whole chat even though only a window of rows is on screen; loading
-     * every message just to add four columns up is what kept that window from
-     * being a window.
-     *
-     * The two prompt conventions stay apart exactly as they do in
-     * [com.tulipskun.aixodia.data.model.totalInputTokens]: a provider that puts
-     * the cache inside its input total must not have it added twice.
-     */
-    @Query(
-        """
-        SELECT
-            COALESCE(SUM(CASE WHEN inputIncludesCache = 1 THEN tokensIn
-                              ELSE tokensIn + cacheRead + cacheWrite END), 0) AS promptTokens,
-            COALESCE(SUM(cacheRead), 0) AS cacheRead,
-            COALESCE(SUM(CASE WHEN inputIncludesCache = 1
-                              THEN MAX(tokensIn - cacheRead, 0)
-                              ELSE tokensIn END), 0) AS freshInput,
-            COALESCE(SUM(tokensOut), 0) AS outTokens,
-            COALESCE(SUM(CASE WHEN durationMs > 0 THEN durationMs ELSE 0 END), 0) AS totalMs,
-            COALESCE((
-                SELECT durationMs FROM messages
-                WHERE sessionId = :sid AND role != 'user' AND role NOT LIKE 'tool%'
-                      AND durationMs > 0
-                ORDER BY seq DESC LIMIT 1
-            ), 0) AS lastTurnMs
-        FROM messages
-        WHERE sessionId = :sid AND role != 'user' AND role NOT LIKE 'tool%'
-        """
-    )
-    fun observeTotals(sid: String): Flow<StoredTotals>
 }
 
 /**
@@ -203,7 +182,7 @@ interface MessageDao {
  * error and not a warning: it throws the first time the database is opened, and
  * the app closes before anything on screen. That is what shipped as v0.1.270.
  */
-internal const val DB_VERSION = 10
+internal const val DB_VERSION = 11
 
 // The version has to move whenever an entity gains a column, and it is the one
 // number nothing else forces you to touch: adding a field to MessageEntity and
@@ -302,10 +281,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v11 caches the cost the engine sums on the session itself. The phone
+        // no longer adds a thread up, so a chat with only its newest page on
+        // screen still shows the whole chat's figures. usageKnown stays false
+        // for rows written before this build: they have never seen engine
+        // metadata, and zeroes must not be mistaken for a real empty chat.
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN usageKnown INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN usagePromptTokens INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN usageCacheRead INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN usageFreshInput INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN usageOutTokens INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN usageTotalMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN usageLastTurnMs INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
                 .also { inst = it }
         }

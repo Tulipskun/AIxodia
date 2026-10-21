@@ -11,10 +11,12 @@ import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.Block
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ProviderView
+import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.remote.toStoredTotals
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -97,7 +99,17 @@ class ChatRepository(
     }
 
     fun observeSessions(): Flow<List<ChatSession>> = db.sessions().observe().map { list ->
-        list.map { ChatSession(it.id, it.title, it.model, it.unread, it.lastSnippet, it.lastAt) }
+        list.map {
+            ChatSession(
+                id = it.id,
+                title = it.title,
+                model = it.model,
+                unread = it.unread,
+                lastSnippet = it.lastSnippet,
+                lastAt = it.lastAt,
+                usage = it.storedUsage(),
+            )
+        }
     }
 
     /**
@@ -109,9 +121,13 @@ class ChatRepository(
     fun observeMessages(sid: String, from: Long): Flow<List<ChatMessage>> =
         db.messages().observeFrom(sid, from).map { it.toChatMessages() }
 
-    /** The whole chat's cost, summed in SQL, independent of the loaded window. */
-    fun observeTotals(sid: String): Flow<com.tulipskun.aixodia.data.model.StoredTotals> =
-        db.messages().observeTotals(sid)
+    /**
+     * The whole chat's cost from the session metadata the engine sends, never
+     * from the page of messages currently mapped. Null until a sync has stored
+     * usage for this chat (or when talking to an engine that predates it).
+     */
+    fun observeSessionUsage(sid: String): Flow<com.tulipskun.aixodia.data.model.StoredTotals?> =
+        db.sessions().observeOne(sid).map { it?.storedUsage() }
 
     private fun List<MessageEntity>.toChatMessages(): List<ChatMessage> =
         // An answer with no text and no tool step is an empty bubble, not a reply.
@@ -201,12 +217,20 @@ class ChatRepository(
         val local = try { db.sessions().get(sid) } catch (_: Exception) { null }
         if (local == null) {
             val row = try { history.sessions() } catch (_: Exception) { emptyList() }.firstOrNull { it.id == sid }
+            val usage = row?.usage?.toStoredTotals()
             db.sessions().upsert(
                 SessionEntity(
                     id = sid,
                     title = row?.title?.ifBlank { sid } ?: sid,
                     model = row?.model ?: "",
                     lastAt = (row?.updatedAt ?: 0) * 1000,
+                    usageKnown = usage != null,
+                    usagePromptTokens = usage?.promptTokens ?: 0,
+                    usageCacheRead = usage?.cacheRead ?: 0,
+                    usageFreshInput = usage?.freshInput ?: 0,
+                    usageOutTokens = usage?.outTokens ?: 0,
+                    usageTotalMs = usage?.totalMs ?: 0,
+                    usageLastTurnMs = usage?.lastTurnMs ?: 0,
                 )
             )
         }
@@ -807,7 +831,7 @@ internal fun mergeSessionRows(
     return server.map { row ->
         val prev = known[row.id]
         val serverAt = if (row.updatedAt > 0) row.updatedAt * 1000L else prev?.lastAt ?: 0L
-        SessionEntity(
+        val merged = SessionEntity(
             id = row.id,
             title = row.title.ifBlank {
                 prev?.title?.takeIf { it.isNotBlank() } ?: row.id
@@ -820,8 +844,43 @@ internal fun mergeSessionRows(
             // server chat now; stop treating it as local-only.
             remote = true,
         )
+        val usage = row.usage
+        when {
+            usage != null -> merged.copy(
+                usageKnown = true,
+                usagePromptTokens = usage.promptTokens,
+                usageCacheRead = usage.cacheRead,
+                usageFreshInput = usage.freshInput,
+                usageOutTokens = usage.outTokens,
+                usageTotalMs = usage.totalMs,
+                usageLastTurnMs = usage.lastTurnMs,
+            )
+            // An older engine omits `usage`; the last metadata we had is still
+            // better than making the strip disappear mid-session.
+            prev != null && prev.usageKnown -> merged.copy(
+                usageKnown = true,
+                usagePromptTokens = prev.usagePromptTokens,
+                usageCacheRead = prev.usageCacheRead,
+                usageFreshInput = prev.usageFreshInput,
+                usageOutTokens = prev.usageOutTokens,
+                usageTotalMs = prev.usageTotalMs,
+                usageLastTurnMs = prev.usageLastTurnMs,
+            )
+            else -> merged
+        }
     }
 }
+
+/** The engine-summed cost cached on a session, or null when never received. */
+private fun SessionEntity.storedUsage(): StoredTotals? =
+    if (!usageKnown) null else StoredTotals(
+        promptTokens = usagePromptTokens,
+        cacheRead = usageCacheRead,
+        freshInput = usageFreshInput,
+        outTokens = usageOutTokens,
+        lastTurnMs = usageLastTurnMs,
+        totalMs = usageTotalMs,
+    )
 
 /** True for a model reply that has no text, no tool name and was not waiting to send. */
 internal fun isEmptyAnswer(role: String, text: String, toolName: String, pending: Boolean): Boolean =

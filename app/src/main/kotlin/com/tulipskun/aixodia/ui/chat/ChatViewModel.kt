@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -186,6 +187,14 @@ class ChatViewModel(
      * without a second view model having to be created.
      */
     private val activeId = MutableStateFlow(initialSession)
+
+    /**
+     * The open chat as a flow. The screen resets its scroll state when this
+     * changes, so switching chats starts at the newest row instead of keeping
+     * the previous chat's position.
+     */
+    val activeSession: StateFlow<String> = activeId.asStateFlow()
+
     var sessionId: String
         get() = activeId.value
         private set(value) {
@@ -210,9 +219,13 @@ class ChatViewModel(
                 if (from == null) flowOf(emptyList()) else repo.observeMessages(sid, from)
             }
 
-    /** Whole-chat cost, summed by SQLite rather than from the loaded page. */
-    val storedTotals: Flow<StoredTotals> =
-        activeId.flatMapLatest { repo.observeTotals(it) }
+    /**
+     * Whole-chat cost from the engine's session metadata, not from the page of
+     * rows on screen. The ViewModel only relays it; the strip has no aggregate
+     * of its own to drift from the daemon's.
+     */
+    val sessionUsage: Flow<StoredTotals?> =
+        activeId.flatMapLatest { repo.observeSessionUsage(it) }
 
     /** Whether a scroll to the top should ask for another page. */
     val hasOlder = MutableStateFlow(false)
@@ -866,6 +879,10 @@ class ChatViewModel(
             if (baseSeq >= 0L) {
                 runCatching { repo.stampThinking(sid, baseSeq, spans.answerMs, spans.byCall) }
             }
+            // The cost strip now comes from the session metadata, so refresh
+            // it after the turn: the running total has just been released and
+            // the engine's sum is what keeps the new turn on screen.
+            runCatching { repo.syncSessions() }
         }
     }
 
