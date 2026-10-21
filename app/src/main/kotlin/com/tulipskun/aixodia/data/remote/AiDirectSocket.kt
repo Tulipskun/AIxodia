@@ -92,6 +92,16 @@ class AiDirectSocket(
         relay.reconnect()
     }
 
+    /**
+     * Asks the engine to resume the last unfinished question it already has
+     * stored. It sends no text: a retry must not create another user bubble or
+     * feed the question to the model twice.
+     */
+    fun retry(sessionId: String, clientMsgId: String): Boolean {
+        val frame = AiInput(type = "retry", sessionId = sessionId, clientMsgId = clientMsgId)
+        return relay.sendChat(inAdapter.toJson(frame))
+    }
+
     /** Returns true when the frame was handed to the socket. */
     fun send(
         sessionId: String,

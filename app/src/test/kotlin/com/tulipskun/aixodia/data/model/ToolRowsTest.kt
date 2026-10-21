@@ -114,7 +114,8 @@ class ToolMergeTest {
         // block per request, above each tool card.
         val call = ChatMessage(
             id = "s:1", sessionId = "s", seq = 1, role = "tool_call", text = "",
-            createdAt = 1000, toolName = "bash", toolArgs = "pwd", reasoningContent = "thought hard",
+            createdAt = 1000, toolName = "bash", toolArgs = "pwd",
+            reasoningContent = "thought hard", thinkingMs = 1_500L,
         )
         val result = ChatMessage(
             id = "s:2", sessionId = "s", seq = 2, role = "tool_result", text = "w1",
@@ -123,5 +124,6 @@ class ToolMergeTest {
         val merged = mergeToolPairs(listOf(call, result))
         assertEquals(1, merged.size)
         assertEquals("thought hard", merged[0].reasoningContent)
+        assertEquals(1_500L, merged[0].thinkingMs)
     }
 }

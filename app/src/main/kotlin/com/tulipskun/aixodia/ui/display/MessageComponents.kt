@@ -142,6 +142,11 @@ fun MessageBlock(
     // blocks, and types this app has never seen, take the paths below.
     val block = Block.parse(m.block)
     val toolish = isTool || block?.type == Block.TOOL
+    // Cards are spaced by the thread's one gap, not by their own margins. A
+    // tool row carries a thought pill and a card as one item, so its inside gap
+    // has to match the gap the LazyColumn puts between items; otherwise the
+    // thought sits tight on its tool while the next thought floats far below.
+    val cardish = toolish || block?.type == Block.REASONING
     val body = m.text.ifBlank { m.toolArgs }
     // The main agent is the conversation itself, so it carries no name; a sub
     // agent or a tool step keeps its badge because it is a separate voice.
@@ -152,7 +157,14 @@ fun MessageBlock(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(top = if (startsAfterUser) 10.dp else 4.dp, bottom = 4.dp),
+            .padding(
+                top = when {
+                    startsAfterUser -> 10.dp
+                    cardish -> 0.dp
+                    else -> 4.dp
+                },
+                bottom = if (cardish) 0.dp else 4.dp,
+            ),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
     ) {
         val clock = if (m.pending) "" else formatClock(m.createdAt)
@@ -174,28 +186,36 @@ fun MessageBlock(
             }
         }
         if (toolish) {
-            // The thinking that led to this call belongs to this request alone.
-            // It rides on the call row, so it is shown above the card rather than
-            // merged into the answer's one pill at the end of the turn.
-            if (m.reasoningContent.isNotBlank()) {
-                ThoughtPill(m.thinkingMs, m.reasoningContent)
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                // The thinking that led to this call belongs to this request
+                // alone. It rides on the call row, so it is shown above the
+                // card rather than merged into the answer's one pill at the end
+                // of the turn.
+                if (m.reasoningContent.isNotBlank()) {
+                    ThoughtPill(m.thinkingMs, m.reasoningContent)
+                }
+                // The card names the tool and what it was asked to do; the
+                // call's own output folds away underneath. A tool block starts
+                // collapsed: a long result is the one thing in a thread that is
+                // noise until it is asked for, and the header already says
+                // which tool ran.
+                ToolCallCard(
+                    name = toolCardName(m, block).ifBlank { if (m.role == "tool_result") "result" else "call" },
+                    args = toolCardArgs(m, block),
+                    body = body,
+                    durationMs = toolCardDurationMs(m, block),
+                    // A merged step is the result answering the call, so the
+                    // step is over; a call with no result yet is the one still
+                    // running.
+                    done = toolCardDone(m),
+                    failed = m.role == "tool_result" && m.text.startsWith("{\"error\""),
+                    onCopy = onCopy,
+                    copyLabel = copyLabel,
+                )
             }
-            // The card names the tool and what it was asked to do; the call's own
-            // output folds away underneath. A tool block starts collapsed: a long
-            // result is the one thing in a thread that is noise until it is asked
-            // for, and the header already says which tool ran.
-            ToolCallCard(
-                name = toolCardName(m, block).ifBlank { if (m.role == "tool_result") "result" else "call" },
-                args = toolCardArgs(m, block),
-                body = body,
-                durationMs = toolCardDurationMs(m, block),
-                // A merged step is the result answering the call, so the step is
-                // over; a call with no result yet is the one still running.
-                done = toolCardDone(m),
-                failed = m.role == "tool_result" && m.text.startsWith("{\"error\""),
-                onCopy = onCopy,
-                copyLabel = copyLabel,
-            )
         } else if (mine) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -589,7 +609,6 @@ private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
         color = scheme.surfaceContainerHigh,
         shape = shape,
         modifier = Modifier
-            .padding(top = 2.dp)
             .fillMaxWidth()
             .clip(shape)
             .then(
@@ -695,7 +714,7 @@ fun ThinkingLive(
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = MaterialTheme.shapes.small,
-        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -773,7 +792,7 @@ fun SendingLive(elapsedMs: Long, modifier: Modifier = Modifier) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = MaterialTheme.shapes.small,
-        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -844,8 +863,8 @@ fun LiveThink(
 @Composable
 fun ToolSteps(steps: List<ToolStep>) {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         steps.forEach { ToolStepCard(it) }
     }
@@ -1076,7 +1095,6 @@ fun ToolCallCard(
         color = scheme.surfaceContainerHigh,
         shape = shape,
         modifier = Modifier
-            .padding(top = 2.dp)
             .fillMaxWidth()
             .clip(shape)
             .then(clickable),

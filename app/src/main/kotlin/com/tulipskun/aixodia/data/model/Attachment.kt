@@ -42,7 +42,10 @@ data class UserMessageParts(val text: String, val attachments: List<AttachmentRe
  * stored turn (the agent needs it) and is lifted out here for display.
  */
 fun splitAttachmentNote(raw: String): UserMessageParts {
-    val marker = "[attachment]"
+    // The daemon writes the Thai heading. Accept the old English spelling too:
+    // a message stored by an older engine still has a note to lift out.
+    val marker = listOf("[ไฟล์แนบ]", "[attachment]").firstOrNull { it in raw }
+        ?: return UserMessageParts(raw, emptyList())
     val at = raw.indexOf(marker)
     if (at < 0) return UserMessageParts(raw, emptyList())
     val head = raw.take(at).trimEnd()

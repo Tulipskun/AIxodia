@@ -8,6 +8,7 @@ import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.local.MessageEntity
 import com.tulipskun.aixodia.data.local.SessionEntity
 import com.tulipskun.aixodia.data.model.AiOutput
+import com.tulipskun.aixodia.data.model.Block
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.SessionAgentConfig
@@ -253,6 +254,15 @@ class ChatRepository(
     /** Stops the turn the daemon is running for this chat. */
     fun stopTurn(sid: String): Boolean = socket.cancel(sid)
 
+    /**
+     * Resumes the last question the engine stored but never answered. This
+     * sends no new content: the phone keeps the single user bubble it already
+     * has, and the provider sees the existing tool trail instead of the same
+     * question appended twice.
+     */
+    fun retryTurn(sid: String): Boolean =
+        if (sid.isBlank()) false else socket.retry(sid, "$sid:retry:${System.currentTimeMillis()}")
+
     /** Stops one sub agent of this chat and leaves the turn running. */
     fun stopSubAgent(sid: String, jobId: String): Boolean = socket.cancelSubAgent(sid, jobId)
 
@@ -332,14 +342,38 @@ class ChatRepository(
     suspend fun maxSeq(sid: String): Long = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
 
     /**
-     * Records how long a finished turn thought before its first word. Only rows
-     * the turn itself created — past the seq the thread ended on when it was
-     * sent — and only answers that have no figure yet, so an old turn never
-     * borrows a new one's thinking time.
+     * Records each request's own thinking time on the rows that request made.
+     * The closing answer gets the last request's figure, and every tool call
+     * gets the figure of the request that produced it, keyed by call id. This
+     * is what keeps a turn with four tool rounds from putting the whole turn's
+     * duration on one pill and leaving the other three with nothing.
+     *
+     * Only rows this attempt created — past the seq the thread ended on when it
+     * was sent — are touched, so an old turn never borrows a new one's time.
      */
-    suspend fun stampThinkingMs(sid: String, afterSeq: Long, ms: Long) {
-        if (ms <= 0L) return
-        try { db.messages().stampThinking(sid, afterSeq, ms) } catch (_: Exception) { }
+    suspend fun stampThinking(
+        sid: String,
+        afterSeq: Long,
+        answerMs: Long,
+        byCall: Map<String, Long>,
+    ) {
+        if (answerMs <= 0L && byCall.isEmpty()) return
+        val rows = try { db.messages().allNow(sid) } catch (_: Exception) { return }
+        var lastAnswer: MessageEntity? = null
+        for (row in rows) {
+            if (row.seq <= afterSeq) continue
+            if (row.role == "model" || row.role == "assistant") lastAnswer = row
+            if (!row.role.startsWith("tool") || byCall.isEmpty()) continue
+            val callId = try { Block.parse(row.block)?.id.orEmpty() } catch (_: Exception) { "" }
+            val ms = byCall[callId] ?: continue
+            if (ms > 0L) {
+                try { db.messages().stampThinkingAt(sid, row.seq, ms) } catch (_: Exception) { }
+            }
+        }
+        val answer = lastAnswer
+        if (answerMs > 0L && answer != null && answer.reasoningContent.isNotBlank()) {
+            try { db.messages().stampThinkingAt(sid, answer.seq, answerMs) } catch (_: Exception) { }
+        }
     }
 
     /**

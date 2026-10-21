@@ -94,6 +94,7 @@ fun mergeToolPairs(messages: List<ChatMessage>): List<ChatMessage> {
                         // row has none. Carry it so each tool step keeps its own
                         // "Thought" above the card instead of losing it here.
                         reasoningContent = call.reasoningContent,
+                        thinkingMs = call.thinkingMs,
                     )
                 } else {
                     out += m

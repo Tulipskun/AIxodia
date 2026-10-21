@@ -252,9 +252,6 @@ class ChatViewModel(
     val pendingAttachments = MutableStateFlow<List<AttachmentRef>>(emptyList())
     /** True while an upload is in flight, so the picker can be disabled. */
     val uploading = MutableStateFlow(false)
-    /** The last text sent, kept so a failed turn can be retried verbatim. */
-    private var lastSentText = ""
-    private var lastAttachments: List<AttachmentRef> = emptyList()
     /** The error to show as a retryable card, or "" when nothing failed. */
     val errorCard = MutableStateFlow("")
     /**
@@ -271,8 +268,6 @@ class ChatViewModel(
      * in flight.
      */
     private var turnBaseSeq = -1L
-    /** Send-to-first-token of the running turn, stamped onto its rows at close. */
-    private var pendingThinkingMs = 0L
     val selectedProvider = MutableStateFlow("")
     val selectedModel = MutableStateFlow("")
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
@@ -326,6 +321,12 @@ class ChatViewModel(
                     "trace" -> onTrace(f)
                     "done" -> onTurnDone(f)
                     "error" -> {
+                        // The rows the failed attempt already stored are here
+                        // now. Stamp the thought times they did get before the
+                        // live timeline that measured them is cleared.
+                        val spans = liveThinkingSpans()
+                        val sid = f.sessionId.ifBlank { sessionId }
+                        val baseSeq = turnBaseSeq
                         status.value = ""
                         liveText.value = ""
                         liveBlocks.value = emptyList()
@@ -333,7 +334,6 @@ class ChatViewModel(
                         liveReasoning.value = ""
                         reasoningActive.value = false
                         turnBaseSeq = -1L
-                        pendingThinkingMs = 0L
                         busy.value = false
                         liveUsage.value = null
                         // Raw daemon text is logged by the daemon; the user sees Thai.
@@ -349,6 +349,13 @@ class ChatViewModel(
                             viewModelScope.launch { repo.forgetDeadSession(dead) }
                         }
                         finishStats()
+                        if (baseSeq >= 0L) {
+                            viewModelScope.launch {
+                                runCatching {
+                                    repo.stampThinking(sid, baseSeq, spans.answerMs, spans.byCall)
+                                }
+                            }
+                        }
                     }
                     // The ack only means the message reached the daemon. The
                     // turn keeps running until `done`, and until then the stop
@@ -377,13 +384,7 @@ class ChatViewModel(
         // The clock for the rate starts here, not when the question was sent.
         val stats = turnStats.value
         if (stats.firstTokenAtMs == 0L) {
-            val now = SystemClock.elapsedRealtime()
-            turnStats.value = stats.copy(firstTokenAtMs = now)
-            // The thinking ends where the first word begins: send to first
-            // token is the figure the stored pill shows. The daemon reports no
-            // thinking duration of its own, so this local measurement is the
-            // only one there is.
-            pendingThinkingMs = (now - stats.startedAtMs).coerceAtLeast(0L)
+            turnStats.value = stats.copy(firstTokenAtMs = SystemClock.elapsedRealtime())
         }
         estimateTokens()
         busy.value = true
@@ -414,12 +415,6 @@ class ChatViewModel(
         // total is never counted alongside the row it becomes.
         if (frame != null && frame.seq > 0L) {
             liveUsage.value = liveUsage.value?.copy(seq = frame.seq)
-        }
-        // The whole turn's time, from send to the answer arriving (includes
-        // tool execution): one figure for every pill in this turn, not a
-        // per-request sum.
-        if (turnStats.value.startedAtMs > 0L) {
-            pendingThinkingMs = (SystemClock.elapsedRealtime() - turnStats.value.startedAtMs).coerceAtLeast(0L)
         }
         if (text.isBlank()) return
         // Replace whatever streamed in with the daemon's own copy: it is the one
@@ -590,14 +585,6 @@ class ChatViewModel(
         if (block.round > 0) settleRequest(Block.requestId(block.round), now)
         else settleOpenRequest(now)
         liveThinkingMs.value = 0L
-        // A turn that opens with tools never streams a word first, so
-        // the first call is where its thinking ends.
-        if (pendingThinkingMs == 0L) {
-            val started = turnStats.value.startedAtMs
-            if (started > 0L) {
-                pendingThinkingMs = (now - started).coerceAtLeast(0L)
-            }
-        }
         // What came before this tool is its own turn, now and after.
         val said = liveText.value.trim()
         if (said.isNotEmpty()) {
@@ -714,14 +701,6 @@ class ChatViewModel(
                 val name = f.toolCall?.name ?: return
                 settleOpenRequest()
                 liveThinkingMs.value = 0L
-                // A turn that opens with tools never streams a word first, so
-                // the first call is where its thinking ends.
-                if (pendingThinkingMs == 0L) {
-                    val started = turnStats.value.startedAtMs
-                    if (started > 0L) {
-                        pendingThinkingMs = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
-                    }
-                }
                 // What came before this tool is its own turn, now and after.
                 val said = liveText.value.trim()
                 if (said.isNotEmpty()) {
@@ -809,16 +788,13 @@ class ChatViewModel(
         } else if (stage == "already_done") {
             notice.value = "That task already finished"
         }
-        // The thinking was measured while the turn ran; its rows only just
-        // arrived, so stamp the figure now while their seqs are known.
+        // Each request measured its own thought in the live timeline. Its
+        // rows only just arrived, so stamp the figures now while their seqs
+        // and call ids are known: the answer gets the last request's time and
+        // every tool row gets the time of the request that produced it.
         val sid = frame.sessionId.ifBlank { sessionId }
         val baseSeq = turnBaseSeq
-        // Use the full turn duration (send -> end of loop) for every pill,
-        // so they all show one consistent time.
-        if (turnStats.value.startedAtMs > 0L) {
-            pendingThinkingMs = (SystemClock.elapsedRealtime() - turnStats.value.startedAtMs).coerceAtLeast(0L)
-        }
-        val thinkingMs = pendingThinkingMs
+        val spans = liveThinkingSpans()
         clearLiveTurn()
         answerSettled = false
         // The turn is over: let the running total go. Its answer's stored row
@@ -829,7 +805,9 @@ class ChatViewModel(
         // compatibility/recovery fallback for a daemon without a complete batch.
         viewModelScope.launch {
             if (!frame.turnsSynced) runCatching { repo.refreshLatest(sid) }
-            if (baseSeq >= 0L) runCatching { repo.stampThinkingMs(sid, baseSeq, thinkingMs) }
+            if (baseSeq >= 0L) {
+                runCatching { repo.stampThinking(sid, baseSeq, spans.answerMs, spans.byCall) }
+            }
         }
     }
 
@@ -850,7 +828,6 @@ class ChatViewModel(
         subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
         turnBaseSeq = -1L
-        pendingThinkingMs = 0L
         liveText.value = ""
     }
 
@@ -1061,16 +1038,56 @@ class ChatViewModel(
         pendingAttachments.value = pendingAttachments.value.filterIndexed { i, _ -> i != index }
     }
 
-    fun send(text: String) {
-        if (conn.value != ConnState.ONLINE) {
-            notice.value = "Not connected to the daemon"
-            return
+    /** How long each request in the live timeline thought, split by call. */
+    private data class ThinkingSpans(
+        val answerMs: Long,
+        val byCall: Map<String, Long>,
+    )
+
+    /**
+     * Reads the live timeline once, before it is cleared, and assigns every
+     * closed thought to the card it belongs to: the tools that request called
+     * and, when it is the last one, the closing answer. A thought is never
+     * merged into the turn total, so one round cannot put the whole turn's
+     * clock on the final pill while the earlier pills show nothing.
+     */
+    private fun liveThinkingSpans(now: Long = SystemClock.elapsedRealtime()): ThinkingSpans {
+        var current: LiveBlock.Think? = null
+        var lastAct = -1
+        val byCall = LinkedHashMap<String, Long>()
+        val blocks = liveBlocks.value
+        blocks.forEachIndexed { index, block ->
+            when (block) {
+                is LiveBlock.Think -> current = block
+                is LiveBlock.Act -> {
+                    lastAct = index
+                    val thought = current ?: return@forEachIndexed
+                    val callId = block.step.id
+                    if (callId.isBlank() || thought.reasoning.isBlank()) return@forEachIndexed
+                    val ms = thoughtMs(thought, now)
+                    if (ms > 0L) byCall[callId] = ms
+                }
+                is LiveBlock.Say -> Unit
+            }
         }
-        val attachments = pendingAttachments.value
-        if (text.isBlank() && attachments.isEmpty()) return
+        val answer = blocks.drop(lastAct + 1)
+            .filterIsInstance<LiveBlock.Think>()
+            .lastOrNull()
+            ?.takeIf { it.reasoning.isNotBlank() }
+        return ThinkingSpans(
+            answerMs = answer?.let { thoughtMs(it, now) } ?: 0L,
+            byCall = byCall,
+        )
+    }
+
+    private fun thoughtMs(thought: LiveBlock.Think, now: Long): Long {
+        val end = if (thought.endedAtMs > 0L) thought.endedAtMs else now
+        return (end - thought.startedAtMs).coerceAtLeast(0L)
+    }
+
+    /** Resets the thread's live state for a new turn, sent or retried. */
+    private fun beginLiveTurn() {
         answerSettled = false
-        lastSentText = text.trim()
-        lastAttachments = attachments
         errorCard.value = ""
         busy.value = true
         liveChars = 0
@@ -1081,7 +1098,6 @@ class ChatViewModel(
         liveText.value = ""
         liveReasoning.value = ""
         reasoningActive.value = false
-        pendingThinkingMs = 0L
         turnBaseSeq = -1L
         // The first request of the turn is open from the moment the question
         // leaves: this is the phone's time-to-first-token, drawn as the
@@ -1103,6 +1119,16 @@ class ChatViewModel(
             startedAtMs = SystemClock.elapsedRealtime(),
             running = true,
         )
+    }
+
+    fun send(text: String) {
+        if (conn.value != ConnState.ONLINE) {
+            notice.value = "Not connected to the daemon"
+            return
+        }
+        val attachments = pendingAttachments.value
+        if (text.isBlank() && attachments.isEmpty()) return
+        beginLiveTurn()
         viewModelScope.launch {
             turnBaseSeq = repo.maxSeq(sessionId)
             val fresh = repo.send(sessionId, text.trim(), attachments)
@@ -1111,11 +1137,25 @@ class ChatViewModel(
         }
     }
 
-    /** Re-sends the last message after a failure, reusing the same text. */
+    /**
+     * Resumes the unfinished turn the engine stored. No text is sent and no
+     * local user row is added: the thread keeps one question, and the provider
+     * sees the tool trail that already exists instead of the prompt twice.
+     */
     fun retryLast() {
-        if (lastSentText.isBlank() && lastAttachments.isEmpty()) return
-        pendingAttachments.value = lastAttachments
-        send(lastSentText)
+        if (conn.value != ConnState.ONLINE) {
+            notice.value = "Not connected to the daemon"
+            return
+        }
+        if (sessionId.isBlank()) return
+        beginLiveTurn()
+        viewModelScope.launch {
+            turnBaseSeq = repo.maxSeq(sessionId)
+            if (!repo.retryTurn(sessionId)) {
+                notice.value = "Could not ask the daemon to retry"
+                clearLiveTurn()
+            }
+        }
     }
 
     /** "New chat" — the only session action that needs no argument. */
