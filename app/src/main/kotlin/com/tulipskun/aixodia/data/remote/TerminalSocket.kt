@@ -28,6 +28,19 @@ private const val TAG = "TerminalSocket"
 private const val RETRY_MS = 1_500L
 
 /**
+ * How long the app may spend in the background before a still-"open" terminal
+ * stream is treated as suspect. Android can freeze or drop the socket while
+ * Doze keeps the process alive; the old listener then stays OPEN forever and
+ * the screen never gets a replay. A quick app switch is left alone so a healthy
+ * screen is not reset for a glance at a notification.
+ */
+private const val REATTACH_AFTER_BACKGROUND_MS = 30_000L
+
+/** Whether returning to the foreground should rebuild an existing stream. */
+internal fun shouldReattachAfterBackground(state: TermState, wanted: Boolean, awayMs: Long): Boolean =
+    wanted && state == TermState.OPEN && awayMs >= REATTACH_AFTER_BACKGROUND_MS
+
+/**
  * How long a freshly opened stream may stay silent before it is treated as
  * dead. The engine answers an open with ready (or error) at once; no answer
  * means the frame or the stream id was stale, and dialing again with a new id
@@ -217,6 +230,18 @@ class TerminalSocket(
      */
     fun reconnect() {
         if (!wanted) return
+        reconnectLocked()
+    }
+
+    /**
+     * Called when the activity comes back. A stream that survived a long
+     * absence can look OPEN while Android has already dropped every byte, so
+     * rebuild it once; the engine replays RIS, the modes and the ring, which is
+     * exactly the recovery a fresh attach gives. A short absence keeps the
+     * current screen untouched.
+     */
+    fun onForeground(awayMs: Long) {
+        if (!shouldReattachAfterBackground(_state.value, wanted, awayMs)) return
         reconnectLocked()
     }
 

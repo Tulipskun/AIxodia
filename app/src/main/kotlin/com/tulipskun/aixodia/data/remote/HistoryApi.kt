@@ -81,6 +81,23 @@ data class SessionRow(
     @Json(name = "updated_at") val updatedAt: Long = 0,
 )
 
+/**
+ * Picks one page out of an oldest-first transcript.
+ *
+ * beforeSeq <= 0 means "the newest page", which is what opening a long chat
+ * needs: the first page used to be the oldest rows, so a phone that had no
+ * cache showed the start of the thread and numbered the next send from there,
+ * colliding with turns it had never downloaded.
+ */
+internal fun pageTurns(rows: List<TurnRow>, beforeSeq: Long, limit: Int): List<TurnRow> {
+    if (limit <= 0) return emptyList()
+    return if (beforeSeq <= 0L) {
+        rows.takeLast(limit)
+    } else {
+        rows.filter { it.seq < beforeSeq }.takeLast(limit)
+    }
+}
+
 class HistoryApi(
     private val settings: SettingsStore,
     private val relay: RelayClient? = null,
@@ -203,7 +220,10 @@ class HistoryApi(
             client.newCall(req).execute().use { r ->
                 val text = r.body?.string().orEmpty()
                 val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use null
-                val arr = env.optJSONArray("sessions") ?: return@use emptyList()
+                // A reply without the field is not "the daemon has no chats".
+                // Treat it as unreachable so syncSessions never prunes the
+                // phone's history over a half-read response.
+                val arr = env.optJSONArray("sessions") ?: return@use null
                 val out = ArrayList<SessionRow>()
                 for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
                     out.add(SessionRow(
@@ -320,7 +340,7 @@ class HistoryApi(
                     out.sortedBy { it.seq }
                 }
             }.getOrDefault(emptyList()).let { list ->
-                if (beforeSeq <= 0L) list.take(limit) else list.filter { it.seq < beforeSeq }.takeLast(limit)
+                pageTurns(list, beforeSeq, limit)
             }
         }
 

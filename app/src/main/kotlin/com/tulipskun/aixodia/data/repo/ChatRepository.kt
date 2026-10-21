@@ -143,35 +143,32 @@ class ChatRepository(
     suspend fun syncSessions() {
         val rows = try { history.sessionsOrNull() } catch (_: Exception) { null } ?: return
         val ids = rows.map { it.id }.toSet()
+        val local = try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }
         val pending = try { db.messages().allPending().map { it.sessionId }.toSet() } catch (_: Exception) { emptySet() }
-        for (local in try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }) {
-            if (local.id in ids) {
-                // A draft whose create reached D1 just before the app died is
-                // already a server chat; stop treating it as local-only.
-                if (!local.remote) {
-                    try { db.sessions().upsert(local.copy(remote = true)) } catch (_: Exception) { }
-                }
-                continue
-            }
+        // The daemon sends its newest page, not every chat. Treating an absent
+        // id as deleted once the page is full would erase older chats from the
+        // phone every time the user has more than one page of history.
+        val complete = rows.size < SESSION_LIST_PAGE
+        for (session in local) {
+            if (session.id in ids) continue
             // A New chat that has never sent its first message is deliberately
             // absent from D1. Keeping it is what makes "New chat" instant.
-            if (!local.remote) continue
-            if (local.id !in pending) {
-                try { db.messages().deleteSession(local.id) } catch (_: Exception) { }
-                try { db.sessions().delete(local.id) } catch (_: Exception) { }
-            }
+            if (!session.remote) continue
+            if (!complete) continue
+            if (session.id in pending) continue
+            try {
+                db.messages().deleteSession(session.id)
+                db.sessions().delete(session.id)
+            } catch (_: Exception) { }
         }
         if (rows.isEmpty()) return
-        db.sessions().upsertAll(
-            rows.map {
-                SessionEntity(
-                    id = it.id,
-                    title = it.title.ifBlank { it.id },
-                    model = it.model,
-                    lastAt = it.updatedAt * 1000,
-                )
-            }
-        )
+        // Update every server chat, not just insert the missing ones. The old
+        // IGNORE upsert left titles, models and timestamps frozen at the moment
+        // a chat first appeared on the phone, so the drawer kept an old order.
+        val merged = mergeSessionRows(local, rows, pending)
+        db.withTransaction {
+            for (session in merged) db.sessions().upsert(session)
+        }
     }
 
     /**
@@ -354,7 +351,11 @@ class ChatRepository(
         // reconnect does not re-download the whole history (Telegram/Discord style).
         val localMax = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
         val rows = if (localMax <= 0L) {
-            try { history.latest(sid) } catch (_: Exception) { emptyList() }
+            // A cold open has no local seq to continue from. Pull the newest
+            // page, not the oldest one: the optimistic row for the next send is
+            // numbered from here, and an old page made it collide with turns
+            // that were already on the server.
+            try { history.latest(sid, limit = 10_000) } catch (_: Exception) { emptyList() }
         } else {
             try { history.turnsAfter(sid, localMax) } catch (_: Exception) { emptyList() }
         }
@@ -515,17 +516,17 @@ class ChatRepository(
      *
      * - no local row at this seq: insert (new row, or a historical gap);
      * - same role and text: adopt it (clears a stale pending flag);
-     * - different content: the counters diverged. D1 wins, but only when the
-     *   displaced local row's text is also in this page (its true twin): that
-     *   way a message is never deleted without its replacement on screen.
-     *   Otherwise the local row stays — the mirror is still in flight, or the
-     *   twin is outside this page, and dropping either side would lose text.
+     * - different content: the counters diverged. D1 owns that seq. When the
+     *   displaced local row's text is also in this page (its true twin), the
+     *   page replaces it; otherwise the local row moves to the tail instead of
+     *   keeping D1's row out. Either way no question disappears, and the next
+     *   pull can still see every remote seq.
      *
      * A page that matches nothing local at all is a different case: the session
      * id was reborn server-side (deleted and recreated, so D1 holds a new
      * conversation under an old id). Merging would only stack two threads on
      * the same seqs, so D1 is adopted wholesale instead, keeping only pending
-     * rows whose text D1 does not have yet.
+     * rows whose text D1 does not have yet (moved clear of D1's seqs).
      */
     private suspend fun reconcile(sid: String, rows: List<com.tulipskun.aixodia.data.remote.TurnRow>) {
         if (rows.isEmpty()) return
@@ -547,19 +548,24 @@ class ChatRepository(
             // pending rows stay only while their text is nowhere in the page
             // (still unsent), and a pending row D1 already has is dropped in
             // favour of D1's copy.
+            var nextSeq = ((localBySeq.keys + entities.map { it.seq }).maxOrNull() ?: 0L) + 1L
             if (localBySeq.isNotEmpty() && entities.none { e ->
                     localBySeq[e.seq]?.let { it.role == e.role && it.text == e.text } == true
                 }
             ) {
                 val pulledTexts = entities.map { it.text }.toSet()
+                val entitySeqs = entities.map { it.seq }.toSet()
                 for (row in localBySeq.values) {
                     // Drop only local rows D1 already holds (by text) — they
                     // are duplicates. Keep pending rows and rows whose text is
                     // not in the pulled page: they may not have reached D1 yet,
                     // and deleting them makes the thread flicker or lose
-                    // messages.
+                    // messages. A kept row may not sit on a seq D1 now owns.
                     if (row.text in pulledTexts) {
                         db.messages().deleteOne(sid, row.seq)
+                    } else if (row.seq in entitySeqs) {
+                        db.messages().deleteOne(sid, row.seq)
+                        db.messages().upsert(row.copy(seq = nextSeq++))
                     }
                 }
                 for (e in entities.sortedBy { it.seq }) {
@@ -584,6 +590,14 @@ class ChatRepository(
                 val twinInPage = entities.any { it.seq != e.seq && it.text == existing.text }
                 if (twinInPage) {
                     db.messages().deleteOne(sid, e.seq)
+                    db.messages().upsert(e)
+                } else {
+                    // D1 owns this seq now. Keeping the old local row there used
+                    // to leave the remote row uninserted, so the next pull could
+                    // never repair the gap; move the local row to the tail and
+                    // keep both, in seq order.
+                    db.messages().deleteOne(sid, existing.seq)
+                    db.messages().upsert(existing.copy(seq = nextSeq++))
                     db.messages().upsert(e)
                 }
             }
@@ -659,6 +673,41 @@ class ChatRepository(
 
     fun close() = socket.close()
 
+}
+
+/** The number of chats the daemon returns in one list page. */
+internal const val SESSION_LIST_PAGE = 200
+
+/**
+ * Applies the daemon's chat metadata without throwing away phone-only state.
+ *
+ * D1 owns the title, model and updated_at, so those always move forward even
+ * for a chat Room already holds. Unread and the last preview are local, and a
+ * queued message keeps its chat at the top until the daemon stores it.
+ */
+internal fun mergeSessionRows(
+    local: List<SessionEntity>,
+    server: List<com.tulipskun.aixodia.data.remote.SessionRow>,
+    pending: Set<String>,
+): List<SessionEntity> {
+    val known = local.associateBy { it.id }
+    return server.map { row ->
+        val prev = known[row.id]
+        val serverAt = if (row.updatedAt > 0) row.updatedAt * 1000L else prev?.lastAt ?: 0L
+        SessionEntity(
+            id = row.id,
+            title = row.title.ifBlank {
+                prev?.title?.takeIf { it.isNotBlank() } ?: row.id
+            },
+            model = row.model,
+            lastSnippet = prev?.lastSnippet.orEmpty(),
+            lastAt = if (row.id in pending) maxOf(serverAt, prev?.lastAt ?: 0L) else serverAt,
+            unread = prev?.unread ?: 0,
+            // A draft whose create reached D1 just before the app died is a
+            // server chat now; stop treating it as local-only.
+            remote = true,
+        )
+    }
 }
 
 /** True for a model reply that has no text, no tool name and was not waiting to send. */

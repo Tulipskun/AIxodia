@@ -2,6 +2,7 @@ package com.tulipskun.aixodia
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,6 +14,9 @@ import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    /** When the activity left the foreground; 0 before the first pause. */
+    private var backgroundedAt = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Edge-to-edge: let Compose handle status/nav bars via WindowInsets.
@@ -38,14 +42,27 @@ class MainActivity : ComponentActivity() {
      * when the socket is likely stale, so an offline one is redialed at once and
      * an open terminal window re-dials too.
      */
+    override fun onPause() {
+        backgroundedAt = SystemClock.elapsedRealtime()
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
         val c = (application as AixodiaApp).container
         val relayWasOnline = c.relay.isOnline
         c.relay.reconnectIfDown()
-        // Only force the terminal when the link really was down: a quick trip to
-        // another app should not clear and replay a healthy screen.
-        if (!relayWasOnline) c.terminal.reconnect()
+        val away = if (backgroundedAt > 0L) {
+            SystemClock.elapsedRealtime() - backgroundedAt
+        } else {
+            0L
+        }
+        backgroundedAt = 0L
+        // Only force the terminal when the link really was down or the app was
+        // away long enough for Android to have silently frozen the stream. A
+        // quick trip to another app should not clear and replay a healthy
+        // screen.
+        if (!relayWasOnline) c.terminal.reconnect() else c.terminal.onForeground(away)
     }
 
     /**

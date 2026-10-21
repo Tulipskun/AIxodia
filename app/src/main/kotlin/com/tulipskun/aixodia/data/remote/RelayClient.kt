@@ -172,6 +172,11 @@ class RelayClient(private val settings: SettingsStore) {
         backoffMs = 1000L
         ws?.cancel()
         ws = null
+        // The old socket's listener is stale from here on, so its close
+        // callback will not run. Finish everything it owned now: a terminal
+        // listener left waiting for an onClosed that can never arrive would
+        // keep the panel on a dead stream instead of reattaching.
+        lost("reconnecting")
         _state.value = ConnState.OFFLINE
         // Wake the loop if it is sleeping between attempts, so "immediately"
         // means immediately and not "after the rest of the backoff".

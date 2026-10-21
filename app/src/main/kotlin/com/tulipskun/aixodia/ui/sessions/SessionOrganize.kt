@@ -69,8 +69,10 @@ fun groupSessionsByDate(sessions: List<ChatSession>, nowMs: Long = System.curren
     val week = mutableListOf<ChatSession>()
     val older = mutableListOf<ChatSession>()
 
-    // Newest first within each bucket (sessions are usually already sorted).
-    sessions.sortedByDescending { it.lastAt }.forEach { s ->
+    // Newest first within each bucket, with the same id tiebreaker Room uses.
+    // Chats created in the same second otherwise shuffle between redraws.
+    sessions.sortedWith(compareByDescending<ChatSession> { it.lastAt }.thenByDescending { it.id })
+        .forEach { s ->
         val t = if (s.lastAt > 0L) s.lastAt else 0L
         when {
             t >= startOfToday -> today += s
