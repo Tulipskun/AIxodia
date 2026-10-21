@@ -192,7 +192,11 @@ class ChatRepository(
                 db.sessions().delete(session.id)
             } catch (_: Exception) { }
         }
-        if (rows.isEmpty()) return
+        // An empty list is authoritative: the daemon answered and has no chats
+        // (a server-side wipe, or a fresh engine under the same address). The
+        // pruning loop above must run for it, or those old remote rows stay in
+        // the drawer forever. A failed read is null and returned above, so this
+        // is not the "half-read response" case.
         // Update every server chat, not just insert the missing ones. The old
         // IGNORE upsert left titles, models and timestamps frozen at the moment
         // a chat first appeared on the phone, so the drawer kept an old order.

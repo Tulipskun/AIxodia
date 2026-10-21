@@ -46,6 +46,9 @@ class SettingsStore(private val ctx: Context) {
     private val tokenFieldsByProvider =
         stringPreferencesKey("token_fields_by_provider")
     private val providersCache = stringPreferencesKey("providers_cache")
+    // The tunnel that produced providers_cache. A new engine (or a different
+    // account behind the same app) must not inherit the old provider list.
+    private val providersCacheUrl = stringPreferencesKey("providers_cache_url")
 
     /** The footer format for a provider, falling back to the shared default. */
     fun tokenFieldsFlow(provider: String) = ctx.ds.data.map { prefs ->
@@ -79,8 +82,6 @@ class SettingsStore(private val ctx: Context) {
     val accountIdFlow: Flow<String> = ctx.ds.data.map { it[accountId] ?: "" }
     val databaseIdFlow: Flow<String> = ctx.ds.data.map { it[databaseId] ?: "" }
     val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "" }
-    val providersCacheFlow: Flow<String> = ctx.ds.data.map { it[providersCache] ?: "" }
-
     /** The cached daemon start time (unix second), 0 when never seen. */
     val terminalSessionIdFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionId] ?: "" }
     val terminalSessionIdsFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionIds] ?: "" }
@@ -90,15 +91,21 @@ class SettingsStore(private val ctx: Context) {
     val daemonStartedAtFlow: Flow<Long> =
         ctx.ds.data.map { it[daemonStartedAt]?.toLongOrNull() ?: 0L }
 
-    suspend fun current(): ConnConfig = ConnConfig(
-        endpoint = endpointFlow.first(),
-        wsUrl = wsUrlFlow.first(),
-        daemonUrl = daemonUrlFlow.first(),
-        token = tokenFlow.first(),
-        accountId = accountIdFlow.first(),
-        databaseId = databaseIdFlow.first(),
-        sessionId = sessionFlow.first(),
-    )
+    suspend fun current(): ConnConfig {
+        // One snapshot, not seven independent first() reads: saveDaemon() writes
+        // endpoint, daemonUrl and wsUrl in one edit, and reading them across
+        // edits could pair a new address with the old socket or token.
+        val prefs = ctx.ds.data.first()
+        return ConnConfig(
+            endpoint = prefs[endpoint].orEmpty(),
+            wsUrl = prefs[wsUrl].orEmpty(),
+            daemonUrl = prefs[daemonUrl].orEmpty(),
+            token = prefs[token].orEmpty(),
+            accountId = prefs[accountId].orEmpty(),
+            databaseId = prefs[databaseId].orEmpty(),
+            sessionId = prefs[sessionId].orEmpty(),
+        )
+    }
 
     /**
      * The one credential, plus the ids when they are already known. Blank ids
@@ -121,8 +128,17 @@ class SettingsStore(private val ctx: Context) {
         }
     }
 
-    suspend fun saveProvidersCache(json: String) {
-        ctx.ds.edit { it[providersCache] = json }
+    suspend fun saveProvidersCache(daemonUrl: String, json: String) {
+        ctx.ds.edit {
+            it[providersCache] = json
+            it[providersCacheUrl] = daemonUrl.trim().trimEnd('/')
+        }
+    }
+
+    /** The cached provider JSON and the daemon URL that produced it. */
+    suspend fun providersCacheSnapshot(): Pair<String, String> {
+        val prefs = ctx.ds.data.first()
+        return (prefs[providersCache] ?: "") to (prefs[providersCacheUrl] ?: "")
     }
 
     /**
@@ -132,6 +148,11 @@ class SettingsStore(private val ctx: Context) {
     suspend fun saveDaemon(address: String) {
         val clean = address.trim().trimEnd('/')
         ctx.ds.edit {
+            if ((it[daemonUrl] ?: "").trim().trimEnd('/') != clean) {
+                // The provider list belongs to the engine at that address.
+                it.remove(providersCache)
+                it.remove(providersCacheUrl)
+            }
             it[endpoint] = clean
             it[daemonUrl] = clean
             it[wsUrl] = wsUrlFor(clean)

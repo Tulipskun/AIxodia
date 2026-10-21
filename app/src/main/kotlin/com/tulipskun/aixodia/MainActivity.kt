@@ -66,7 +66,9 @@ class MainActivity : ComponentActivity() {
         // Chat frames are not replayed by a dead-but-still-"online" socket. A
         // long background trip redials on purpose, which makes the repository
         // refresh D1, flush unacked rows, and run the unfinished-turn recovery.
-        if (!relayWasOnline || away >= 30_000L) c.socket.reconnect()
+        // When the relay was already down, reconnectIfDown() above has started
+        // the redial; calling reconnect() again would tear that attempt down.
+        if (relayWasOnline && away >= 30_000L) c.socket.reconnect()
     }
 
     /**

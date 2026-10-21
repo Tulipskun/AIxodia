@@ -498,24 +498,31 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** Every configured provider with its reachability and last error. */
     suspend fun providers(): List<ProviderStatus> = withContext(Dispatchers.IO) {
-        val base = absoluteUrl(settings.current().daemonUrl) ?: return@withContext cachedProviders()
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext cachedProviders()
         val list = runCatching {
             val req = Request.Builder().url("$base/api/providers")
-                .header("Authorization", "Bearer ${settings.current().token}").get().build()
+                .header("Authorization", "Bearer ${c.token}").get().build()
             client.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) return@use emptyList()
                 providersAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
             }
         }.getOrDefault(emptyList())
-        if (list.isNotEmpty()) runCatching { settings.saveProvidersCache(providerListAdapter.toJson(list)) }
+        if (list.isNotEmpty()) runCatching {
+            settings.saveProvidersCache(base, providerListAdapter.toJson(list))
+        }
         if (list.isNotEmpty()) list else cachedProviders()
     }
 
     /** Last providers list cached locally, so the screen is not empty offline. */
     suspend fun cachedProviders(): List<ProviderStatus> = withContext(Dispatchers.IO) {
         runCatching {
-            val raw = settings.providersCacheFlow.first()
-            if (raw.isBlank()) emptyList()
+            val current = settings.current().daemonUrl.trim().trimEnd('/')
+            val (raw, cachedFor) = settings.providersCacheSnapshot()
+            // A cache from another tunnel describes another engine. Showing it
+            // here would claim providers and reachability the current daemon
+            // never reported.
+            if (raw.isBlank() || cachedFor.isBlank() || cachedFor != current) emptyList()
             else providerListAdapter.fromJson(raw) ?: emptyList()
         }.getOrDefault(emptyList())
     }

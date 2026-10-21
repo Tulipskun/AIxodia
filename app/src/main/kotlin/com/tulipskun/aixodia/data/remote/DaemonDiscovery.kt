@@ -75,7 +75,20 @@ class DaemonDiscovery(
     private suspend fun loop() {
         var backoff = pollMs
         while (scope.isActive) {
-            val current = settings.current()
+            val current = try {
+                settings.current()
+            } catch (e: Exception) {
+                // DataStore can fail a read while the file is being rewritten.
+                // Letting that escape would kill this loop for the rest of the
+                // process, leaving discovery stuck on the last address it saw.
+                Log.w(TAG, "settings read failed: ${e.message}")
+                _state.value = DiscoveryState(
+                    phase = DiscoveryPhase.UNREACHABLE,
+                    error = e.message?.take(120).orEmpty(),
+                )
+                delay(pollMs)
+                continue
+            }
             if (current.token.isBlank()) {
                 // No credential, so the row cannot be read at all. Not an error
                 // worth retrying quickly; the token arrives in settings.

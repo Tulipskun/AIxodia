@@ -719,7 +719,11 @@ class TerminalSocket(
             mySid = opened
             sid = opened
             backoff = RETRY_MS
-            _state.value = TermState.OPEN
+            // Still CONNECTING, not OPEN: the frame has been written but the
+            // engine has not named the shell yet. Claiming OPEN here made the
+            // header lose both "connecting" and the ready details for up to
+            // READY_TIMEOUT, and showed a terminal as attached when the open
+            // had in fact been swallowed.
             // No stream id here: it is an implementation detail that changes on
             // every attach, and the ready frame (above) already names the shell
             // and its directory. Printing it made a healthy terminal look like

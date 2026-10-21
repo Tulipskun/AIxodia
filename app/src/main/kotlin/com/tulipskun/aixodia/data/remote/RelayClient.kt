@@ -171,6 +171,7 @@ class RelayClient(private val settings: SettingsStore) {
     // The one dialing loop. Kept so connect() can tell a live loop from one
     // that a disconnect() is still winding down: launching a second loop for
     // the same client leaves two sockets racing to own `ws`.
+    @Volatile
     private var loopJob: Job? = null
 
     // The attempt the loop is waiting on right now (null between attempts).
@@ -194,15 +195,15 @@ class RelayClient(private val settings: SettingsStore) {
     val isOnline: Boolean get() = _state.value == ConnState.ONLINE
 
     /** Starts the single connection (idempotent). */
+    @Synchronized
     fun connect() {
         val running = loopJob?.isActive == true
         if (running && wantOpen) return
         wantOpen = true
         if (running) {
-            // A disconnect() set wantOpen false and left the loop waiting for
-            // an attempt that is over. Reusing that loop — instead of starting
-            // a second one — is what keeps one socket owning `ws`; completing
-            // its wait is what lets it dial again now.
+            // The loop stays parked while the client is closed. Reusing it —
+            // instead of starting a second one — is what keeps one socket
+            // owning `ws`; completing its wait is what lets it dial again now.
             attempt?.complete(Unit)
             wake.trySend(Unit)
             return
@@ -210,6 +211,7 @@ class RelayClient(private val settings: SettingsStore) {
         loopJob = scope.launch { loop() }
     }
 
+    @Synchronized
     fun disconnect() {
         wantOpen = false
         // Nothing else may wake the loop: the socket this attempt waited on is
@@ -452,7 +454,15 @@ class RelayClient(private val settings: SettingsStore) {
     }
 
     private suspend fun loop() {
-        while (wantOpen) {
+        // Stay alive while the client is closed instead of returning. A loop
+        // that exited here could race connect(): connect() sees loopJob active,
+        // wakes it, and returns — then the loop finishes and the client is left
+        // with wantOpen=true and no dialer.
+        while (true) {
+            if (!wantOpen) {
+                withTimeoutOrNull(60_000) { wake.receive() }
+                continue
+            }
             var opened = false
             try {
                 val c = settings.current()
@@ -544,7 +554,10 @@ class RelayClient(private val settings: SettingsStore) {
             if (!opened) {
                 _state.value = ConnState.OFFLINE
             }
-            if (!wantOpen) break
+            if (!wantOpen) {
+                _state.value = ConnState.OFFLINE
+                continue
+            }
             _state.value = ConnState.OFFLINE
             // How long the socket that just ended had been up. Zero when it
             // never opened; the retry policy needs that distinction.
@@ -554,7 +567,6 @@ class RelayClient(private val settings: SettingsStore) {
             withTimeoutOrNull(backoffMs + Random.nextLong(0, 400)) { wake.receive() }
             backoffMs = nextBackoffMs(backoffMs, upMs)
         }
-        _state.value = ConnState.OFFLINE
     }
 
     private companion object {

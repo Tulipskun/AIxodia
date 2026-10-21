@@ -715,8 +715,12 @@ fun ChatScreen(
         ) { pad ->
             var threadLoaded by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { delay(400); threadLoaded = true }
-            LaunchedEffect(conn, discoveryState.phase) {
-                if (conn == ConnState.OFFLINE && (discovery == null || discoveryState.phase != com.tulipskun.aixodia.data.remote.DiscoveryPhase.CONNECTED)) {
+            LaunchedEffect(conn) {
+                // The discovery row saying the daemon is alive is not proof
+                // that this phone's socket reached it: a bad token, a stale
+                // room or a relay edge can leave the dot red while D1 looks
+                // healthy. Show the card whenever the live link is down.
+                if (conn == ConnState.OFFLINE) {
                     kotlinx.coroutines.delay(1500L)
                     showOfflineCard = true
                 } else {
