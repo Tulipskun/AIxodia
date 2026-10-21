@@ -1,11 +1,15 @@
 # AIxodia
 
-Android chat client (Kotlin + Compose) for the `Tulipskun/ai-engine` daemon. History
-lives in Cloudflare D1 and the phone reads and writes it **directly** over the
-D1 REST API (D-011) — there is no Cloudflare Worker in this project.
+Android chat client (Kotlin + Compose) for the `Tulipskun/aixodia-engine` daemon. History
+lives **on the engine** (its own store) and the phone reads it through the
+daemon's `/v1/...` HTTP API over the quick tunnel; Room keeps the copy the
+screens draw. Cloudflare D1 is read directly by the phone for one thing only:
+the daemon's own row in `system_state`, which says where that tunnel is. There
+is no Cloudflare Worker in this project (D-011).
 
-- **Direct live display**: authenticated WebSocket to the `ai` daemon mobile endpoint — JSON `Input`/`Output` frames mirroring `ai/sdk/io.go` (+ `types.go`, `trace.go`). The daemon serves it itself in `ai/transport/mobile/`.
-- **History from Cloudflare D1, direct**: `data/remote/D1Api.kt` calls `POST https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{database}/query` with the operator's Cloudflare API token, so the chat list and old turns stay readable and editable **while the daemon is stopped**.
+- **One socket for everything live**: authenticated WebSocket to the engine's `/room` — JSON chat frames plus multiplexed terminal streams and HTTP-over-socket rpcs. The engine serves it in `io/relay` (transport) on top of the `io/mobile` hub; frames mirror the daemon's `io/mobile` wire types.
+- **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers.
+- **Daemon discovery from D1**: `data/remote/D1Api.kt` runs one `SELECT` against `system_state` (`daemon/url`, `daemon/version`, `daemon/heartbeat`) with the operator's Cloudflare API token. That is how the phone learns the current quick-tunnel URL and whether the daemon is alive without asking anyone.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
 - **Chunked history**: the thread holds one page of messages (60 rows), not the whole
   transcript; scrolling to the top asks for the next page and keeps the reader's
@@ -27,15 +31,17 @@ db/             Cloudflare D1 schema + migrations (applied with wrangler, no Wor
 
 1. **D1**: `wrangler d1 create aixodia`, then
    `wrangler d1 execute aixodia --file=db/schema.sql` — both go straight to the
-   Cloudflare API, nothing is deployed. See `db/README.md`.
-2. **Daemon**: build and run `Tulipskun/ai-engine` (`cmd/ai-engine`) with mobile enabled — it
-   serves the WebSocket, opens the quick tunnel, writes its URL into the D1
-   `nodes` row and mirrors every finished turn into D1 itself.
+   Cloudflare API, nothing is deployed. The schema is provider config plus the
+   `system_state` keys the daemon writes and the phone reads. See `db/README.md`.
+2. **Daemon**: run `Tulipskun/aixodia-engine` (`main.go`) — it serves `/room`,
+   opens the quick tunnel, writes its URL and heartbeat into the D1
+   `system_state` rows and stores the chat history itself.
 3. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
    **Cloudflare API token** — the account and database ids are resolved from it
-   and cached, so no id is ever typed — then press "ค้นหา ai" to pick up the
-   daemon's current tunnel URL for the live socket. Providers, their write-only
-   key pools and the per-agent model routes live on the same screen.
+   and cached, so no id is ever typed. Discovery then finds the daemon's tunnel
+   URL by itself (one `system_state` read every 30s, `DaemonDiscovery`), so
+   there is no address to paste. Providers, their write-only key pools and the
+   per-agent model routes live on the same screen.
 
 ## Architecture
 
@@ -47,31 +53,65 @@ is older than 90s. `ai` keeps no local state: config and sessions live in D1, an
 the Cloudflare API token (sent in the WS hello, memory-only) is the daemon's
 credential too.
 
-Two back ends, one credential:
+One credential, three transports:
 
-- **D1 REST** — chat list, paging, session create/rename/delete (`D1Api`).
-- **Daemon over the tunnel** — the live socket, the provider catalogue, provider
-  health, per-chat model pins and the agent settings, because validating those
-  needs the running router rather than the database.
+- **`/room` WebSocket** — the live tail, terminal streams and every HTTP call
+  made as an rpc frame (`RelayClient`). One handshake, one token, one reconnect
+  loop (`RelayClient.loop`), which redials with a capped backoff that only
+  resets after a socket stayed up (see `nextBackoffMs`).
+- **HTTP over the tunnel** — history paging, session create/rename/delete, the
+  provider catalogue, provider health, per-chat model pins and the agent
+  settings (`HistoryApi`). The daemon's router validates those, which is why
+  they are not read from the database.
+- **D1 REST** — only discovery: the daemon's tunnel URL, version and heartbeat
+  (`D1Api.node()`). Nothing the phone edits lives in D1.
 
 ## Authentication — one token, two steps
 
 1. The daemon is only reachable through a random `*.trycloudflare.com` quick
    tunnel (nothing published, no port forwarding).
-2. The app sends the **Cloudflare API token** in the WebSocket handshake header
-   (`Authorization: Bearer …`); the daemon verifies it against Cloudflare
-   (`GET /user/tokens/verify`) before upgrading and keeps it in memory only.
+2. The app sends the **Cloudflare API token** as `Authorization: Bearer …` — in
+   the WebSocket handshake for `/room` and in a header on every `/v1/...` HTTP
+   call. The daemon checks it before upgrading or answering and keeps it in
+   memory only.
 
-Missing header → `401` (not counted). Wrong token five times → `429` and a 30s
-lockout for that address, then 60/120/240/300s. Cloudflare unreachable → `503`
-(fail closed, not counted). There is **no second token** and none may be added
+An engine that cannot verify its `CF_TOKEN` against Cloudflare D1 at startup
+exits instead of serving (`db.Verify`). After that, every request — the `/room`
+handshake and each `/v1/...` call — compares the bearer to that token and
+answers `401` when it is missing or wrong, so a tunnel with a rotated token
+does not let a stranger in. There is **no second token** and none may be added
 without approval; the daemon owns no credential of its own.
+
+## Reconnecting
+
+One loop owns the socket (`RelayClient.loop`); every trigger below only asks it
+to dial now, so there is never a second connection racing the first.
+
+- **Failure or close** — redial with a capped, jittered backoff (1s → 8s). The
+  delay resets to 1s only after a socket stayed up 10s (`nextBackoffMs`), so a
+  server that accepts and immediately drops is not retried once a second.
+- **Engine absent while the socket is up** (`{"ctl":"presence","engine":false}`)
+  — the state drops to CONNECTING and the socket is kept: the room is the
+  phone's, the engine is what left. The hello is sent again when presence
+  returns, which is when the streamed answer resumes arriving.
+- **Foreground or network change** — `reconnectIfDown()` redials only when the
+  link is not ONLINE, so coming back to the app never resets a healthy socket.
+- **Daemon moved** — discovery adopts the new tunnel URL (`Adopt`), or sees the
+  same URL with a new `started` (`Keep` + replaced). In both cases the socket
+  and the terminal are redialed, because every stream died with the old process.
+- **Terminal** — a dropped stream reattaches on the same socket; a stream the
+  engine never answered is redialed with a new stream id, and the socket itself
+  is replaced only when it is not ONLINE, so a swallowed terminal open cannot
+  kill a chat turn that is streaming on it.
 
 ## Production DB (runtime config, nothing hardcoded)
 
-- Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds sessions/turns/nodes/state.
+- Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds provider config and the
+  daemon's `system_state` keys. Chat history is the engine's own store, not a
+  D1 table.
 - One credential does the work: the Cloudflare API token typed in Settings reads
-  and writes D1, and the same token authenticates the daemon handshake.
+  the daemon row out of D1, and the same token authenticates both the `/room`
+  WebSocket and the `/v1/...` HTTP calls.
 - The token used for `wrangler` stays in the shell (`CLOUDFLARE_API_TOKEN`); the
   repo contains config (`config/aixodia.example.json`) and no secrets. It needs
   Account → **D1: Edit**, which is what the app and the daemon both use it for.
@@ -100,10 +140,10 @@ The key is not in this repository: it lives in the private
 
 ## Test it right now
 
-Start the daemon (`Tulipskun/ai-engine`, mobile enabled), paste the Cloudflare API
-token in the app's settings, press "ค้นหา ai" to fill the tunnel URL, and send a
-message. The provider, key and per-agent model are set from the phone
-(AX-083..094).
+Start the daemon (`Tulipskun/aixodia-engine`), paste the Cloudflare API token in
+the app's settings, and send a message: discovery finds the tunnel URL and the
+socket dials `/room` without any further setup. The provider, key and per-agent
+model are set from the phone (AX-083..094).
 
 ## Terminal transport: WebRTC P2P (planned)
 

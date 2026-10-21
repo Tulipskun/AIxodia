@@ -12,10 +12,10 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Cloudflare D1 over its REST API. The phone reads and writes
- * the history tables itself, so the Worker that used to sit in front of D1 is
- * gone. The daemon has talked to this same API since CHANGE-081, which is why
- * nothing new has to be deployed for the app to do it too.
+ * Cloudflare D1 over its REST API. In this build the phone uses it for one
+ * thing: reading the daemon's own row out of `system_state` so it knows where
+ * the quick tunnel is (`node()`). Chat history is the daemon's local store and
+ * is read through `/v1/...` over the tunnel; no Worker sits in front of D1.
  *
  * One credential is enough: the account and the database are resolved from the
  * token with the same three calls the daemon makes (`/user/tokens/verify`, then
@@ -23,9 +23,9 @@ import java.util.concurrent.TimeUnit
  * operator never types a Cloudflare id.
  *
  * This class owns what has to be shared off the machine: the daemon's own row,
- * i.e. the tunnel URL the phone dials. Chat history is the daemon's local
- * store; provider keys and settings live there too, because validating them
- * needs the running router rather than the database.
+ * i.e. the tunnel URL the phone dials. Provider keys and settings live on the
+ * daemon too, because validating them needs the running router rather than the
+ * database.
  */
 class D1Api(private val settings: SettingsStore) {
 
