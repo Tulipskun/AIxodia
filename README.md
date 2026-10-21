@@ -107,7 +107,7 @@ message. The provider, key and per-agent model are set from the phone
 
 ## Terminal transport: WebRTC P2P (planned)
 
-The current terminal stream is carried inside the shared Cloudflare Durable Objects relay WebSocket. This means terminal output and input consume relay traffic and relay messages for the entire session.
+The current terminal stream is carried as a stream inside the app's one WebSocket to the engine (`/room`, reached through the engine's Cloudflare quick tunnel). Terminal input and output therefore share that socket with chat and with the HTTP rpc calls for the entire session.
 
 The target design is to move **terminal bytes only** to a WebRTC DataChannel:
 
@@ -115,7 +115,7 @@ The target design is to move **terminal bytes only** to a WebRTC DataChannel:
 - Android uses libwebrtc; the Linux engine uses Pion WebRTC.
 - Prefer a direct ICE path with STUN. Configure TURN as a fallback for networks where direct connectivity fails.
 - Once the DataChannel is open, terminal input, PTY output, resize events, and terminal control messages use that channel. Keep the existing PTY session and terminal UI semantics.
-- If the P2P connection fails, reconnect through the existing relay transport so terminal access remains available.
+- If the P2P connection fails, reconnect through the existing socket transport so terminal access remains available.
 - Authenticate signaling and session attachment with short-lived, scoped credentials. Do not expose an unauthenticated shell or send the Cloudflare API token to an arbitrary peer.
 
 **Status:** design target only. The current TerminalSocket still uses RelayClient; P2P is not active until both the Android and engine implementations, signaling protocol, TURN fallback, and tests are merged. Chat and HTTP RPC continue using the existing transport unless separately redesigned.

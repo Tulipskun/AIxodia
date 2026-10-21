@@ -59,10 +59,11 @@ internal enum class RelayFrameKind { CONTROL, RPC, TERM, CHAT }
 /**
  * Two vocabularies arrive on this socket and they do not mix.
  *
- * The relay's own control frames carry "ctl" ({"ctl":"presence","engine":true},
- * {"ctl":"superseded-phone"}), while the engine's frames carry "ch"
- * ({"ch":"chat"...}, {"ch":"rpc"...}, {"ch":"term"...}). A frame with neither is
- * a chat frame, because that is what the engine sends for the streamed answer.
+ * Control frames carry "ctl" ({"ctl":"presence","engine":true} when the socket
+ * pairs, {"ctl":"superseded-phone"} when a former relay refused the other
+ * phone), while the engine's frames carry "ch" ({"ch":"chat"...},
+ * {"ch":"rpc"...}, {"ch":"term"...}). A frame with neither is a chat frame,
+ * because that is what the engine sends for the streamed answer.
  *
  * Reading only "ch" is how a phone ends up connected but never ONLINE: the
  * presence frame has no "ch", so it looks like a chat frame, the engine is
@@ -78,13 +79,13 @@ internal fun relayFrameKind(ctl: String?, ch: String?): RelayFrameKind {
 }
 
 /**
- * The app's one connection: every byte to the engine travels here.
+ * The app's one connection: every stream to the engine travels here.
  *
- * The engine dials the relay room from its side; this side is the other half of
- * that room. Chat frames, the terminal's bytes and plain HTTP requests all share
+ * It dials the engine's `/room` socket on the current tunnel URL. Chat frames,
+ * the terminal's bytes and the multiplexed terminal control frames all share
  * the socket, so a phone needs one handshake, one token and one reconnect loop.
- * The relay itself is transparent: it pairs the two sockets and forwards, so
- * everything in this class is the engine's wire protocol, not the relay's.
+ * The engine answers HTTP calls as rpc frames on the same socket, which is why
+ * HistoryApi's plain requests no longer need a transport of their own.
  */
 class RelayClient(private val settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -317,8 +318,8 @@ class RelayClient(private val settings: SettingsStore) {
                 _state.value = if (here) ConnState.ONLINE else ConnState.CONNECTING
                 if (here) hello()
             }
-            // Another phone took the room. The relay closes this socket right
-            // after, and the close handler takes it from there.
+            // A former relay closed this socket for another phone; the close
+            // handler takes it from there. A direct socket never sends it.
             "superseded-phone" -> {
                 Log.i(TAG, "another phone took the room")
                 _engine.value = false
@@ -401,14 +402,18 @@ class RelayClient(private val settings: SettingsStore) {
             var opened = false
             try {
                 val c = settings.current()
-                if (c.wsUrl.isBlank() || c.token.isBlank()) {
+                // The socket address always follows the daemon address, so a
+                // stored wsUrl from an older build (the relay room) cannot
+                // outlive the switch to the tunnel.
+                val wsUrl = SettingsStore.wsUrlFor(c.daemonUrl).ifBlank { c.wsUrl }
+                if (wsUrl.isBlank() || c.token.isBlank()) {
                     _state.value = ConnState.OFFLINE
                     delay(2000)
                     continue
                 }
                 _state.value = ConnState.CONNECTING
                 val req = Request.Builder()
-                    .url(c.wsUrl)
+                    .url(wsUrl)
                     .header("Authorization", "Bearer ${c.token}")
                     .build()
                 val ready = CompletableDeferred<Unit>()

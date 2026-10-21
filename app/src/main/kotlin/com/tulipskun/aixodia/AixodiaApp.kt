@@ -40,7 +40,7 @@ class AppContainer(app: Application) {
     val settings = SettingsStore(app)
     // One socket for the whole app: chat, terminal and the HTTP API all ride it.
     val relay = RelayClient(settings)
-    val historyApi = HistoryApi(settings, relay)
+    val historyApi = HistoryApi(settings)
     val socket = AiDirectSocket(settings, relay)
     val terminal = TerminalSocket(settings, relay)
     val repo = ChatRepository(db, historyApi, socket)

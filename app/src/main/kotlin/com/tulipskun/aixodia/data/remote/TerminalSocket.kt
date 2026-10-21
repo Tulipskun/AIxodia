@@ -76,11 +76,11 @@ sealed interface TermEvent {
 }
 
 /**
- * One terminal, carried as a stream inside the app's single relay socket.
+ * One terminal, carried as a stream inside the app's single engine socket.
  *
  * It used to be its own WebSocket to `/terminal`, which needed a second
- * handshake and a second reachable path. The relay has neither: one socket
- * carries chat, the API and every terminal. A terminal is opened with a control
+ * handshake and a second reachable path. The one `/room` socket carries chat,
+ * the API and every terminal instead. A terminal is opened with a control
  * frame, addressed by an id, and closed when the window goes.
  *
  * The shell itself still lives on the engine, keyed by the persisted session
@@ -161,11 +161,11 @@ class TerminalSocket(
     private var refreshJob: Job? = null
 
     init {
-        // The engine's half of the relay can drop and re-register while the
-        // phone's socket never moves (the worker tells us with presence
-        // false/true). Every stream id lives in that engine-side relay session,
-        // so at that moment all of them are dead even though ours look open.
-        // Presence coming back is the signal to reattach the shell on screen.
+        // The engine can drop and re-register while the phone's socket never
+        // moves (a relay edge used to tell us with presence false/true). Every
+        // stream id lives in that engine-side session, so at that moment all of
+        // them are dead even though ours look open. Presence coming back is the
+        // signal to reattach the shell on screen.
         scope.launch {
             var wasUp = relay?.enginePresent?.value ?: true
             relay?.enginePresent?.collect { up ->

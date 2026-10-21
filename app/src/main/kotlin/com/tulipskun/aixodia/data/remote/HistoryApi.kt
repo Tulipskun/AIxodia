@@ -136,13 +136,10 @@ internal fun pageTurns(rows: List<TurnRow>, beforeSeq: Long, limit: Int): List<T
     return if (limit <= 0) before else before.takeLast(limit)
 }
 
-class HistoryApi(
-    private val settings: SettingsStore,
-    private val relay: RelayClient? = null,
-) {
+class HistoryApi(private val settings: SettingsStore) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    // History is Cloudflare D1 read directly; everything in this class
-    // that still talks to the daemon goes over the app's one relay socket.
+    // History is Cloudflare D1 read directly; everything in this class that
+    // talks to the daemon calls the tunnel URL over ordinary HTTP.
     private val d1 = D1Api(settings)
     // The settings calls are not all instant: asking the daemon to re-check its
     // providers means waiting for the gateways to answer, through a connection
@@ -153,7 +150,6 @@ class HistoryApi(
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(150, TimeUnit.SECONDS)
-        .addInterceptor(RelayInterceptor(settings, relay))
         .build()
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
@@ -736,27 +732,8 @@ class HistoryApi(
         runCatching {
             val query = "session_id=" + URLEncoder.encode(sessionId, "UTF-8") +
                 "&name=" + URLEncoder.encode(name, "UTF-8")
-            // Over the relay there is no address to stream to: the file is sent
-            // as rpc frames, which the engine joins before it hands the request
-            // to its own upload handler.
-            val online = relay?.takeIf { it.isOnline }
-            if (online != null) {
-                val bytes = open()?.use { it.readBytes() } ?: return@runCatching null
-                val reply = online.rpc(
-                    "POST",
-                    "/v1/attachments?$query",
-                    bytes,
-                    mapOf("Content-Type" to mime),
-                )
-                if (!reply.isSuccessful) return@runCatching null
-                val o = JSONObject(reply.text())
-                return@runCatching com.tulipskun.aixodia.data.model.AttachmentRef(
-                    name = o.optString("name"),
-                    path = o.optString("path"),
-                    mime = o.optString("mime"),
-                    size = o.optLong("size"),
-                )
-            }
+            // The tunnel is an ordinary HTTPS address, so the file streams in
+            // the request body instead of being buffered into rpc frames.
             val body = object : RequestBody() {
                 override fun contentType(): MediaType? = mime.toMediaTypeOrNull()
                 override fun writeTo(sink: BufferedSink) {

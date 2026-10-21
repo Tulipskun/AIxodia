@@ -240,7 +240,9 @@ class SettingsStore(private val ctx: Context) {
                 clean.startsWith("http://") -> "ws"
                 else -> return ""
             }
-            return "$scheme://" + clean.substringAfter("://")
+            // The engine serves its multiplexed phone socket on /room, next to
+            // the plain HTTP API the same tunnel exposes.
+            return "$scheme://" + clean.substringAfter("://") + "/room"
         }
     }
 }
