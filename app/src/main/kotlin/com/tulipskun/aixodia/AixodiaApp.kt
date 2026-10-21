@@ -42,7 +42,7 @@ class AppContainer(app: Application) {
     val relay = RelayClient(settings)
     val historyApi = HistoryApi(settings)
     val socket = AiDirectSocket(settings, relay)
-    val terminal = TerminalSocket(settings, relay)
+    val terminal = TerminalSocket(settings, relay, historyApi)
     val repo = ChatRepository(db, historyApi, socket)
     val discovery = DaemonDiscovery(settings, historyApi, socket, terminal, scope)
 

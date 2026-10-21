@@ -50,6 +50,15 @@ internal fun shouldReattachAfterBackground(state: TermState, wanted: Boolean, aw
  */
 private const val READY_TIMEOUT = 10_000L
 
+/**
+ * How often a dialing terminal re-reads the daemon address itself. Discovery
+ * polls every 30s, but an engine redeploy replaces the quick-tunnel URL and the
+ * app may still be holding the old one when the window opens. Waiting for the
+ * next discovery tick made the terminal sit on "connecting" until an unrelated
+ * chat send woke it; opening a terminal now checks the row before dialing.
+ */
+private const val DAEMON_RECHECK_MS = 30_000L
+
 /** Where the terminal window stands, for the header line. */
 enum class TermState { CLOSED, CONNECTING, OPEN, ENDED }
 
@@ -90,6 +99,7 @@ sealed interface TermEvent {
 class TerminalSocket(
     private val settings: SettingsStore,
     private val relay: RelayClient? = null,
+    private val history: HistoryApi? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val resizeAdapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
@@ -505,9 +515,51 @@ class TerminalSocket(
             lost
         }
 
+    /**
+     * Moves the stored address to the live daemon before the terminal dials.
+     *
+     * Discovery owns this normally, but its next tick can be up to 30s away
+     * (longer after a failed read). During that gap a terminal opened right
+     * after an engine self-update keeps dialing the dead quick-tunnel host and
+     * looks disconnected. Returns true when the address changed, so the relay
+     * socket is redialed with the new one too.
+     */
+    private suspend fun refreshDaemonAddress(): Boolean {
+        val h = history ?: return false
+        val current = try {
+            settings.current()
+        } catch (t: Throwable) {
+            return false
+        }
+        if (current.token.isBlank()) return false
+        val node = try {
+            withTimeoutOrNull(5_000) { h.node() }
+        } catch (t: Throwable) {
+            Log.w(TAG, "daemon address refresh failed", t)
+            null
+        } ?: return false
+        val url = node.tunnelUrl.trim().trimEnd('/')
+        if (!node.online || url.isBlank()) return false
+        if (url == current.daemonUrl.trim().trimEnd('/')) return false
+        return try {
+            settings.saveDaemon(url)
+            Log.i(TAG, "daemon moved to $url")
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "could not save the new daemon address", t)
+            false
+        }
+    }
+
     private suspend fun dial() {
         var backoff = RETRY_MS
+        var lastAddressCheck = 0L
         while (!closing) {
+            val now = System.currentTimeMillis()
+            if (history != null && now - lastAddressCheck >= DAEMON_RECHECK_MS) {
+                lastAddressCheck = now
+                if (refreshDaemonAddress()) relay?.reconnect()
+            }
             val c = try {
                 settings.current()
             } catch (t: Throwable) {
@@ -685,7 +737,12 @@ class TerminalSocket(
                 if (closing) return
                 _state.value = TermState.CONNECTING
                 _error.value = 0
-                _detail.value = "no answer from the engine; retrying"
+                _detail.value = "no answer from the engine; redialing"
+                // The relay can still look ONLINE while its socket points at a
+                // quick-tunnel host that died with the old engine. Dialing
+                // again over that same socket would just lose the open frame
+                // forever, so replace the socket as well as the stream.
+                r.reconnect()
                 delay(RETRY_MS)
                 continue
             }
