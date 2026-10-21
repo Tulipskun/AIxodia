@@ -158,11 +158,18 @@ class TerminalView @JvmOverloads constructor(
         italicPaint.textSize = paint.textSize
         boldItalicPaint.textSize = paint.textSize
         // A monospace font is monospaced for every glyph, so one advance is the
-        // cell width; the line box comes from the font metrics.
+        // cell width; the line box comes from the font metrics. Bold and italic
+        // faces can have a taller ascent than the regular face. Measuring only
+        // the regular one made the top of a bold first row (the TUI title, for
+        // example) rise above y=0, where the view clipped it.
         cellWidth = paint.measureText("M").coerceAtLeast(1f)
-        val fm = paint.fontMetrics
-        cellHeight = (fm.descent - fm.ascent + fm.leading).coerceAtLeast(1f)
-        baseline = -fm.ascent
+        val metrics = listOf(paint, boldPaint, italicPaint, boldItalicPaint)
+            .map { it.fontMetrics }
+        val ascent = metrics.minOf { it.ascent }
+        val descent = metrics.maxOf { it.descent }
+        val leading = metrics.maxOf { it.leading }
+        cellHeight = (descent - ascent + leading).coerceAtLeast(1f)
+        baseline = -ascent
     }
 
     fun setEmulator(emulator: TerminalEmulator) {
