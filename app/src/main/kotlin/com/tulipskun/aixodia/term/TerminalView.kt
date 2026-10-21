@@ -128,6 +128,7 @@ class TerminalView @JvmOverloads constructor(
         color = 0x664A90D9
     }
     private var selecting = false
+    private var selectingDrag = false
     private var selAnchorRow = 0
     private var selAnchorCol = 0
     private var selCursorRow = 0
@@ -497,6 +498,7 @@ class TerminalView @JvmOverloads constructor(
         selCursorRow = row
         selCursorCol = to
         selecting = true
+        selectingDrag = false
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         startSelectionMode()
         invalidate()
@@ -530,6 +532,7 @@ class TerminalView @JvmOverloads constructor(
         val buffer = em.buffer
         if (buffer.lines.isEmpty()) return
         selecting = true
+        selectingDrag = false
         selAnchorRow = 0
         selAnchorCol = 0
         selCursorRow = buffer.lines.size - 1
@@ -689,7 +692,13 @@ class TerminalView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_MOVE -> {
                 if (selecting) {
-                    extendSelection(event.x, event.y)
+                    if (!selectingDrag &&
+                        (kotlin.math.abs(event.y - downY) > touchSlop ||
+                            kotlin.math.abs(event.x - downX) > touchSlop)
+                    ) {
+                        selectingDrag = true
+                    }
+                    if (selectingDrag) extendSelection(event.x, event.y)
                     return true
                 }
                 velocityTracker.addMovement(event)
@@ -714,8 +723,9 @@ class TerminalView @JvmOverloads constructor(
                 velocityTracker.addMovement(event)
                 if (selecting) {
                     // The finger has left the screen; the selection stays put
-                    // until Copy, Select all, or a tap elsewhere.
-                    extendSelection(event.x, event.y)
+                    // until Copy, Select all, or a tap elsewhere. A long press
+                    // that never moved keeps the whole word it selected.
+                    if (selectingDrag) extendSelection(event.x, event.y)
                     return true
                 }
                 val quick = event.eventTime - downTime < 200
