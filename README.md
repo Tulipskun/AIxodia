@@ -104,3 +104,19 @@ Start the daemon (`Tulipskun/ai-engine`, mobile enabled), paste the Cloudflare A
 token in the app's settings, press "ค้นหา ai" to fill the tunnel URL, and send a
 message. The provider, key and per-agent model are set from the phone
 (AX-083..094).
+
+## Terminal transport: WebRTC P2P (planned)
+
+The current terminal stream is carried inside the shared Cloudflare Durable Objects relay WebSocket. This means terminal output and input consume relay traffic and relay messages for the entire session.
+
+The target design is to move **terminal bytes only** to a WebRTC DataChannel:
+
+- Cloudflare Durable Objects are signaling only: pair the phone and engine, then forward SDP offers/answers and ICE candidates. They must not proxy terminal input or output.
+- Android uses libwebrtc; the Linux engine uses Pion WebRTC.
+- Prefer a direct ICE path with STUN. Configure TURN as a fallback for networks where direct connectivity fails.
+- Once the DataChannel is open, terminal input, PTY output, resize events, and terminal control messages use that channel. Keep the existing PTY session and terminal UI semantics.
+- If the P2P connection fails, reconnect through the existing relay transport so terminal access remains available.
+- Authenticate signaling and session attachment with short-lived, scoped credentials. Do not expose an unauthenticated shell or send the Cloudflare API token to an arbitrary peer.
+
+**Status:** design target only. The current TerminalSocket still uses RelayClient; P2P is not active until both the Android and engine implementations, signaling protocol, TURN fallback, and tests are merged. Chat and HTTP RPC continue using the existing transport unless separately redesigned.
+
