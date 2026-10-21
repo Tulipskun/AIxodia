@@ -166,6 +166,15 @@ class TerminalEmulatorTest {
         assertEquals(30, term.columns)
         assertEquals(8, term.rows)
         assertEquals(8, term.buffer.lines.size)
+        // The buffer's own geometry has to follow: drawing and the CSI
+        // operations read buffer.columns/rows, and a stale pair after a
+        // keyboard resize was why the page stopped at the old height.
+        assertEquals(30, term.buffer.columns)
+        assertEquals(8, term.buffer.rows)
+        // A full-screen clear must reach the rows that were just added.
+        term.send("top\r\n\u001b[H\u001b[2J")
+        assertEquals(" ", term.textAt(7, 0))
+        assertEquals(30, term.buffer.lines[7].columns)
     }
 
     @Test

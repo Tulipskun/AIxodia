@@ -251,7 +251,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                             Column {
                                 TerminalHeader(
                                     status = statusLine(state, errorRes, ready, ended) +
-                                        (if (detail.isNotBlank()) "  ·  $detail" else ""),
+                                        (if (detail.isNotBlank() && state != TermState.OPEN) "  ·  $detail" else ""),
                                     canRestart = state == TermState.CLOSED || state == TermState.ENDED,
                                     onRestart = restart,
                                     onCloseSession = closeSession,

@@ -135,7 +135,7 @@ class TerminalRow(columns: Int) {
  * these — the normal screen and the alternate one full-screen programs switch
  * to — and the same operations run on both.
  */
-class TerminalBuffer(val columns: Int, val rows: Int, private val scrollbackLimit: Int) {
+class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimit: Int) {
     val lines = ArrayList<TerminalRow>(rows)
     val scrollback = ArrayList<TerminalRow>()
 
@@ -258,6 +258,8 @@ class TerminalBuffer(val columns: Int, val rows: Int, private val scrollbackLimi
     }
 
     fun resize(newColumns: Int, newRows: Int) {
+        columns = newColumns
+        rows = newRows
         for (row in lines) row.resize(newColumns)
         while (lines.size < newRows) lines.add(TerminalRow(newColumns).also { it.reset(defaultFg, defaultBg) })
         while (lines.size > newRows) {

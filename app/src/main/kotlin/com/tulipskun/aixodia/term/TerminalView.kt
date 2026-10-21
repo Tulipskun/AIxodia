@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
-import android.os.SystemClock
 import android.text.InputType
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -20,12 +19,13 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 
 /**
- * The shortest gap between two size reports to the shell: about 30 fps. Every
- * report makes a full-screen program repaint, so the rate is capped — but the
- * cap is small enough that the grid keeps up with the keyboard instead of
- * arriving after it.
+ * How long the layout has to hold still before the grid and the shell are
+ * resized. The keyboard animates over several frames; resizing on each one
+ * makes a full-screen program repaint repeatedly and moves lines in and out of
+ * scrollback, which reads as a stuttering, half-drawn screen. Waiting for the
+ * last frame sends one resize, at the size the user will actually type into.
  */
-private const val RESIZE_THROTTLE_MS = 32L
+private const val RESIZE_SETTLE_MS = 140L
 
 /**
  * Draws a [TerminalEmulator] and turns fingers and keys into bytes. Everything
@@ -146,24 +146,20 @@ class TerminalView @JvmOverloads constructor(
      * report per [RESIZE_THROTTLE_MS], and the last one lands as the layout
      * settles.
      */
-    private val pendingResize = Runnable {
-        lastResizeAt = SystemClock.uptimeMillis()
-        resizeToView()
-    }
+    private val pendingResize = Runnable { resizeToView() }
     private var sizedAtLeastOnce = false
-    private var lastResizeAt = 0L
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        removeCallbacks(pendingResize)
         if (sizedAtLeastOnce) {
-            removeCallbacks(pendingResize)
-            val sinceLast = SystemClock.uptimeMillis() - lastResizeAt
-            postDelayed(pendingResize, (RESIZE_THROTTLE_MS - sinceLast).coerceAtLeast(0L))
+            // The keyboard is still moving. Let the layout settle first; the
+            // old grid keeps drawing (clipped, if it is taller) until then.
+            postDelayed(pendingResize, RESIZE_SETTLE_MS)
         } else {
             // The first measurement is not an animation: a terminal that waits
             // to tell the shell its real size starts at 80x24 and grows.
             sizedAtLeastOnce = true
-            lastResizeAt = SystemClock.uptimeMillis()
             resizeToView()
         }
         // The canvas fills the new area immediately; the grid catches up.
@@ -178,12 +174,9 @@ class TerminalView @JvmOverloads constructor(
         if (cols == em.columns && rows == em.rows) return
         em.resize(cols, rows)
         onResize?.invoke(cols, rows)
-        if (pinnedToBottom) scrollTopPx = maxScroll().toFloat()
+        scrollTopPx = 0f
     }
 
-    private fun contentRows(): Int = emulator?.rows ?: 0
-    private fun contentHeight(): Int = (contentRows() * cellHeight).toInt()
-    private fun maxScroll(): Int = 0
 
     private fun clampScroll() {
         scrollTopPx = 0f
@@ -275,8 +268,8 @@ class TerminalView @JvmOverloads constructor(
         // the view. The scrollback the buffer keeps is for reading history
         // elsewhere (and for correct reflow); it is never painted, so a
         // reconnect's replay cannot leave an old frame above the live one.
-        for (v in 0 until buffer.rows) {
-            val row = buffer.lines.getOrNull(v) ?: continue
+        for (v in 0 until buffer.lines.size) {
+            val row = buffer.lines[v]
             drawRow(canvas, row, v * cellHeight, v)
         }
 
