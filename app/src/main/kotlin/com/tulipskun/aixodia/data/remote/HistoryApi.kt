@@ -43,6 +43,8 @@ import java.net.URLEncoder
  */
 @JsonClass(generateAdapter = true)
 data class TurnRow(
+    /** The engine's sequential message id; 0 only on older engines. */
+    @Json(name = "id") val messageId: Long = 0,
     @Json(name = "seq") val seq: Long = 0,
     @Json(name = "role") val role: String = "",
     @Json(name = "agent") val agent: String = "",
@@ -368,6 +370,7 @@ class HistoryApi(private val settings: SettingsStore) {
                     val out = ArrayList<TurnRow>()
                     for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
                         out.add(TurnRow(
+                            messageId = o.optLong("id"),
                             seq = o.optLong("seq"),
                             role = o.optString("role"),
                             agent = o.optString("agent"),

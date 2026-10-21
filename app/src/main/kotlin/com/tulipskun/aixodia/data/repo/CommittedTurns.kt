@@ -12,10 +12,15 @@ internal fun mergeCommittedTurns(
     var nextSeq = (local + committed).maxOfOrNull { it.seq }?.plus(1) ?: 1
     for (incoming in committed.sortedBy { it.seq }) {
         val twin = rows.values.firstOrNull {
-            it.role == incoming.role && (
-                (incoming.role == "user" && clientMsgId.isNotBlank() && it.clientMsgId == clientMsgId) ||
-                    (it.seq == incoming.seq && it.text == incoming.text)
-                )
+            // The message id is authoritative when both sides have one, so a
+            // replay of the same committed row cannot make it look like a
+            // second message. Optimistic rows carry 0 until the engine assigns
+            // the sequential id and fall back to client id or seq/text.
+            (incoming.messageId > 0L && it.messageId == incoming.messageId) ||
+                (it.role == incoming.role && (
+                    (incoming.role == "user" && clientMsgId.isNotBlank() && it.clientMsgId == clientMsgId) ||
+                        (it.seq == incoming.seq && it.text == incoming.text)
+                    ))
         }
         if (twin != null) rows.remove(twin.seq)
         val displaced = rows.remove(incoming.seq)
@@ -25,6 +30,7 @@ internal fun mergeCommittedTurns(
             rows[movedSeq] = displaced.copy(seq = movedSeq)
         }
         rows[incoming.seq] = incoming.copy(
+            messageId = if (incoming.messageId > 0L) incoming.messageId else twin?.messageId ?: 0L,
             clientMsgId = twin?.clientMsgId.orEmpty(),
             thinkingMs = twin?.thinkingMs ?: 0,
         )

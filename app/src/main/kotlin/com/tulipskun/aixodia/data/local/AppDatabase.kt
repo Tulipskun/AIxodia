@@ -43,6 +43,14 @@ data class SessionEntity(
 data class MessageEntity(
     val sessionId: String,
     val seq: Long,
+    /**
+     * The engine's sequential message id. It is the row's identity and what
+     * the UI keys rows by; seq stays the sort order and the page cursor. Zero
+     * means a row written before the engine exposed ids (or an optimistic row
+     * not committed yet), and [com.tulipskun.aixodia.data.model.ChatMessage]
+     * falls back to "sessionId:seq".
+     */
+    val messageId: Long = 0,
     val role: String,
     val text: String,
     val createdAt: Long,
@@ -182,7 +190,7 @@ interface MessageDao {
  * error and not a warning: it throws the first time the database is opened, and
  * the app closes before anything on screen. That is what shipped as v0.1.270.
  */
-internal const val DB_VERSION = 11
+internal const val DB_VERSION = 12
 
 // The version has to move whenever an entity gains a column, and it is the one
 // number nothing else forces you to touch: adding a field to MessageEntity and
@@ -298,10 +306,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v12 adds the engine's sequential message id. Existing rows keep 0
+        // and fall back to their seq-derived key until the next pull replaces
+        // it with the server's id.
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN messageId INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var inst: AppDatabase? = null
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx, AppDatabase::class.java, "aixodia.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build()
                 .also { inst = it }
         }

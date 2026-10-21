@@ -9,7 +9,7 @@ import org.junit.Test
 
 class CommittedTurnsTest {
     private fun row(seq: Long, role: String, text: String, clientId: String = "") =
-        MessageEntity("s", seq, role, text, 1000, clientMsgId = clientId)
+        MessageEntity(sessionId = "s", seq = seq, role = role, text = text, createdAt = 1000, clientMsgId = clientId)
 
     @Test fun newTailKeepsTheOlderThreadAndExactFooter() {
         val old = row(1, "model", "older", "old-id").copy(thinkingMs = 250)
@@ -22,6 +22,13 @@ class CommittedTurnsTest {
         val merged = mergeCommittedTurns(listOf(old, user), listOf(user.copy(clientMsgId = ""), answer), "c1")
         assertEquals(listOf(old, user, answer), merged)
         assertEquals(merged, mergeCommittedTurns(merged, listOf(user.copy(clientMsgId = ""), answer), "c1"))
+    }
+
+    @Test fun messageIdAdoptsCommittedRowEvenWhenSeqMoved() {
+        val optimistic = row(2, "user", "hi", "c1")
+        val committed = row(9, "user", "hi").copy(messageId = 42)
+        val merged = mergeCommittedTurns(listOf(optimistic), listOf(committed), "c1")
+        assertEquals(listOf(committed.copy(clientMsgId = "c1")), merged)
     }
 
     @Test fun clientIdAdoptsUserEvenWhenSeqAndAttachmentTextChanged() {
@@ -48,12 +55,13 @@ class CommittedTurnsTest {
     @Test fun websocketBatchDecodesEveryFooterFieldAndDefaultsForOldDaemon() {
         val adapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build().adapter(AiOutput::class.java)
         val frame = adapter.fromJson("""{"kind":"done","session_id":"s","seq":42,"turns_synced":true,
-            "turns":[{"session_id":"s","seq":42,"role":"assistant","text":"ok","created_at":123,
+            "turns":[{"id":77,"session_id":"s","seq":42,"role":"assistant","text":"ok","created_at":123,
             "input_tokens":100,"output_tokens":5,"cache_read_tokens":80,"cache_write_tokens":2,
             "reasoning_tokens":3,"reasoning_content":"real","input_includes_cache":true,
             "model":"big-pickle","duration_ms":9000,"generation_ms":4000}]}""")!!
         assertTrue(frame.turnsSynced)
         val turn = frame.turns.single()
+        assertEquals(77L, turn.messageId)
         assertEquals(42L, turn.seq)
         assertEquals(80, turn.cacheRead)
         assertEquals(2, turn.cacheWrite)

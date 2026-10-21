@@ -134,7 +134,10 @@ class ChatRepository(
         // Tool rows and pending messages always stay visible.
         filterNot { isEmptyAnswer(it.role, it.text, it.toolName, it.pending) }.map {
             ChatMessage(
-                id = "${it.sessionId}:${it.seq}",
+                // The engine's sequential message id is the row's identity.
+                // Old engines and not-yet-committed rows have 0, so they keep
+                // the seq-derived fallback and a stable Compose key.
+                id = if (it.messageId > 0L) it.messageId.toString() else "${it.sessionId}:${it.seq}",
                 sessionId = it.sessionId,
                 seq = it.seq,
                 role = it.role,
@@ -548,7 +551,11 @@ class ChatRepository(
                 if (last != null && last.role == "user" && last.text.trim() == clean) {
                     if (last.pending) return false
                     val clientMsgId = "$sid:${System.currentTimeMillis()}"
-                    db.messages().upsert(last.copy(pending = true, clientMsgId = clientMsgId, createdAt = System.currentTimeMillis()))
+                    db.messages().upsert(last.copy(
+                        pending = true,
+                        clientMsgId = clientMsgId,
+                        createdAt = System.currentTimeMillis(),
+                    ))
                     // The frame reaching OkHttp's queue is not the daemon
                     // accepting it. Keep the row pending until the ack frame
                     // arrives; if the socket dies now, the reconnect flushes it.
@@ -789,6 +796,9 @@ class ChatRepository(
         return MessageEntity(
         sessionId = sid,
         seq = seq,
+        // Old engines do not send an id (0). The seq fallback keeps every row
+        // keyed and is replaced by the real id on the next pull.
+        messageId = messageId,
         role = normalizedRole(role),
         text = view.text,
         toolName = view.toolName,
