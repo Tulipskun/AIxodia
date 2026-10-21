@@ -90,12 +90,11 @@ data class SessionRow(
  * colliding with turns it had never downloaded.
  */
 internal fun pageTurns(rows: List<TurnRow>, beforeSeq: Long, limit: Int): List<TurnRow> {
-    if (limit <= 0) return emptyList()
-    return if (beforeSeq <= 0L) {
-        rows.takeLast(limit)
-    } else {
-        rows.filter { it.seq < beforeSeq }.takeLast(limit)
-    }
+    val before = if (beforeSeq <= 0L) rows else rows.filter { it.seq < beforeSeq }
+    // Zero means "no page bound", which the incremental tail read uses: it
+    // needs everything after a seq, and limiting that to the newest page would
+    // silently skip turns when more than one page landed while offline.
+    return if (limit <= 0) before else before.takeLast(limit)
 }
 
 class HistoryApi(
@@ -296,7 +295,10 @@ class HistoryApi(
     /** Newest page for a session; the app calls this on open and on reconnect. */
     suspend fun latest(sessionId: String, limit: Int = 200): List<TurnRow> = turns(sessionId, 0, limit)
     suspend fun turnsAfter(sessionId: String, afterSeq: Long, limit: Int = 200): List<TurnRow> {
-        val rows = turns(sessionId, 0, 10000)
+        // The catch-up read is unbounded on purpose: a reconnect can be days
+        // behind, and a page-sized tail would look synced while turns in the
+        // middle were still missing. limit = 0 omits the bound.
+        val rows = turns(sessionId, 0, 0)
         return if (afterSeq <= 0L) rows else rows.filter { it.seq > afterSeq }
     }
 
@@ -305,8 +307,20 @@ class HistoryApi(
         withContext(Dispatchers.IO) {
             val c = settings.current()
             val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+            // Ask the daemon for one page, not the transcript. A daemon that
+            // predates these parameters ignores them and still sends
+            // everything; pageTurns below cuts that down, so the phone keeps
+            // working against an older engine.
+            val query = buildString {
+                if (limit > 0) append("limit=").append(limit)
+                if (beforeSeq > 0L) {
+                    if (isNotEmpty()) append('&')
+                    append("before_seq=").append(beforeSeq)
+                }
+            }
+            val url = "$base/v1/sessions/$sessionId/turns" + if (query.isEmpty()) "" else "?$query"
             runCatching {
-                val req = Request.Builder().url("$base/v1/sessions/$sessionId/turns")
+                val req = Request.Builder().url(url)
                     .header("Authorization", "Bearer ${c.token}")
                     .header("Accept", "application/json")
                     .get().build()

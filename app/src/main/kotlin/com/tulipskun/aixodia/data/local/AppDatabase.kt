@@ -11,6 +11,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.tulipskun.aixodia.data.model.StoredTotals
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "sessions", primaryKeys = ["id"])
@@ -70,6 +71,8 @@ data class MessageEntity(
 
 @Dao
 interface SessionDao {
+    // The drawer is drawn from Room, so the list is on screen before any network
+    // call: syncSessions then updates these same rows in the background.
     @Query("SELECT * FROM sessions ORDER BY lastAt DESC, id DESC")
     fun observe(): Flow<List<SessionEntity>>
 
@@ -99,6 +102,23 @@ interface SessionDao {
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE sessionId = :sid ORDER BY seq ASC")
     fun observe(sid: String): Flow<List<MessageEntity>>
+
+    /**
+     * The visible window: every row from [from] to the newest. The thread draws
+     * this, not the whole transcript, so opening a chat with thousands of turns
+     * maps a page rather than the history. A new live row is already past
+     * [from], so it arrives here without reloading anything older.
+     */
+    @Query("SELECT * FROM messages WHERE sessionId = :sid AND seq >= :from ORDER BY seq ASC")
+    fun observeFrom(sid: String, from: Long): Flow<List<MessageEntity>>
+
+    /** The newest [limit] rows, oldest-first once reversed by the caller. */
+    @Query("SELECT * FROM messages WHERE sessionId = :sid ORDER BY seq DESC LIMIT :limit")
+    suspend fun recent(sid: String, limit: Int): List<MessageEntity>
+
+    /** One page immediately before [before], newest-first. */
+    @Query("SELECT * FROM messages WHERE sessionId = :sid AND seq < :before ORDER BY seq DESC LIMIT :limit")
+    suspend fun before(sid: String, before: Long, limit: Int): List<MessageEntity>
 
     @Query("SELECT COALESCE(MAX(seq), 0) FROM messages WHERE sessionId = :sid")
     suspend fun maxSeq(sid: String): Long
@@ -141,6 +161,39 @@ interface MessageDao {
 
     @Query("UPDATE messages SET thinkingMs = :ms WHERE sessionId = :sid AND seq = :seq")
     suspend fun stampThinkingAt(sid: String, seq: Long, ms: Long)
+
+    /**
+     * The session's cost, summed in SQLite. The strip above the composer shows
+     * the whole chat even though only a window of rows is on screen; loading
+     * every message just to add four columns up is what kept that window from
+     * being a window.
+     *
+     * The two prompt conventions stay apart exactly as they do in
+     * [com.tulipskun.aixodia.data.model.totalInputTokens]: a provider that puts
+     * the cache inside its input total must not have it added twice.
+     */
+    @Query(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN inputIncludesCache = 1 THEN tokensIn
+                              ELSE tokensIn + cacheRead + cacheWrite END), 0) AS promptTokens,
+            COALESCE(SUM(cacheRead), 0) AS cacheRead,
+            COALESCE(SUM(CASE WHEN inputIncludesCache = 1
+                              THEN MAX(tokensIn - cacheRead, 0)
+                              ELSE tokensIn END), 0) AS freshInput,
+            COALESCE(SUM(tokensOut), 0) AS outTokens,
+            COALESCE(SUM(CASE WHEN durationMs > 0 THEN durationMs ELSE 0 END), 0) AS totalMs,
+            COALESCE((
+                SELECT durationMs FROM messages
+                WHERE sessionId = :sid AND role != 'user' AND role NOT LIKE 'tool%'
+                      AND durationMs > 0
+                ORDER BY seq DESC LIMIT 1
+            ), 0) AS lastTurnMs
+        FROM messages
+        WHERE sessionId = :sid AND role != 'user' AND role NOT LIKE 'tool%'
+        """
+    )
+    fun observeTotals(sid: String): Flow<StoredTotals>
 }
 
 /**

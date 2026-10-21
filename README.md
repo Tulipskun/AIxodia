@@ -6,7 +6,13 @@ D1 REST API (D-011) — there is no Cloudflare Worker in this project.
 
 - **Direct live display**: authenticated WebSocket to the `ai` daemon mobile endpoint — JSON `Input`/`Output` frames mirroring `ai/sdk/io.go` (+ `types.go`, `trace.go`). The daemon serves it itself in `ai/transport/mobile/`.
 - **History from Cloudflare D1, direct**: `data/remote/D1Api.kt` calls `POST https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{database}/query` with the operator's Cloudflare API token, so the chat list and old turns stay readable and editable **while the daemon is stopped**.
-- **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; open = cache → D1 backfill → WS live tail.
+- **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
+- **Chunked history**: the thread holds one page of messages (60 rows), not the whole
+  transcript; scrolling to the top asks for the next page and keeps the reader's
+  place. Pages come from Room when cached and from
+  `GET /v1/sessions/{id}/turns?before_seq=…&limit=…` only when they are not. The
+  session's cost strip is summed in SQLite, so it still counts the turns below
+  the loaded window.
 - **Messenger UX**: Discord-like session drawer + Telegram-like bubbles, typing/tool status, connection dot, retry, pull-older.
 
 ## Layout

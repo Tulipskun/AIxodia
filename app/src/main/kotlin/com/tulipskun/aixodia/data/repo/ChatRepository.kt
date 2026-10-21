@@ -100,10 +100,23 @@ class ChatRepository(
         list.map { ChatSession(it.id, it.title, it.model, it.unread, it.lastSnippet, it.lastAt) }
     }
 
-    fun observeMessages(sid: String): Flow<List<ChatMessage>> = db.messages().observe(sid).map { list ->
+    /**
+     * The thread's visible page: rows from [from] to the newest, oldest-first.
+     * Room re-emits when a live turn adds a row past [from] or when an older
+     * page is reconciled, but it never maps the thousands of rows below the
+     * window just because the chat is long.
+     */
+    fun observeMessages(sid: String, from: Long): Flow<List<ChatMessage>> =
+        db.messages().observeFrom(sid, from).map { it.toChatMessages() }
+
+    /** The whole chat's cost, summed in SQL, independent of the loaded window. */
+    fun observeTotals(sid: String): Flow<com.tulipskun.aixodia.data.model.StoredTotals> =
+        db.messages().observeTotals(sid)
+
+    private fun List<MessageEntity>.toChatMessages(): List<ChatMessage> =
         // An answer with no text and no tool step is an empty bubble, not a reply.
         // Tool rows and pending messages always stay visible.
-        list.filterNot { isEmptyAnswer(it.role, it.text, it.toolName, it.pending) }.map {
+        filterNot { isEmptyAnswer(it.role, it.text, it.toolName, it.pending) }.map {
             ChatMessage(
                 id = "${it.sessionId}:${it.seq}",
                 sessionId = it.sessionId,
@@ -131,7 +144,6 @@ class ChatRepository(
                 block = it.block,
             )
         }.let(::mergeToolPairs)
-    }
 
     /**
      * Session list from D1, merged into Room. D1 is authoritative when it
@@ -351,11 +363,13 @@ class ChatRepository(
         // reconnect does not re-download the whole history (Telegram/Discord style).
         val localMax = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
         val rows = if (localMax <= 0L) {
-            // A cold open has no local seq to continue from. Pull the newest
-            // page, not the oldest one: the optimistic row for the next send is
-            // numbered from here, and an old page made it collide with turns
-            // that were already on the server.
-            try { history.latest(sid, limit = 10_000) } catch (_: Exception) { emptyList() }
+            // A cold open has no local seq to continue from. Pull one newest
+            // page, not the whole transcript: older pages arrive on demand
+            // through loadOlderWindow, and the optimistic row for the next
+            // send is numbered from this page's max. An old page made that row
+            // collide with turns that were already on the server; ten thousand
+            // rows made opening a long chat download it before showing it.
+            try { history.latest(sid, limit = CHAT_PAGE) } catch (_: Exception) { emptyList() }
         } else {
             try { history.turnsAfter(sid, localMax) } catch (_: Exception) { emptyList() }
         }
@@ -375,7 +389,15 @@ class ChatRepository(
     /** Verifies Room vs D1 and repairs only missing turns (no full re-pull). */
     suspend fun verify(sid: String): Int {
         val localMax = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
-        val remote = try { history.turnsAfter(sid, localMax) } catch (_: Exception) { emptyList() }
+        val remote = try {
+            // An empty cache gets the newest page, the same page the screen
+            // opens on. Pulling the whole transcript here would fill the gap
+            // below that page before the reader ever asked for it.
+            if (localMax <= 0L) history.latest(sid, CHAT_PAGE)
+            else history.turnsAfter(sid, localMax)
+        } catch (_: Exception) {
+            emptyList()
+        }
         if (remote.isEmpty()) return 0
         reconcile(sid, remote)
         return remote.size
@@ -530,13 +552,58 @@ class ChatRepository(
         }
     }
 
-    suspend fun loadOlder(sid: String) {
-        val min = db.messages().minSeq(sid)
-        if (min <= 1) return
-        (try { history.turns(sid, beforeSeq = min, limit = 100) } catch (_: Exception) { emptyList() })
-            .takeIf { it.isNotEmpty() }?.let { rows ->
-            reconcile(sid, rows)
+    /**
+     * The page a chat opens on: the newest [limit] rows from Room. [hasOlder]
+     * says whether there is anything before it, either already cached or only
+     * on the server, so the screen knows to ask for a page at the top.
+     */
+    suspend fun latestWindow(sid: String, limit: Int = CHAT_PAGE): MessageWindow {
+        val rows = try { db.messages().recent(sid, limit) } catch (_: Exception) { emptyList() }
+            .sortedBy { it.seq }
+        if (rows.isEmpty()) return MessageWindow(emptyList(), hasOlder = false)
+        val cachedMin = try { db.messages().minSeq(sid) } catch (_: Exception) { rows.first().seq }
+        val oldest = rows.first().seq
+        // Either the cache already holds rows below this page, or the sequence
+        // starts after 1 and only the server can say whether more exists.
+        val older = oldest > cachedMin || oldest > 1L
+        return MessageWindow(rows.toChatMessages(), older)
+    }
+
+    /**
+     * One page above the window, Discord/Telegram style: the cached rows are
+     * instant, and only when the cache has nothing older does this ask the
+     * server. A failed fetch leaves the window alone; the caller keeps its
+     * "older" marker and can try again on the next scroll.
+     *
+     * The returned [MessageWindow.hasOlder] refers to the new page. A page
+     * shorter than [limit] straight from the server is the end of the thread.
+     */
+    suspend fun loadOlderWindow(
+        sid: String,
+        beforeSeq: Long,
+        limit: Int = CHAT_PAGE,
+    ): MessageWindow {
+        if (beforeSeq <= 1L) return MessageWindow(emptyList(), hasOlder = false)
+        val cached = try { db.messages().before(sid, beforeSeq, limit) } catch (_: Exception) {
+            emptyList()
+        }.sortedBy { it.seq }
+        if (cached.isNotEmpty()) {
+            return MessageWindow(cached.toChatMessages(), hasOlder = cached.first().seq > 1L)
         }
+
+        val fetched = try { history.turns(sid, beforeSeq = beforeSeq, limit = limit) } catch (_: Exception) {
+            emptyList()
+        }
+        if (fetched.isEmpty()) return MessageWindow(emptyList(), hasOlder = false)
+        reconcile(sid, fetched)
+        val page = try { db.messages().before(sid, beforeSeq, limit) } catch (_: Exception) {
+            emptyList()
+        }.sortedBy { it.seq }
+        // A full server page may have more behind it; a short one is the start.
+        // If reconcile moved rows out of range, ask again on the next scroll
+        // rather than claiming the thread has ended.
+        val older = fetched.size >= limit || page.isEmpty()
+        return MessageWindow(page.toChatMessages(), hasOlder = older && page.firstOrNull()?.seq != 1L)
     }
 
     /**
@@ -707,6 +774,19 @@ class ChatRepository(
     fun close() = socket.close()
 
 }
+
+/** One page of a thread. Opening a chat maps this many rows, not the history. */
+internal const val CHAT_PAGE = 60
+
+/**
+ * One page of a thread, oldest-first, plus whether the thread continues above
+ * it. The window is the unit the screen holds: rows below it stay in Room and
+ * are only mapped when the reader scrolls up to them.
+ */
+data class MessageWindow(
+    val messages: List<ChatMessage>,
+    val hasOlder: Boolean,
+)
 
 /** The number of chats the daemon returns in one list page. */
 internal const val SESSION_LIST_PAGE = 200

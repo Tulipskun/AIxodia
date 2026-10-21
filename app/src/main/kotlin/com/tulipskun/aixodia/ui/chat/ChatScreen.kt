@@ -81,8 +81,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -107,6 +109,7 @@ import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.model.GenerationSettings
+import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
@@ -145,6 +148,7 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -226,6 +230,9 @@ fun ChatScreen(
         ChatViewModel(repo, settings, sessId, context.applicationContext)
     }
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
+    val storedTotals by vm.storedTotals.collectAsStateWithLifecycle(initialValue = StoredTotals())
+    val hasOlder by vm.hasOlder.collectAsStateWithLifecycle()
+    val loadingOlder by vm.loadingOlder.collectAsStateWithLifecycle()
     val sessions by vm.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
     val conn by vm.conn.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
     var showOfflineCard by remember { mutableStateOf(false) }
@@ -342,14 +349,85 @@ fun ChatScreen(
             toast = ""
         }
     }
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    // The thread holds a page of rows, not the whole history. Everything below
+    // is what keeps that window feeling like a chat rather than a list that
+    // reloads: the top row asks for the next page, the row that was under the
+    // thumb stays there when that page arrives, and the bottom follows new
+    // turns only while the reader is already at the bottom.
+    val showOlderHeader = hasOlder || loadingOlder
+    val olderHeaderItems = if (showOlderHeader) 1 else 0
+    var olderAnchor by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var lastScrolledTail by remember { mutableStateOf<String?>(null) }
+    var firstScrollDone by remember { mutableStateOf(false) }
+    var followTail by remember { mutableStateOf(true) }
+    val currentHasOlder by rememberUpdatedState(hasOlder)
+    val currentLoadingOlder by rememberUpdatedState(loadingOlder)
+    val currentMessages by rememberUpdatedState(messages)
+    val currentHeaderItems by rememberUpdatedState(olderHeaderItems)
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            info.totalItemsCount == 0 ||
+                (last != null && last.index >= info.totalItemsCount - 3)
+        }.distinctUntilChanged().collect { followTail = it }
     }
+
+    // Auto-follow the tail for a new turn, and jump to the bottom once when the
+    // cache's newest page first appears. A page prepended above changes the
+    // item count but not the tail, so it never yanks the reader downwards.
+    val listTotal = listState.layoutInfo.totalItemsCount
+    LaunchedEffect(messages.lastOrNull()?.id, listTotal) {
+        val tail = messages.lastOrNull()?.id ?: return@LaunchedEffect
+        if (listTotal <= 0) return@LaunchedEffect
+        if (!firstScrollDone) {
+            listState.scrollToItem(listTotal - 1)
+            firstScrollDone = true
+            lastScrolledTail = tail
+        } else if (tail != lastScrolledTail) {
+            lastScrolledTail = tail
+            if (followTail) listState.animateScrollToItem(listTotal - 1)
+        }
+    }
+
+    // Loading the older page raises the window. Put the row that was at the top
+    // back where it was, so the new content appears above instead of under the
+    // reader's eyes.
+    LaunchedEffect(messages) {
+        val anchor = olderAnchor ?: return@LaunchedEffect
+        val index = messages.indexOfFirst { it.id == anchor.first }
+        if (index >= 0) {
+            listState.scrollToItem(index + olderHeaderItems, anchor.second)
+            olderAnchor = null
+        }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { index ->
+                // The first frame sits at index 0 for a moment before the
+                // thread jumps to its newest row; asking then would load a
+                // page nobody scrolled to and pull the view off the tail.
+                if (!firstScrollDone) return@collect
+                if (!currentHasOlder || currentLoadingOlder || olderAnchor != null) return@collect
+                // The header itself plus one row of slack: the page is asked
+                // for before the reader actually runs out of content.
+                if (index > currentHeaderItems + 1) return@collect
+                val messageIndex = (index - currentHeaderItems).coerceAtLeast(0)
+                currentMessages.getOrNull(messageIndex)?.let { first ->
+                    olderAnchor = first.id to listState.firstVisibleItemScrollOffset
+                }
+                vm.loadOlder()
+            }
+    }
+
     // A streamed answer grows without adding a row, so the thread follows the
     // live text too instead of leaving it half under the input bar.
-    LaunchedEffect(liveText.length, liveBlocks.size) {
-        if (liveText.isNotBlank() || liveBlocks.isNotEmpty()) {
-            listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+    LaunchedEffect(liveText.length, liveBlocks.size, followTail) {
+        if (followTail && (liveText.isNotBlank() || liveBlocks.isNotEmpty())) {
+            listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
         }
     }
 
@@ -561,7 +639,9 @@ fun ChatScreen(
                         // because it is about the conversation, not about any one
                         // turn in it — and it is the one thing that has to stay
                         // visible while the thread scrolls.
-                        val totals = remember(messages, liveUsage) { sessionTotals(messages, liveUsage) }
+                        val totals = remember(storedTotals, liveUsage, messages) {
+                            sessionTotals(storedTotals, liveUsage, messages)
+                        }
                         SessionStrip(
                             totals = totals,
                             // A turn in flight has no stored duration yet, so it
@@ -632,6 +712,34 @@ fun ChatScreen(
             ) {
                 if (threadLoaded && messages.isEmpty() && liveText.isBlank() && liveBlocks.isEmpty()) {
                     item { EmptyChatState() }
+                }
+                // The top of the loaded window. It is one item whether or not a
+                // fetch is running, so the rows below do not shift by a slot
+                // while the page is on its way; the item itself also keeps a
+                // manual way to ask on a screen reader where scrolling to the
+                // top is awkward.
+                if (showOlderHeader) {
+                    item(key = "older-page") {
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (loadingOlder) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                TextButton(onClick = { vm.loadOlder() }) {
+                                    Text(
+                                        stringResource(R.string.load_older),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
                     MessageBlock(

@@ -7,11 +7,15 @@ import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.Block
+import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
+import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.remote.ConnState
+import com.tulipskun.aixodia.data.repo.CHAT_PAGE
 import com.tulipskun.aixodia.data.repo.ChatRepository
+import com.tulipskun.aixodia.data.repo.MessageWindow
 import com.tulipskun.aixodia.ui.display.LiveUsage
 import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
@@ -20,8 +24,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -174,11 +180,46 @@ class ChatViewModel(
         liveBlocks.value = out
     }
 
-    /** The chat currently on screen; set by ensureSession, like a chat app. */
-    var sessionId: String = initialSession
-        private set
+    /**
+     * The chat currently on screen; set by ensureSession, like a chat app. The
+     * id itself is a flow so the window and the totals follow a chat switch
+     * without a second view model having to be created.
+     */
+    private val activeId = MutableStateFlow(initialSession)
+    var sessionId: String
+        get() = activeId.value
+        private set(value) {
+            if (activeId.value == value) return
+            // A different chat starts at its newest page, not at the old
+            // chat's floor. Close the window first, then switch the id, so the
+            // new chat is never queried with the old chat's lower bound.
+            windowFloor.value = null
+            hasOlder.value = false
+            activeId.value = value
+        }
 
-    val messages = repo.observeMessages(sessionId)
+    /**
+     * The oldest seq the screen maps. Null until the newest page is read; Room
+     * then keeps this window live as new turns arrive, without touching the
+     * rows below it.
+     */
+    private val windowFloor = MutableStateFlow<Long?>(null)
+    val messages: Flow<List<ChatMessage>> =
+        combine(activeId, windowFloor) { sid, from -> sid to from }
+            .flatMapLatest { (sid, from) ->
+                if (from == null) flowOf(emptyList()) else repo.observeMessages(sid, from)
+            }
+
+    /** Whole-chat cost, summed by SQLite rather than from the loaded page. */
+    val storedTotals: Flow<StoredTotals> =
+        activeId.flatMapLatest { repo.observeTotals(it) }
+
+    /** Whether a scroll to the top should ask for another page. */
+    val hasOlder = MutableStateFlow(false)
+    val loadingOlder = MutableStateFlow(false)
+    /** True once the server has said there is nothing above this chat. */
+    private var olderExhausted = false
+
     val sessions = repo.observeSessions()
     val conn: StateFlow<ConnState> = repo.connState
 
@@ -271,12 +312,18 @@ class ChatViewModel(
         // facing: failures belong in [notice], never as an uncaught exception
         // (an uncaught one in viewModelScope takes the whole process down).
         viewModelScope.launch {
+            // Cache first: the stored chat's newest page is on screen before
+            // any network read. ensureSession below may then open the same
+            // chat again (and refresh its tail); the second window is only a
+            // re-anchor, not what makes the first frame appear.
+            if (initialSession.isNotBlank()) startWindow(initialSession)
             runCatching {
                 repo.syncSessions()
                 // No session id to type: open the last chat, or start one.
                 val id = repo.ensureSession(initialSession)
                 sessionId = id
                 settings.saveSession(id)
+                startWindow(id)
             }.onFailure { err ->
                 notice.value = "Cannot connect: ${err.message ?: err::class.simpleName}"
             }
@@ -1204,6 +1251,7 @@ class ChatViewModel(
             runCatching { repo.createDraftSession() }
                 .onSuccess {
                     sessionId = it
+                    startWindow(it)
                     selectedProvider.value = ""
                     selectedModel.value = ""
                     hasStoredRoute.value = false
@@ -1221,6 +1269,7 @@ class ChatViewModel(
             recoveryJob = null
             repo.selectSession(id)
             sessionId = id
+            startWindow(id)
             selectedProvider.value = ""
             selectedModel.value = ""
             hasStoredRoute.value = false
@@ -1246,6 +1295,7 @@ class ChatViewModel(
             if (id == sessionId) {
                 val next = repo.activeSession.value
                 sessionId = next
+                startWindow(next)
                 selectedProvider.value = ""
                 selectedModel.value = ""
                 hasStoredRoute.value = false
@@ -1263,8 +1313,17 @@ class ChatViewModel(
     fun refresh() {
         viewModelScope.launch {
             refreshDaemonStart()
+            // The drawer is drawn from the cache, so the network refresh only
+            // updates those rows: the list is usable while this is in flight,
+            // and stays usable when it fails.
+            runCatching { repo.syncSessions() }
             runCatching { repo.refreshLatest(sessionId) }
                 .onFailure { notice.value = "Failed to fetch latest: ${it.message}" }
+            // A cold start that had no cache yet (or a chat whose first pull
+            // failed) can open its window now that the newest rows are here.
+            if (windowFloor.value == null || windowFloor.value == Long.MIN_VALUE) {
+                startWindow(sessionId)
+            }
         }
     }
 
@@ -1284,10 +1343,61 @@ class ChatViewModel(
         settings.saveDaemonStartedAt(started)
     }
 
+    /**
+     * Reads the newest page from Room and opens the window there. The rows
+     * below it stay cached on disk; scrolling up asks for them one page at a
+     * time. This is what makes reopening a long chat instant instead of
+     * mapping the whole transcript before the first frame.
+     */
+    private suspend fun startWindow(sid: String): MessageWindow? {
+        val page = try {
+            repo.latestWindow(sid, CHAT_PAGE)
+        } catch (_: Exception) {
+            return null
+        }
+        if (sessionId != sid) return null
+        // The cache-first pass has already opened this chat and the reader may
+        // have scrolled pages in while the network refresh ran. Re-anchoring
+        // now would throw those pages away and pull the view back to the tail;
+        // new rows are already inside the window because it has no upper bound.
+        val open = windowFloor.value
+        if (open != null && open != Long.MIN_VALUE) return page
+        olderExhausted = false
+        loadingOlder.value = false
+        hasOlder.value = page.hasOlder
+        // An empty chat has no floor yet. Long.MIN_VALUE keeps the window open
+        // so the optimistic row of the first send (seq 1) appears immediately.
+        windowFloor.value = page.messages.firstOrNull()?.seq ?: Long.MIN_VALUE
+        return page
+    }
+
+    /**
+     * One page up, from the cache when it has one and from the server only
+     * when it does not. Concurrent triggers are folded into one request: the
+     * scroll listener can fire several times while a page is in flight.
+     */
     fun loadOlder() {
+        val sid = sessionId
+        val floor = windowFloor.value ?: return
+        if (loadingOlder.value || !hasOlder.value || olderExhausted || floor <= 1L) return
+        loadingOlder.value = true
         viewModelScope.launch {
-            runCatching { repo.loadOlder(sessionId) }
-                .onFailure { notice.value = "Failed to load older history: ${it.message}" }
+            val page = try {
+                repo.loadOlderWindow(sid, floor, CHAT_PAGE)
+            } catch (err: Exception) {
+                notice.value = "Failed to load older history: ${err.message}"
+                loadingOlder.value = false
+                return@launch
+            }
+            if (sessionId != sid) return@launch
+            if (page.messages.isNotEmpty()) {
+                // The new floor is the page's oldest message, so Room maps the
+                // page together with everything it already had.
+                windowFloor.value = page.messages.first().seq
+            }
+            hasOlder.value = page.hasOlder
+            olderExhausted = !page.hasOlder
+            loadingOlder.value = false
         }
     }
 

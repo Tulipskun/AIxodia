@@ -375,3 +375,20 @@ data class ChatSession(
     val lastSnippet: String = "",
     val lastAt: Long = 0,
 )
+
+/**
+ * A whole chat's usage, summed by SQLite. It carries the same figures the
+ * session strip used to add up from every loaded message, so the strip can stay
+ * complete while the thread itself only holds a page of rows.
+ *
+ * [lastTurnMs] is the newest answer that reported a duration, not the longest:
+ * it is the "last turn" reading, not an average.
+ */
+data class StoredTotals(
+    val promptTokens: Int = 0,
+    val cacheRead: Int = 0,
+    val freshInput: Int = 0,
+    val outTokens: Int = 0,
+    val lastTurnMs: Long = 0,
+    val totalMs: Long = 0,
+)

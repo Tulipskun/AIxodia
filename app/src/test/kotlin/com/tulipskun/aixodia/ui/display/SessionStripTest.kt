@@ -1,6 +1,7 @@
 package com.tulipskun.aixodia.ui.display
 
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.normalizedRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -172,6 +173,58 @@ class SessionStripTest {
     fun `no live turn leaves the thread's totals untouched`() {
         val messages = listOf(msg(1, "model", tokensIn = 500, tokensOut = 5, inputIncludesCache = true))
         assertEquals(sessionTotals(messages), sessionTotals(messages, null))
+    }
+
+    @Test
+    fun `the strip adds the whole chat up from SQL, not from the loaded page`() {
+        // Only the newest page is in the thread window; the session total still
+        // covers turns the reader has not scrolled back to.
+        val stored = StoredTotals(
+            promptTokens = 40_000,
+            cacheRead = 30_000,
+            freshInput = 10_000,
+            outTokens = 900,
+            lastTurnMs = 4_000,
+            totalMs = 12_000,
+        )
+        val totals = sessionTotals(
+            stored = stored,
+            live = null,
+            loaded = listOf(msg(90, "model", tokensIn = 5_000, tokensOut = 50)),
+        )
+        assertEquals(40_000, totals.promptTokens)
+        assertEquals(30_000, totals.cacheRead)
+        assertEquals(10_000, totals.freshInput)
+        assertEquals(900, totals.outTokens)
+        assertEquals(12_000L, totals.totalMs)
+        assertEquals(4_000L, totals.lastTurnMs)
+    }
+
+    @Test
+    fun `a live answer already in the window is not counted twice`() {
+        val stored = StoredTotals(
+            promptTokens = 15_000,
+            cacheRead = 10_000,
+            freshInput = 5_000,
+            outTokens = 290,
+            lastTurnMs = 9_000,
+            totalMs = 9_000,
+        )
+        val landing = msg(
+            3, "model", tokensIn = 12_000, cacheRead = 9_000, tokensOut = 250,
+            inputIncludesCache = true, durationMs = 9_000,
+        )
+        val totals = sessionTotals(
+            stored = stored,
+            live = LiveUsage(seq = 3, promptTokens = 12_000, cacheRead = 9_000, outputTokens = 250, inputIncludesCache = true),
+            loaded = listOf(landing),
+        )
+        // The stored sum minus the landing row, plus the same live turn once.
+        assertEquals(15_000, totals.promptTokens)
+        assertEquals(10_000, totals.cacheRead)
+        assertEquals(5_000, totals.freshInput)
+        assertEquals(290, totals.outTokens)
+        assertEquals(0L, totals.totalMs)
     }
 
     @Test

@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.freshInputTokens
 import com.tulipskun.aixodia.data.model.isAnswer
 import com.tulipskun.aixodia.data.model.totalInputTokens
@@ -162,6 +163,57 @@ fun sessionTotals(messages: List<ChatMessage>, live: LiveUsage?): SessionTotals 
     if (live == null) return sessionTotals(messages)
     val committed = messages.filterNot { it.isAnswer && live.seq != 0L && it.seq == live.seq }
     return sessionTotals(committed).plus(live.totals())
+}
+
+/** The SQL totals, in the shape the strip already draws. */
+fun StoredTotals.toSessionTotals(): SessionTotals = SessionTotals(
+    promptTokens = promptTokens,
+    cacheRead = cacheRead,
+    freshInput = freshInput,
+    outTokens = outTokens,
+    lastTurnMs = lastTurnMs,
+    totalMs = totalMs,
+)
+
+/**
+ * The strip for a windowed thread. [stored] is the whole chat's SQL total, so
+ * scrolling up loads rows for the screen without making the figures jump; the
+ * live turn is laid on top exactly as before. [loaded] is only used to take a
+ * live turn's own stored row out of the double count while both are on screen.
+ */
+fun sessionTotals(
+    stored: StoredTotals,
+    live: LiveUsage?,
+    loaded: List<ChatMessage> = emptyList(),
+): SessionTotals {
+    var base = stored.toSessionTotals()
+    if (live == null) return base
+    if (live.seq != 0L) {
+        loaded.firstOrNull { it.isAnswer && it.seq == live.seq }?.let { row ->
+            base = base.minus(row)
+        }
+    }
+    return base.plus(live.totals())
+}
+
+/**
+ * Takes one answer back out of a summed total. Used only for the moment an
+ * answer has reached Room while the running total is still on screen, so the
+ * turn is counted once rather than twice.
+ */
+private fun SessionTotals.minus(m: ChatMessage): SessionTotals {
+    if (!m.isAnswer) return this
+    val duration = m.durationMs.coerceAtLeast(0L)
+    return SessionTotals(
+        promptTokens = (promptTokens - m.totalInputTokens()).coerceAtLeast(0),
+        cacheRead = (cacheRead - m.cacheRead).coerceAtLeast(0),
+        freshInput = (freshInput - m.freshInputTokens()).coerceAtLeast(0),
+        outTokens = (outTokens - m.tokensOut).coerceAtLeast(0),
+        // The previous turn's own duration is not in this row; zero for the
+        // one frame this matters is better than counting this turn twice.
+        lastTurnMs = if (duration > 0L && duration == lastTurnMs) 0L else lastTurnMs,
+        totalMs = (totalMs - duration).coerceAtLeast(0L),
+    )
 }
 
 /**

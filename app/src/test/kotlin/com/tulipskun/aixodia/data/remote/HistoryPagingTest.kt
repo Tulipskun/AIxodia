@@ -21,4 +21,14 @@ class HistoryPagingTest {
     @Test fun shortChatLoadsWhole() {
         assertEquals(turns(7), pageTurns(turns(7), beforeSeq = 0, limit = 200))
     }
+
+    @Test fun noBoundMeansTheWholeCatchUp() {
+        // The reconnect read asks for everything after its last seq; capping it
+        // at a page would hide turns that arrived while the phone was away.
+        assertEquals(turns(250), pageTurns(turns(250), beforeSeq = 0, limit = 0))
+    }
+
+    @Test fun anEmptyPageIsAnEmptyThread() {
+        assertEquals(emptyList<TurnRow>(), pageTurns(emptyList(), beforeSeq = 0, limit = 60))
+    }
 }
