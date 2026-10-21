@@ -79,7 +79,6 @@ import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.model.freshInputTokens
 import com.tulipskun.aixodia.data.model.totalInputTokens
 import com.tulipskun.aixodia.ui.chat.MarkdownText
-import com.tulipskun.aixodia.ui.chat.SubAgentActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -148,8 +147,8 @@ fun MessageBlock(
     // thought sits tight on its tool while the next thought floats far below.
     val cardish = toolish || block?.type == Block.REASONING
     val body = m.text.ifBlank { m.toolArgs }
-    // The main agent is the conversation itself, so it carries no name; a sub
-    // agent or a tool step keeps its badge because it is a separate voice.
+    // The main agent is the conversation itself, so it carries no name; a
+    // worker agent or a tool step keeps its badge because it is a separate voice.
     val named = (m.agent.isNotBlank() && m.agent != "main") || isTool
     // No "คุณ" badge: the bubble on the right already says whose turn it is,
     // and a label on every question is noise. The clock is enough.
@@ -510,7 +509,6 @@ fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
 fun AgentRule(m: ChatMessage) {
     if (m.role == "user" || m.agent == "main" || m.agent.isBlank()) return
     val color = when (m.agent) {
-        "sub" -> MaterialTheme.colorScheme.tertiary
         "worker" -> MaterialTheme.colorScheme.secondary
         else -> return
     }
@@ -526,18 +524,17 @@ fun AgentRule(m: ChatMessage) {
 /**
  * Who is speaking, as a colour rather than a word.
  *
- * Three labels per turn — MAIN, SUB, WORKER — is three things to read before
- * the answer, and MAIN is the one that needs no label at all because it is the
- * conversation. A sub answer is now a thin coloured rule in the margin with the
- * agent's name in that same colour above it: a reader knows it is a separate
- * voice from the shape, not from decoding a badge.
+ * A label on every turn is something to read before the answer, and MAIN is
+ * the one that needs no label at all because it is the conversation. A worker
+ * answer is a thin coloured rule in the margin with its name in that same
+ * colour above it: a reader knows it is a separate voice from the shape, not
+ * from decoding a badge.
  */
 @Composable
 fun AgentBadge(m: ChatMessage) {
     val scheme = MaterialTheme.colorScheme
     val (labelRes, color) = when {
         m.role == "user" -> Pair(R.string.agent_user, scheme.primary)
-        m.agent == "sub" -> Pair(R.string.agent_sub, scheme.tertiary)
         m.agent == "worker" -> Pair(R.string.agent_worker, scheme.secondary)
         else -> return
     }
@@ -934,76 +931,6 @@ private fun CommandLine(command: String) {
         )
     }
 }
-
-/**
- * Sub-agent activity rows with per-job stop — stays in the display module so
- * the chat thread only composes it.
- */
-@Composable
-fun SubAgentPanel(
-    agents: List<SubAgentActivity>,
-    nowMs: Long,
-    onStop: (String) -> Unit,
-    tokenFields: List<TokenField> = TokenField.DEFAULT,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-    ) {
-        Column(
-            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                stringResource(R.string.sub_agent_title, agents.size),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
-            agents.forEach { a ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val (dot, tint) = when {
-                        a.stopping -> "◐" to MaterialTheme.colorScheme.tertiary
-                        a.running -> "●" to MaterialTheme.colorScheme.primary
-                        else -> "○" to MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    Text(dot, color = tint, style = MaterialTheme.typography.labelMedium)
-                    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        Text(
-                            a.label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.tertiary,
-                        )
-                        Text(
-                            formatSeconds(a.elapsedMs(nowMs)),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (a.detail.isNotBlank()) {
-                            Text(
-                                a.detail,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                    if (a.running && !a.stopping) {
-                        FilledTonalButton(
-                            onClick = { onStop(a.jobId) },
-                            modifier = Modifier.padding(start = 4.dp),
-                        ) {
-                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Text("  " + stringResource(R.string.sub_agent_stop))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 
 /**
  * A failed turn as a card with a retry button — the error is actionable, not

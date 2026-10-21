@@ -127,7 +127,6 @@ import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SessionStrip
 import com.tulipskun.aixodia.ui.display.sessionTotals
 import com.tulipskun.aixodia.ui.display.SetupNeeded
-import com.tulipskun.aixodia.ui.display.SubAgentPanel
 import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.ToolStepCard
@@ -239,7 +238,6 @@ fun ChatScreen(
     val liveText by vm.liveText.collectAsStateWithLifecycle()
     val liveBlocks by vm.liveBlocks.collectAsStateWithLifecycle()
     val liveReasoning by vm.liveReasoning.collectAsStateWithLifecycle()
-    val subAgents by vm.subAgents.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     val liveUsage by vm.liveUsage.collectAsStateWithLifecycle()
     // The footer format follows the provider, because what is worth printing
@@ -293,8 +291,8 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
     val clip = LocalClipboardManager.current
-    // One clock for the whole screen: the footer, the rate and every sub agent
-    // row read the same instant, so their numbers agree with each other.
+    // One clock for the whole screen: the footer and the rate read the same
+    // instant, so their numbers agree with each other.
     //
     // It is sampled as a pair because the two readings are not interchangeable.
     // `elapsedRealtime` counts from boot, which is what a duration needs and
@@ -303,8 +301,8 @@ fun ChatScreen(
     // footer showed "19:42" beside a message sent at 05:13.
     var tick by remember { mutableStateOf(Tick.now()) }
     val nowMs = tick.elapsed
-    LaunchedEffect(busy, subAgents.isNotEmpty()) {
-        while (busy || subAgents.any { it.running }) {
+    LaunchedEffect(busy) {
+        while (busy) {
             tick = Tick.now()
             kotlinx.coroutines.delay(200)
         }
@@ -411,11 +409,6 @@ fun ChatScreen(
             onDismiss = { deleting = null },
         )
     }
-    // The sub-agent block reads from the daemon, so load it once per sheet
-    // opening instead of on every recomposition.
-    LaunchedEffect(showModelPicker) {
-        if (showModelPicker) vm.loadSubAgentConfig()
-    }
     if (showAttachSheet) {
         AttachSheet(
             onMedia = {
@@ -431,7 +424,6 @@ fun ChatScreen(
     }
     if (showModelPicker) {
         ChatModelSheet(
-            vm = vm,
             providers = providers,
             statuses = providerStatuses.associateBy { it.id },
             pickedProvider = pickedProvider,
@@ -562,13 +554,6 @@ fun ChatScreen(
                             OfflineBanner(
                                 messageRes = socketErr.takeIf { it != 0 } ?: R.string.offline_title,
                                 onRetry = { vm.refresh() },
-                            )
-                        }
-                        if (subAgents.isNotEmpty()) {
-                            SubAgentPanel(
-                                agents = subAgents,
-                                nowMs = nowMs,
-                                onStop = { vm.stopSubAgent(it) },
                             )
                         }
                         // What the session has cost, summed from the thread. The
@@ -728,7 +713,6 @@ private fun thinkingLabel(level: String): String =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatModelSheet(
-    vm: ChatViewModel,
     providers: List<com.tulipskun.aixodia.data.model.ProviderView>,
     statuses: Map<String, com.tulipskun.aixodia.data.model.ProviderStatus>,
     pickedProvider: String,
@@ -938,81 +922,6 @@ private fun ChatModelSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Use agent default (clear this chat lock)") }
 
-            // Per-session sub-agent settings (ACP session config pattern):
-            // each chat may pin its own sub provider/model instead of
-            // inheriting the global agent defaults.
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            Text("Sub agent (this chat only)", style = MaterialTheme.typography.titleSmall)
-            val subPickedProvider by vm.subAgentProvider.collectAsStateWithLifecycle()
-            val subPickedModel by vm.subAgentModel.collectAsStateWithLifecycle()
-            val subEnabled by vm.subAgentEnabled.collectAsStateWithLifecycle()
-            val subPinned by vm.subAgentPinned.collectAsStateWithLifecycle()
-            Text(
-                if (subPinned) "This chat has a pinned sub agent" else "Use agent default (general sub agent)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Enable sub agent", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Switch(
-                    checked = subEnabled,
-                    onCheckedChange = { enabled -> vm.setSubAgent(subPickedProvider, subPickedModel, enabled) },
-                )
-            }
-            if (providers.isNotEmpty()) {
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    providers.forEach { p ->
-                        FilterChip(
-                            selected = p.id == subPickedProvider,
-                            onClick = { vm.chooseSubProvider(p.id) },
-                            label = { Text(p.id) },
-                        )
-                    }
-                }
-                if (subPickedProvider.isNotBlank()) {
-                    val subModels = providers.firstOrNull { it.id == subPickedProvider }?.models.orEmpty()
-                    val subWorking = providers.firstOrNull { it.id == subPickedProvider }?.defaultModel.orEmpty()
-                    val filtered = if (subModels.isEmpty()) emptyList()
-                    else if (subWorking.isBlank() || subModels.none { it.id == subWorking }) subModels
-                    else listOf(subModels.first { it.id == subWorking }) + subModels.filter { it.id != subWorking }
-                    LazyColumn(Modifier.heightIn(max = 160.dp).fillMaxWidth()) {
-                        items(filtered) { m ->
-                            val selected = m.id == subPickedModel
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clip(MaterialTheme.shapes.small)
-                                    .background(
-                                        if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                                    )
-                                    .clickable { vm.chooseSubModel(m.id) }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(m.id, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-            }
-            Button(
-                onClick = { vm.setSubAgent(subPickedProvider, subPickedModel, subEnabled) },
-                enabled = subPickedProvider.isNotBlank() && subPickedModel.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Save sub agent for this chat") }
-            Text(
-                "Toggle without picking a provider — this chat uses the agent sub agent",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextButton(
-                onClick = { vm.clearSubAgent() },
-                enabled = subPinned,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Use agent default (clear this chat sub agent)") }
         }
     }
 }

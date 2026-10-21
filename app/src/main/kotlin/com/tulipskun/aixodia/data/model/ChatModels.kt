@@ -5,8 +5,8 @@ import com.squareup.moshi.JsonClass
 import com.tulipskun.aixodia.data.remote.TurnRow
 
 // Mirrors ai sdk/io.go + sdk/types.go + sdk/trace.go (additive-only), plus the
-// fields the mock agent adds: which agent spoke (main/sub), which job
-// a step belongs to, and the client id used to clear the pending marker.
+// fields the agent adds: which agent spoke, which job a step belongs to, and
+// the client id used to clear the pending marker.
 
 @JsonClass(generateAdapter = true)
 data class ContentPart(
@@ -132,8 +132,6 @@ data class AgentSettings(
 @JsonClass(generateAdapter = true)
 data class SettingsView(
     @Json(name = "main") val main: AgentSettings = AgentSettings(),
-    @Json(name = "sub") val sub: AgentSettings = AgentSettings(),
-    @Json(name = "sub_enabled") val subEnabled: Boolean = true,
 )
 
 /** One tool step of the turn being streamed: call, then its result. */
@@ -231,7 +229,7 @@ data class AiOutput(
     @Json(name = "kind") val kind: String = "message", // ack | delta | message | trace | done | error
     @Json(name = "seq") val seq: Long = 0,
     @Json(name = "role") val role: String = "model",
-    @Json(name = "agent") val agent: String = "", // main | sub | worker | system
+    @Json(name = "agent") val agent: String = "", // main | worker | system
     @Json(name = "job_id") val jobId: String = "",
     @Json(name = "client_msg_id") val clientMsgId: String = "",
     @Json(name = "tool_call") val toolCall: ToolCall? = null,
@@ -272,8 +270,7 @@ data class AiInput(
     @Json(name = "session_id") val sessionId: String = "",
     @Json(name = "role") val role: String = "user",
     @Json(name = "content") val content: List<ContentPart> = emptyList(),
-    // A cancel that names a job stops that one sub agent; without it the
-    // cancel stops the whole turn.
+    // A cancel without a job id stops the whole turn.
     @Json(name = "job_id") val jobId: String = "",
     @Json(name = "client_msg_id") val clientMsgId: String = "",
     // Files the phone already uploaded; the daemon hands their paths to the agent.
@@ -300,7 +297,7 @@ data class ChatMessage(
     val text: String,
     val createdAt: Long,
     val pending: Boolean = false,
-    val agent: String = "", // main | sub | worker | system
+    val agent: String = "", // main | worker | system
     val jobId: String = "",
     val stage: String = "",
     val toolName: String = "",
@@ -377,19 +374,4 @@ data class ChatSession(
     val unread: Int = 0,
     val lastSnippet: String = "",
     val lastAt: Long = 0,
-)
-
-@JsonClass(generateAdapter = true)
-data class SessionAgentConfig(
-    @Json(name = "provider") val provider: String = "",
-    @Json(name = "model") val model: String = "",
-    @Json(name = "pinned") val pinned: Boolean = false,
-    @Json(name = "sub_provider") val subProvider: String = "",
-    @Json(name = "sub_model") val subModel: String = "",
-    @Json(name = "sub_enabled") val subEnabled: Boolean = true,
-    @Json(name = "sub_pinned") val subPinned: Boolean = false,
-    // What this chat actually runs on, and whether that came from the chat or
-    // from the agent defaults, so the sheet can say which it is showing.
-    @Json(name = "generation") val generation: GenerationSettings = GenerationSettings(),
-    @Json(name = "generation_source") val generationSource: String = "",
 )

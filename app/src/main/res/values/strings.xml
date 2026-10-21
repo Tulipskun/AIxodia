@@ -52,12 +52,7 @@
     <string name="online">Online</string>
     <string name="connecting">Connecting</string>
     <string name="offline">Offline</string>
-
-    <string name="sub_agent_running">Running</string>
-    <string name="sub_agent_stop">Stop</string>
-    <string name="sub_agent_title">SUB AGENT %1$d</string>
     <string name="agent_main">main</string>
-    <string name="agent_sub">SUB</string>
     <string name="agent_worker">WORKER</string>
     <string name="agent_user">You</string>
     <string name="live_answering">Answering</string>

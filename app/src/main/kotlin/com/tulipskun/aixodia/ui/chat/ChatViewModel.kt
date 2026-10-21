@@ -24,18 +24,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-/** One sub agent the daemon is running (or just finished) for this chat. */
-data class SubAgentActivity(
-    val jobId: String,
-    val label: String,
-    val detail: String,
-    val startedAtMs: Long,
-    val running: Boolean,
-    val stopping: Boolean = false,
-) {
-    fun elapsedMs(nowMs: Long): Long = (nowMs - startedAtMs).coerceAtLeast(0L)
-}
-
 /**
  * What the footer shows about the turn on screen: which model, how many tokens
  * it used, how long it took and how fast. Counts are exact once the provider
@@ -203,7 +191,7 @@ class ChatViewModel(
     val tokenFields: Flow<List<TokenField>> =
         settings.endpointFlow.flatMapLatest { settings.tokenFieldsFlow(it) }
 
-    /** Latest live status line for the thread ("sub: web_fetch …"). */
+    /** Latest live status line for the thread ("web_fetch …"). */
     val status = MutableStateFlow("")
     val busy = MutableStateFlow(false)
     val notice = MutableStateFlow("")
@@ -228,14 +216,9 @@ class ChatViewModel(
     val liveBlocks = MutableStateFlow<List<LiveBlock>>(emptyList())
     /** Recorded thinking time for the current reasoning event, if the daemon sent one. */
     val liveThinkingMs = MutableStateFlow(0L)
-    /** Which agent that thinking event belongs to. */
-    val liveThinkingAgent = MutableStateFlow("main")
     val providers = MutableStateFlow<List<ProviderView>>(emptyList())
     /** Same catalogue's global health/key counts, shown as a caption in the session sheet. */
     val providerStatuses = MutableStateFlow<List<ProviderStatus>>(emptyList())
-
-    /** The sub agents this turn started, newest last, each with its own stop. */
-    val subAgents = MutableStateFlow<List<SubAgentActivity>>(emptyList())
 
     /** Model, tokens, elapsed time and rate for the footer. */
     val turnStats = MutableStateFlow(TurnStats())
@@ -260,7 +243,6 @@ class ChatViewModel(
      * read as a repetition, so it is dropped.
      */
     private var answerSettled = false
-    private var liveSubText = ""
     private var liveChars = 0
     /**
      * Where the thread ended when the turn was sent, so the thinking time it
@@ -274,8 +256,6 @@ class ChatViewModel(
     val hasStoredRoute = MutableStateFlow(false)
     /** A route chosen for a New chat, saved to the daemon with its first send. */
     private var draftRoute: Pair<String, String>? = null
-    /** A sub-agent choice made before the New chat has a server row. */
-    private var draftSubAgent: Triple<String, String, Boolean>? = null
 
     init {
         // A fresh install has no settings yet, and every call here is network
@@ -317,11 +297,11 @@ class ChatViewModel(
                 if (f.sessionId.isNotEmpty() && f.sessionId != sessionId) return@collect
                 when (f.kind) {
                     // One streamed chunk: append to the bubble the phone is
-                    // already showing, or to the sub agent's status line.
-                    "delta" -> onDelta(f.agent, f.text, f)
+                    // already showing.
+                    "delta" -> onDelta(f.agent, f.text)
                     // The authoritative answer. A streamed turn already filled
                     // the bubble, so this only confirms it.
-                    "message" -> onMessage(f.agent, f.text, f)
+                    "message" -> onMessage(f.text, f)
                     "trace" -> onTrace(f)
                     "done" -> onTurnDone(f)
                     "error" -> {
@@ -370,16 +350,10 @@ class ChatViewModel(
         }
     }
 
-    private fun onDelta(agent: String, chunk: String, frame: AiOutput? = null) {
+    private fun onDelta(agent: String, chunk: String) {
         if (chunk.isEmpty() || answerSettled) return
         liveThinkingMs.value = 0L
         reasoningActive.value = false
-        if (agent.isNotEmpty() && agent != "main") {
-            status.value = "${if (agent == "sub") "sub" else agent}: " + (liveSubText + chunk).take(80)
-            liveSubText += chunk
-            noteSubAgent(frame, chunk.take(80))
-            return
-        }
         liveAgent.value = agent.ifEmpty { "main" }
         // The request has spoken: it is no longer waiting or thinking.
         settleOpenRequest()
@@ -406,13 +380,7 @@ class ChatViewModel(
         turnStats.value = stats.copy(estimatedTokens = (liveChars + 3) / 4)
     }
 
-    private fun onMessage(agent: String, text: String, frame: AiOutput? = null) {
-        if (agent.isNotEmpty() && agent != "main") {
-            status.value = "${if (agent == "sub") "sub" else agent}: " + text.take(80)
-            liveSubText = text
-            noteSubAgent(frame, text.take(80))
-            return
-        }
+    private fun onMessage(text: String, frame: AiOutput? = null) {
         recordUsage(frame)
         // The closing frame names the seq the turn's answer lands at. The strip
         // uses it to skip that row once it reaches the thread, so the running
@@ -656,17 +624,6 @@ class ChatViewModel(
             onUsage(f)
             return
         }
-        if (f.agent.isNotEmpty() && f.agent != "main") {
-            val detail = when (f.stage) {
-                "tool_call", "tool_running" -> "Using ${f.toolCall?.name ?: "tool"}"
-                "tool_result" -> if (f.toolResult?.isError == true) "Tool failed" else "Tool done"
-                "request" -> "Sending request"
-                "response_text" -> "Thinking"
-                "retry_wait" -> "Retrying"
-                else -> f.text.ifEmpty { f.stage }
-            }
-            noteSubAgent(f, detail)
-        }
         // The engine's display block, when the frame has one: it names the
         // round or step outright, so the live thread is upserted by id instead
         // of re-derived from stage order. Frames from an older daemon carry
@@ -763,7 +720,6 @@ class ChatViewModel(
             }
             "response_text" -> {
                 liveThinkingMs.value = f.reasoningMs
-                liveThinkingAgent.value = f.agent.ifEmpty { "main" }
                 traceNote(
                     if (f.reasoningMs > 0) {
                         "Thinking · " + String.format(Locale.US, "%.1fs", f.reasoningMs / 1000.0)
@@ -781,12 +737,6 @@ class ChatViewModel(
 
     private fun onTurnDone(frame: AiOutput) {
         val stage = frame.stage
-        // A cancel that named a job answers for that job only: the turn keeps
-        // running, so the busy state and the stream stay as they are.
-        if (stage.startsWith("subagent_")) {
-            onSubAgentStopped(frame)
-            return
-        }
         if (stage == "cancelled") {
             notice.value = "Stopped"
         } else if (stage == "already_done") {
@@ -823,13 +773,11 @@ class ChatViewModel(
      */
     private fun clearLiveTurn() {
         status.value = ""
-        liveSubText = ""
         liveBlocks.value = emptyList()
         liveThinkingMs.value = 0L
         liveReasoning.value = ""
         reasoningActive.value = false
         busy.value = false
-        subAgents.value = subAgents.value.map { it.copy(running = false) }
         finishStats()
         turnBaseSeq = -1L
         liveText.value = ""
@@ -840,75 +788,6 @@ class ChatViewModel(
         val stats = turnStats.value
         if (stats.startedAtMs == 0L) return
         turnStats.value = stats.copy(running = false, endedAtMs = SystemClock.elapsedRealtime())
-    }
-
-    /**
-     * Keeps one row per sub agent: what it is doing, how long it has been at it,
-     * and whether it is still running. The phone is the only place the user can
-     * see that work at all, so the row is built from the frames, not guessed.
-     */
-    private fun noteSubAgent(frame: AiOutput?, detail: String) {
-        val jobId = frame?.jobId?.takeIf { it.isNotBlank() } ?: return
-        val now = SystemClock.elapsedRealtime()
-        val rows = subAgents.value
-        val existing = rows.firstOrNull { it.jobId == jobId }
-        val row = if (existing == null) {
-            SubAgentActivity(jobId = jobId, label = "sub", detail = detail, startedAtMs = now, running = true)
-        } else {
-            existing.copy(detail = detail, running = true, stopping = false)
-        }
-        subAgents.value = if (existing == null) rows + row else rows.map { if (it.jobId == jobId) row else it }
-    }
-
-    private fun onSubAgentStopped(frame: AiOutput) {
-        val jobId = frame.jobId.takeIf { it.isNotBlank() } ?: return
-        val rows = subAgents.value
-        when (frame.stage) {
-            "subagent_stopping" -> {
-                subAgents.value = rows.map { if (it.jobId == jobId) it.copy(stopping = true) else it }
-                status.value = "Stopping sub agent…"
-            }
-            "subagent_not_found" -> {
-                subAgents.value = rows.filterNot { it.jobId == jobId }
-                notice.value = "No sub agent to stop — may have finished"
-            }
-            "subagent_stop_failed" -> {
-                subAgents.value = rows.map { if (it.jobId == jobId) it.copy(stopping = false) else it }
-                notice.value = "Failed to stop sub agent"
-            }
-            // The daemon says how each worker ended. A row that only ever saw
-            // its own deltas would keep claiming it is still running.
-            "subagent_stopped", "subagent_completed", "subagent_failed" -> {
-                val ended = frame.stage.removePrefix("subagent_")
-                subAgents.value = rows.map {
-                    if (it.jobId != jobId) it
-                    else it.copy(
-                        running = false,
-                        stopping = false,
-                        detail = when (ended) {
-                            "stopped" -> "Stopped"
-                            "failed" -> "Failed"
-                            else -> "Done"
-                        },
-                    )
-                }
-            }
-        }
-    }
-
-    /**
-     * The per-row stop: one worker stops, the turn that delegated to it keeps
-     * going. The daemon answers for the job, and that answer is what moves the
-     * row, so the button never has to guess.
-     */
-    fun stopSubAgent(jobId: String) {
-        if (jobId.isBlank()) return
-        if (!repo.stopSubAgent(sessionId, jobId)) {
-            notice.value = "Cannot send stop to sub agent — socket offline"
-            return
-        }
-        subAgents.value = subAgents.value.map { if (it.jobId == jobId) it.copy(stopping = true) else it }
-        status.value = "Stopping sub agent…"
     }
 
     /**
@@ -1111,9 +990,7 @@ class ChatViewModel(
         errorCard.value = ""
         busy.value = true
         liveChars = 0
-        liveSubText = ""
         liveBlocks.value = emptyList()
-        subAgents.value = emptyList()
         liveUsage.value = null
         liveText.value = ""
         liveReasoning.value = ""
@@ -1164,16 +1041,6 @@ class ChatViewModel(
             if (wasDraft && pendingRoute != null) {
                 runCatching { repo.setSessionModel(sessionId, pendingRoute.first, pendingRoute.second) }
                 draftRoute = null
-            }
-            val pendingSub = draftSubAgent
-            if (wasDraft && pendingSub != null) {
-                runCatching {
-                    repo.saveSessionAgentConfig(
-                        sessionId, "", "", false,
-                        pendingSub.first, pendingSub.second, pendingSub.third, false,
-                    )
-                }
-                draftSubAgent = null
             }
             turnBaseSeq = repo.maxSeq(sessionId)
             val fresh = try {
@@ -1230,7 +1097,6 @@ class ChatViewModel(
                     selectedModel.value = ""
                     hasStoredRoute.value = false
                     draftRoute = null
-                    draftSubAgent = null
                     settings.saveSession(it)
                 }
                 .onFailure { notice.value = "Failed to create a new chat: ${it.message}" }
@@ -1246,7 +1112,6 @@ class ChatViewModel(
             selectedModel.value = ""
             hasStoredRoute.value = false
             draftRoute = null
-            draftSubAgent = null
             settings.saveSession(id)
             // The header shows this chat's model, not the daemon default.
             runCatching { repo.sessionRoute(id) }.getOrNull()?.let { (provider, model) ->
@@ -1271,7 +1136,6 @@ class ChatViewModel(
                 selectedModel.value = ""
                 hasStoredRoute.value = false
                 draftRoute = null
-                draftSubAgent = null
                 settings.saveSession(next)
                 runCatching { repo.sessionRoute(next) }.getOrNull()?.let { (provider, model) ->
                     selectedProvider.value = provider
@@ -1315,75 +1179,6 @@ class ChatViewModel(
 
     fun clearNotice() { notice.value = "" }
 
-    // ---- Per-session sub-agent settings (ACP session config pattern) ----
-
-    val subAgentProvider = MutableStateFlow("")
-    val subAgentModel = MutableStateFlow("")
-    val subAgentEnabled = MutableStateFlow(true)
-    val subAgentPinned = MutableStateFlow(false)
-
-    fun loadSubAgentConfig() {
-        viewModelScope.launch {
-            val cfg = repo.sessionAgentConfig(sessionId) ?: return@launch
-            subAgentProvider.value = cfg.subProvider
-            subAgentModel.value = cfg.subModel
-            subAgentEnabled.value = cfg.subEnabled
-            subAgentPinned.value = cfg.subPinned
-        }
-    }
-
-    // Toggling the sub agent on or off must work without picking a route: a
-    // blank provider/model tells the daemon "keep the agent's global
-    // sub-agent, only override the switch", which is what the daemon writes
-    // as sub_enabled with no route change.
-    fun setSubAgent(provider: String, model: String, enabled: Boolean) {
-        viewModelScope.launch {
-            val draft = repo.isDraft(sessionId)
-            val ok = draft || runCatching {
-                repo.saveSessionAgentConfig(sessionId, "", "", false, provider, model, enabled, false)
-            }.getOrDefault(false)
-            if (ok) {
-                if (draft) draftSubAgent = Triple(provider, model, enabled)
-                subAgentProvider.value = provider
-                subAgentModel.value = model
-                subAgentEnabled.value = enabled
-                subAgentPinned.value = provider.isNotBlank() && model.isNotBlank()
-                notice.value = if (subAgentPinned.value) {
-                    "Sub agent: $provider / $model"
-                } else if (enabled) {
-                    "Enable sub agent using the agent default"
-                } else {
-                    "Disable sub agent for this chat"
-                }
-            } else {
-                notice.value = "Failed to save sub agent"
-            }
-        }
-    }
-
-    fun clearSubAgent() {
-        viewModelScope.launch {
-            val draft = repo.isDraft(sessionId)
-            val ok = draft || runCatching {
-                repo.saveSessionAgentConfig(sessionId, "", "", false, "", "", null, true)
-            }.getOrDefault(false)
-            if (ok) {
-                if (draft) draftSubAgent = null
-                subAgentProvider.value = ""
-                subAgentModel.value = ""
-                subAgentPinned.value = false
-                // Re-read the effective values so the toggle shows what the
-                // agent's global sub-agent is, not the flag the chat had.
-                if (!draft) loadSubAgentConfig()
-                notice.value = "Sub agent now uses the agent default"
-            } else {
-                notice.value = "Failed to clear sub agent"
-            }
-        }
-    }
-
-    fun chooseSubProvider(id: String) { subAgentProvider.value = id }
-    fun chooseSubModel(id: String) { subAgentModel.value = id }
     override fun onCleared() {
         super.onCleared()
     }

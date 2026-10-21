@@ -17,9 +17,6 @@
     <string name="offline_http">Could not connect (HTTP %1$d)</string>
     <string name="offline_closed">The connection closed (%1$d)</string>
     <string name="composer_hint">Send a message…</string>
-    <string name="sub_agent_running">working</string>
-    <string name="sub_agent_stop">Stop</string>
-    <string name="sub_agent_title">SUB AGENT %1$d</string>
     <string name="agent_user">you</string>
     <string name="live_answering">answering</string>
     <string name="live_thinking">thinking · %1$s</string>

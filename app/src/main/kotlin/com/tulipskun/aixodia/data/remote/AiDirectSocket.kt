@@ -71,13 +71,6 @@ class AiDirectSocket(
         return relay.sendChat(inAdapter.toJson(frame))
     }
 
-    /** Stops one sub agent job and leaves the turn running. */
-    fun cancelSubAgent(sessionId: String, jobId: String): Boolean {
-        if (jobId.isBlank()) return false
-        val frame = AiInput(type = "cancel", sessionId = sessionId, jobId = jobId)
-        return relay.sendChat(inAdapter.toJson(frame))
-    }
-
     /** Closes the socket and tells the engine no turn is still wanted. */
     fun close() {
         relay.bye()

@@ -71,9 +71,9 @@ class TurnFooterTest {
         val final = row(3, "model").copy(agent = "main", model = "big-pickle")
         val history = listOf(
             row(1, "user"),
-            row(2, "model").copy(agent = "sub", model = "worker-model"),
+            row(2, "model").copy(agent = "worker", model = "worker-model"),
             final,
-            row(4, "tool_result").copy(agent = "sub", durationMs = 900L),
+            row(4, "tool_result").copy(agent = "worker", durationMs = 900L),
             row(5, "model").copy(agent = "worker", model = "worker-model"),
             row(6, "system").copy(model = "big-pickle"),
         )

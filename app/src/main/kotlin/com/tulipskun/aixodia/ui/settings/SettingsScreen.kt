@@ -109,8 +109,6 @@ import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
-private enum class Picker { MainProvider, MainModel, SubProvider, SubModel }
-
 /** The Settings screen is split: the main page, and a page only for providers and keys. */
 private enum class SettingsPage { Main, Connection, Agent, About }
 
@@ -156,14 +154,10 @@ fun SettingsScreen(
     var probedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var catalogue by remember { mutableStateOf<List<ProviderView>>(emptyList()) }
     var mainRoute by remember { mutableStateOf(AgentRoute()) }
-    var subRoute by remember { mutableStateOf(AgentRoute()) }
     var mainGeneration by remember { mutableStateOf(GenerationSettings()) }
-    var subGeneration by remember { mutableStateOf(GenerationSettings()) }
     // Names the reader cleared, sent once with the save so the daemon removes
     // exactly those and leaves the rest of the stored values where they are.
     var clearedMain by remember { mutableStateOf<List<String>>(emptyList()) }
-    var clearedSub by remember { mutableStateOf<List<String>>(emptyList()) }
-    var picker by remember { mutableStateOf<Picker?>(null) }
     var showAgentDialog by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
@@ -195,9 +189,7 @@ fun SettingsScreen(
         runCatching { history.models() }.getOrNull()?.let { catalogue = it }
         runCatching { history.agentSettings() }.getOrNull()?.let {
             mainRoute = AgentRoute(it.main.provider, it.main.model)
-            subRoute = AgentRoute(it.sub.provider, it.sub.model)
             mainGeneration = it.main.generation
-            subGeneration = it.sub.generation
         }
         loading = false
         rows != null
@@ -375,7 +367,7 @@ fun SettingsScreen(
                     Text("Open agent model settings")
                 }
                 Text(
-                    "main: ${mainRoute.provider}/${mainRoute.model}  ·  sub: ${if (subRoute.provider.isBlank()) "(use main)" else "${subRoute.provider}/${subRoute.model}"}",
+                    "main: ${mainRoute.provider}/${mainRoute.model}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -395,30 +387,17 @@ fun SettingsScreen(
                         },
                     )
                 }
-                if (subRoute.provider.isBlank() || subRoute.model.isBlank()) {
-                    Text(
-                        "No sub agent selected — if left blank, uses the main agent value",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 Button(
                     onClick = {
                         busy = true
                         scope.launch {
-                            val sub = if (subRoute.provider.isBlank() || subRoute.model.isBlank()) mainRoute else subRoute
                             msg = history.saveAgentSettings(
                                 SettingsView(
                                     main = AgentSettings(mainRoute.provider, mainRoute.model, mainGeneration),
-                                    sub = AgentSettings(sub.provider, sub.model, subGeneration),
-                                    subEnabled = true,
                                 ),
                                 clearMain = clearedMain,
-                                clearSub = clearedSub,
                             )
                             clearedMain = emptyList()
-                            clearedSub = emptyList()
-                            subRoute = sub
                             load(false)
                             busy = false
                         }
@@ -508,66 +487,15 @@ fun SettingsScreen(
             providers = routable,
             modelsByProvider = modelsByProvider,
             mainRoute = mainRoute,
-            subRoute = subRoute,
             mainGen = mainGeneration,
-            subGen = subGeneration,
-            onMainRoute = { mainRoute = it },
-            onSubRoute = { subRoute = it },
-            onMainGen = { mainGeneration = it },
-            onSubGen = { subGeneration = it },
             onDismiss = { showAgentDialog = false },
-            onSave = { m, sub, mg, sg ->
+            onSave = { m, mg ->
                 mainRoute = m
-                subRoute = sub
                 mainGeneration = mg
-                subGeneration = sg
                 showAgentDialog = false
             },
         )
     }
-    if (picker != null) {
-        val isProvider = picker == Picker.MainProvider || picker == Picker.SubProvider
-        val isMain = picker == Picker.MainProvider || picker == Picker.MainModel
-        val route = if (isMain) mainRoute else subRoute
-        if (isProvider) {
-            ProviderSheet(
-                title = if (isMain) "main agent — provider" else "sub agent — provider",
-                providers = routable,
-                probedIds = probedIds,
-                current = route.provider,
-                onPick = { id ->
-                    val models = modelsByProvider[id].orEmpty()
-                    val model = catalogue.firstOrNull { it.id == id }?.defaultModel
-                        ?.takeIf { m -> models.any { it.id == m } }
-                        ?: models.firstOrNull()?.id.orEmpty()
-                    if (isMain) {
-                        mainRoute = AgentRoute(id, model)
-                    } else {
-                        subRoute = AgentRoute(id, model)
-                    }
-                    picker = null
-                },
-                onDismiss = { picker = null },
-            )
-        } else {
-            ModelSheet(
-                title = if (isMain) "main agent — model" else "sub agent — model",
-                provider = route.provider,
-                models = modelsByProvider[route.provider].orEmpty(),
-                current = route.model,
-                onPick = { id ->
-                    if (isMain) {
-                        mainRoute = route.copy(model = id)
-                    } else {
-                        subRoute = route.copy(model = id)
-                    }
-                    picker = null
-                },
-                onDismiss = { picker = null },
-            )
-        }
-    }
-
     if (adding) {
         AddProviderDialog(
             onDismiss = { adding = false },

@@ -11,7 +11,6 @@ import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.Block
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ProviderView
-import com.tulipskun.aixodia.data.model.SessionAgentConfig
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.remote.AiDirectSocket
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -308,9 +307,6 @@ class ChatRepository(
      */
     fun retryTurn(sid: String): Boolean =
         if (sid.isBlank()) false else socket.retry(sid, "$sid:retry:${System.currentTimeMillis()}")
-
-    /** Stops one sub agent of this chat and leaves the turn running. */
-    fun stopSubAgent(sid: String, jobId: String): Boolean = socket.cancelSubAgent(sid, jobId)
 
     /** The provider and model the daemon currently offers, for the picker. */
     suspend     fun models(): List<ProviderView> = history.models()
@@ -663,19 +659,6 @@ class ChatRepository(
 
     fun close() = socket.close()
 
-    suspend fun sessionAgentConfig(sid: String): SessionAgentConfig? =
-        try { history.sessionAgentConfig(sid) } catch (_: Exception) { null }
-
-    suspend fun saveSessionAgentConfig(
-        sid: String,
-        mainProvider: String,
-        mainModel: String,
-        clearMain: Boolean,
-        subProvider: String,
-        subModel: String,
-        subEnabled: Boolean?,
-        clearSub: Boolean,
-    ): Boolean = history.saveSessionAgentConfig(sid, mainProvider, mainModel, clearMain, subProvider, subModel, subEnabled, clearSub)
 }
 
 /** True for a model reply that has no text, no tool name and was not waiting to send. */
