@@ -61,9 +61,9 @@ class DaemonDiscovery(
 
     /**
      * The engine instance whose address was last read. A different started
-     * means the daemon was replaced: every relay stream the phone had —
-     * terminals included — died with the old process, even though the address
-     * did not change and the relay may never have shown the engine as absent.
+     * time means the daemon was replaced: every terminal stream the phone had
+     * died with the old process, even though the address did not change and
+     * discovery may not have noticed the absence.
      */
     private var lastStartedAt = 0L
 
