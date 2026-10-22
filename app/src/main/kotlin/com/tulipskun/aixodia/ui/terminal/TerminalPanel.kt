@@ -16,25 +16,34 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -42,12 +51,15 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -255,257 +267,286 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
     }
 
-    // The whole screen lives inside one platform ViewGroup. The terminal is a
-    // plain child View; the header, the session tabs, the keys and the composer
-    // are Compose hosted above and below it in the same ViewGroup. The ViewGroup
-    // — not Compose — owns the placement, so the terminal can never be painted
-    // over the header, and no Compose layer can separate the driven view from
-    // the chrome that drives it.
     val currentOnClose by rememberUpdatedState(onClose)
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
 
-    Box(Modifier.fillMaxSize().background(Ink)) {
-        AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                // The system bars set the floor and the ceiling. The nav bar
-                // keeps its strip or it covers the composer.
-                .windowInsetsPadding(WindowInsets.safeDrawing),
-            factory = { ctx ->
-                val restart = {
-                    ended = null
-                    ready = null
-                    emulator.hardReset()
-                    terminalView.value?.scrollToBottom()
-                    terminalView.value?.keepSoftKeyboard()
-                    socket.newSession()
-                }
-                val closeSession = {
-                    ended = null
-                    ready = null
-                    emulator.hardReset()
-                    terminalView.value?.scrollToBottom()
-                    terminalView.value?.keepSoftKeyboard()
-                    socket.closeSession()
-                }
+    val restart = {
+        ended = null
+        ready = null
+        emulator.hardReset()
+        terminalView.value?.scrollToBottom()
+        terminalView.value?.keepSoftKeyboard()
+        socket.newSession()
+    }
+    val closeSession = {
+        ended = null
+        ready = null
+        emulator.hardReset()
+        terminalView.value?.scrollToBottom()
+        terminalView.value?.keepSoftKeyboard()
+        socket.closeSession()
+    }
+    val status = statusLine(state, errorRes, ready, ended) +
+        (if (detail.isNotBlank() && state != TermState.OPEN) "  ·  $detail" else "")
 
-                val root = LinearLayout(ctx).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setBackgroundColor(Ink.toArgb())
-                }
+    // The terminal itself is still one platform ViewGroup, but the chrome no
+    // longer sits above it: the session controls live in a drawer so the shell
+    // gets the whole page. A menu key or a left-to-right edge swipe opens it.
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = true,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = Ink,
+                drawerContentColor = InkText,
+            ) {
+                TerminalSidebar(
+                    socket = socket,
+                    status = status,
+                    canRestart = state == TermState.CLOSED || state == TermState.ENDED,
+                    onRestart = {
+                        drawerScope.launch { drawerState.close() }
+                        restart()
+                    },
+                    onCloseSession = {
+                        drawerScope.launch { drawerState.close() }
+                        closeSession()
+                    },
+                    onClose = {
+                        drawerScope.launch { drawerState.close() }
+                        currentOnClose()
+                    },
+                    onPicked = { drawerScope.launch { drawerState.close() } },
+                )
+            }
+        },
+    ) {
+        Box(Modifier.fillMaxSize().background(Ink)) {
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // The system bars set the floor and the ceiling. The nav bar
+                    // keeps its strip or it covers the composer.
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
+                factory = { ctx ->
+                    val root = LinearLayout(ctx).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setBackgroundColor(Ink.toArgb())
+                    }
 
-                // The header and the session tabs stay put even with the
-                // keyboard up: closing a shell is not something the keyboard
-                // should take away. The terminal gives up the room instead.
-                val header = ComposeView(ctx).apply {
-                    setContent {
-                        AIxodiaTheme {
-                            Column {
-                                TerminalHeader(
-                                    status = statusLine(state, errorRes, ready, ended) +
-                                        (if (detail.isNotBlank() && state != TermState.OPEN) "  ·  $detail" else ""),
-                                    canRestart = state == TermState.CLOSED || state == TermState.ENDED,
-                                    onRestart = restart,
-                                    onCloseSession = closeSession,
-                                    onClose = { currentOnClose() },
-                                )
-                                TerminalSessionBar(socket = socket)
-                            }
+                    // The terminal takes every pixel above the keys, so the grid
+                    // always matches the visible area. Session controls live in
+                    // the drawer instead of eating a header row.
+                    val middle = FrameLayout(ctx)
+                    val view = TerminalView(ctx).apply {
+                        setBackgroundColor(Ink.toArgb())
+                        setEmulator(emulator)
+                        inputSink = { socket.send(it) }
+                        onResize = { cols, rows -> socket.resize(cols, rows) }
+                        onScrollChanged = { atBottom.value = it }
+                        onModsConsumed = {
+                            // The view has spent its latch; keep the chips in step.
+                            ctrlOn.value = false
+                            altOn.value = false
                         }
+                        requestFocus()
+                        terminalView.value = this
                     }
-                }
-                root.addView(
-                    header,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
+                    middle.addView(
+                        view,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        ),
+                    )
 
-                // The terminal sits between the chrome and takes every pixel
-                // left over, so the grid always matches the visible area.
-                val middle = FrameLayout(ctx)
-                val view = TerminalView(ctx).apply {
-                    setBackgroundColor(Ink.toArgb())
-                    setEmulator(emulator)
-                    inputSink = { socket.send(it) }
-                    onResize = { cols, rows -> socket.resize(cols, rows) }
-                    onScrollChanged = { atBottom.value = it }
-                    onModsConsumed = {
-                        // The view has spent its latch; keep the chips in step.
-                        ctrlOn.value = false
-                        altOn.value = false
-                    }
-                    requestFocus()
-                    terminalView.value = this
-                }
-                middle.addView(
-                    view,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    ),
-                )
-
-                // Only while there is history above: a terminal at the prompt
-                // needs no button. It is a sibling of the terminal inside the
-                // same FrameLayout, so it rides above it without Compose layers.
-                val scrollDown = ComposeView(ctx).apply {
-                    setContent {
-                        AIxodiaTheme {
-                            if (!atBottom.value) {
-                                Box(Modifier.padding(end = 12.dp, bottom = 12.dp)) {
-                                    Surface(
-                                        color = Color(0xFF1A222C),
-                                        shape = RoundedCornerShape(50),
-                                        modifier = Modifier.clickable {
-                                            view.scrollToBottom()
-                                            view.keepSoftKeyboard()
-                                        },
-                                    ) {
-                                        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.KeyboardArrowDown,
-                                                contentDescription = "Scroll to bottom",
-                                                tint = InkText,
-                                            )
+                    // Only while there is history above: a terminal at the prompt
+                    // needs no button. It is a sibling of the terminal inside the
+                    // same FrameLayout, so it rides above it without Compose layers.
+                    val scrollDown = ComposeView(ctx).apply {
+                        setContent {
+                            AIxodiaTheme {
+                                if (!atBottom.value) {
+                                    Box(Modifier.padding(end = 12.dp, bottom = 12.dp)) {
+                                        Surface(
+                                            color = Color(0xFF1A222C),
+                                            shape = RoundedCornerShape(50),
+                                            modifier = Modifier.clickable {
+                                                view.scrollToBottom()
+                                                view.keepSoftKeyboard()
+                                            },
+                                        ) {
+                                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.KeyboardArrowDown,
+                                                    contentDescription = "Scroll to bottom",
+                                                    tint = InkText,
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                middle.addView(
-                    scrollDown,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        Gravity.BOTTOM or Gravity.END,
-                    ),
-                )
+                    middle.addView(
+                        scrollDown,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            Gravity.BOTTOM or Gravity.END,
+                        ),
+                    )
 
-                root.addView(
-                    middle,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        0,
-                        1f,
-                    ),
-                )
+                    root.addView(
+                        middle,
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            0,
+                            1f,
+                        ),
+                    )
 
-                // The keys and the composer are the floor. They stay under the
-                // thumb and out of the terminal's way, and the terminal scrolls
-                // the whole grid instead of pushing the composer around.
-                val footer = ComposeView(ctx).apply {
-                    setContent {
-                        AIxodiaTheme {
-                            Column {
-                                TerminalKeys(
-                                    ctrlOn = ctrlOn.value,
-                                    altOn = altOn.value,
-                                    onCtrl = {
-                                        val v = !ctrlOn.value
-                                        ctrlOn.value = v
-                                        view.setLatchedMods(v, altOn.value)
-                                        view.keepSoftKeyboard()
-                                    },
-                                    onAlt = {
-                                        val v = !altOn.value
-                                        altOn.value = v
-                                        view.setLatchedMods(ctrlOn.value, v)
-                                        view.keepSoftKeyboard()
-                                    },
-                                    onKey = { bytes ->
-                                        socket.send(bytes)
-                                        // Tapping a key must not take the keyboard with it.
-                                        view.keepSoftKeyboard()
-                                    },
-                                )
-                                TerminalComposer(
-                                    socket = socket,
-                                    onSend = {
-                                        if (ctrlOn.value || altOn.value) {
-                                            ctrlOn.value = false
-                                            altOn.value = false
-                                            view.setLatchedMods(false, false)
-                                        }
-                                    },
-                                )
+                    // The keys and the composer are the floor. They stay under the
+                    // thumb and out of the terminal's way, and the terminal scrolls
+                    // the whole grid instead of pushing the composer around.
+                    val footer = ComposeView(ctx).apply {
+                        setContent {
+                            AIxodiaTheme {
+                                Column {
+                                    TerminalKeys(
+                                        ctrlOn = ctrlOn.value,
+                                        altOn = altOn.value,
+                                        onMenu = { drawerScope.launch { drawerState.open() } },
+                                        onCtrl = {
+                                            val v = !ctrlOn.value
+                                            ctrlOn.value = v
+                                            view.setLatchedMods(v, altOn.value)
+                                            view.keepSoftKeyboard()
+                                        },
+                                        onAlt = {
+                                            val v = !altOn.value
+                                            altOn.value = v
+                                            view.setLatchedMods(ctrlOn.value, v)
+                                            view.keepSoftKeyboard()
+                                        },
+                                        onKey = { bytes ->
+                                            socket.send(bytes)
+                                            // Tapping a key must not take the keyboard with it.
+                                            view.keepSoftKeyboard()
+                                        },
+                                    )
+                                    TerminalComposer(
+                                        socket = socket,
+                                        onSend = {
+                                            if (ctrlOn.value || altOn.value) {
+                                                ctrlOn.value = false
+                                                altOn.value = false
+                                                view.setLatchedMods(false, false)
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
-                }
-                root.addView(
-                    footer,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
+                    root.addView(
+                        footer,
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ),
+                    )
 
-                root
-            },
-        )
+                    root
+                },
+            )
 
-        LaunchedEffect(terminalView.value) {
-            terminalView.value?.requestFocus()
+            LaunchedEffect(terminalView.value) {
+                terminalView.value?.requestFocus()
+            }
         }
     }
 }
 
 @Composable
-private fun TerminalHeader(
+private fun TerminalSidebar(
+    socket: TerminalSocket,
     status: String,
     canRestart: Boolean,
     onRestart: () -> Unit,
     onCloseSession: () -> Unit,
     onClose: () -> Unit,
+    onPicked: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxHeight()
+            .padding(16.dp),
+    ) {
+        Text(
+            stringResource(R.string.terminal),
+            style = MaterialTheme.typography.titleLarge,
+            color = InkText,
+        )
+        if (status.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                status,
+                style = MaterialTheme.typography.labelSmall,
+                color = InkDim,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Sessions",
+            style = MaterialTheme.typography.labelSmall,
+            color = InkDim,
+        )
+        Spacer(Modifier.height(6.dp))
+        TerminalSessionBar(socket = socket, onPicked = onPicked)
+        Spacer(Modifier.height(16.dp))
+        if (canRestart) {
+            SidebarAction(
+                label = stringResource(R.string.terminal_open_new),
+                icon = Icons.Default.Refresh,
+                onClick = onRestart,
+            )
+        }
+        SidebarAction(
+            label = "Close session",
+            icon = Icons.Default.Delete,
+            onClick = onCloseSession,
+        )
+        Spacer(Modifier.weight(1f))
+        SidebarAction(
+            label = stringResource(R.string.terminal_close),
+            icon = Icons.Default.Close,
+            onClick = onClose,
+        )
+    }
+}
+
+@Composable
+private fun SidebarAction(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 14.dp, end = 2.dp, top = 4.dp, bottom = 0.dp),
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                stringResource(R.string.terminal),
-                style = MaterialTheme.typography.titleSmall,
-                color = InkText,
-            )
-            if (status.isNotBlank()) {
-                Text(
-                    status,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = InkDim,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (canRestart) {
-            IconButton(onClick = onRestart, modifier = Modifier.size(38.dp)) {
-                Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = stringResource(R.string.terminal_open_new),
-                    tint = InkDim,
-                )
-            }
-        }
-        IconButton(onClick = onCloseSession, modifier = Modifier.size(38.dp)) {
-            Icon(
-                Icons.Default.Close,
-                contentDescription = "Close session",
-                tint = InkDim,
-            )
-        }
-        IconButton(onClick = onClose, modifier = Modifier.size(38.dp)) {
-            Icon(
-                Icons.Default.Close,
-                contentDescription = stringResource(R.string.terminal_close),
-                tint = InkDim,
-            )
-        }
+        Icon(icon, contentDescription = null, tint = InkDim, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = InkText)
     }
 }
 
@@ -521,6 +562,7 @@ private fun TerminalHeader(
 private fun TerminalKeys(
     ctrlOn: Boolean,
     altOn: Boolean,
+    onMenu: () -> Unit,
     onCtrl: () -> Unit,
     onAlt: () -> Unit,
     onKey: (ByteArray) -> Unit,
@@ -542,35 +584,59 @@ private fun TerminalKeys(
         "\u2193" to "\u001b[B".toByteArray(),
         "\u2192" to "\u001b[C".toByteArray(),
     )
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        // Two rows tall, so it is a full-height target instead of another
+        // narrow chip squeezed between the keys.
+        Surface(
+            color = InkLine,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .width(48.dp)
+                .height(70.dp)
+                .clickable(onClick = onMenu),
         ) {
-            top.forEach { (label, bytes) ->
-                Box(Modifier.weight(1f)) {
-                    KeyChip(label, wide = true, onClick = { onKey(bytes) })
-                }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Menu,
+                    contentDescription = "Menu",
+                    tint = InkText,
+                    modifier = Modifier.size(24.dp),
+                )
             }
         }
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Box(Modifier.weight(1f)) {
-                KeyChip("Ctrl", active = ctrlOn, wide = true, onClick = onCtrl)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                top.forEach { (label, bytes) ->
+                    Box(Modifier.weight(1f)) {
+                        KeyChip(label, wide = true, onClick = { onKey(bytes) })
+                    }
+                }
             }
-            Box(Modifier.weight(1f)) {
-                KeyChip("Alt", active = altOn, wide = true, onClick = onAlt)
-            }
-            bottom.forEach { (label, bytes) ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Box(Modifier.weight(1f)) {
-                    KeyChip(label, wide = true, onClick = { onKey(bytes) })
+                    KeyChip("Ctrl", active = ctrlOn, wide = true, onClick = onCtrl)
+                }
+                Box(Modifier.weight(1f)) {
+                    KeyChip("Alt", active = altOn, wide = true, onClick = onAlt)
+                }
+                bottom.forEach { (label, bytes) ->
+                    Box(Modifier.weight(1f)) {
+                        KeyChip(label, wide = true, onClick = { onKey(bytes) })
+                    }
                 }
             }
         }
@@ -595,13 +661,15 @@ private fun KeyChip(
             Modifier
                 .then(if (wide) Modifier.fillMaxWidth() else Modifier)
                 .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = if (wide) 4.dp else 8.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 label,
                 style = MaterialTheme.typography.labelMedium,
                 color = if (active) Color(0xFFE8F0F8) else InkText,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
@@ -651,7 +719,7 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TerminalSessionBar(socket: TerminalSocket) {
+private fun TerminalSessionBar(socket: TerminalSocket, onPicked: () -> Unit = {}) {
     val sessions by socket.sessions.collectAsStateWithLifecycle()
     val pids by socket.sessionPids.collectAsStateWithLifecycle()
     val active by socket.activeSessionId.collectAsStateWithLifecycle()
@@ -676,7 +744,10 @@ private fun TerminalSessionBar(socket: TerminalSocket) {
             Surface(
                 color = if (selected) Color(0xFF2A3A4A) else InkLine,
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.clickable { socket.switchSession(id) },
+                modifier = Modifier.clickable {
+                    socket.switchSession(id)
+                    onPicked()
+                },
             ) {
                 Text(
                     label,
@@ -689,7 +760,10 @@ private fun TerminalSessionBar(socket: TerminalSocket) {
         Surface(
             color = InkLine,
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.clickable { socket.newSession() },
+            modifier = Modifier.clickable {
+                socket.newSession()
+                onPicked()
+            },
         ) {
             Text(
                 "+",
