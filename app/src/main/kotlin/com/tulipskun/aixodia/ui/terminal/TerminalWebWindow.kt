@@ -9,6 +9,7 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -63,11 +65,32 @@ private val InkLine = Color(0xFF1A222C)
 private val InkText = Color(0xFFD7E0EA)
 private val InkDim = Color(0xFF8CA0B3)
 
+// One key of the terminal key bar. The active state is the Ctrl arm, which is
+// visible because a Ctrl that is on and unnoticed makes every following
+// keystroke a control character.
+@Composable
+private fun TermKey(label: String, active: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (active) Color(0xFF33467C) else Ink)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+    ) {
+        Text(
+            label,
+            color = if (active) InkText else InkDim,
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
 private sealed interface WebEvent {
     data object Open : WebEvent
     data class Ready(val shell: String, val cwd: String, val id: String, val cols: Int, val rows: Int, val pid: Int) : WebEvent
     data object Disconnected : WebEvent
     data class Ended(val kind: String, val detail: String) : WebEvent
+    data class CtrlArmed(val on: Boolean) : WebEvent
 }
 
 private class TerminalBridge(private val events: Channel<WebEvent>) {
@@ -89,6 +112,13 @@ private class TerminalBridge(private val events: Channel<WebEvent>) {
     @JavascriptInterface
     fun onEnded(kind: String, detail: String) {
         events.trySend(WebEvent.Ended(kind, detail))
+    }
+
+    // The page spends the Ctrl arm after one key, so the button that shows it
+    // is on has to be told, not just asked.
+    @JavascriptInterface
+    fun onCtrl(on: Boolean) {
+        events.trySend(WebEvent.CtrlArmed(on))
     }
 }
 
@@ -118,6 +148,16 @@ fun TerminalWebWindow(
     var ended by remember { mutableStateOf(false) }
     var attempt by remember { mutableStateOf(0) }
     var terminalSize by remember { mutableStateOf(80 to 24) }
+    var ctrlArmed by remember { mutableStateOf(false) }
+
+    fun pressKey(name: String) {
+        webViewRef.value?.evaluateJavascript("pressKey('$name')", null)
+    }
+
+    fun armCtrl(on: Boolean) {
+        ctrlArmed = on
+        webViewRef.value?.evaluateJavascript("setCtrlArmed($on)", null)
+    }
 
     fun newID(): String = "t-" + UUID.randomUUID().toString().replace("-", "").take(12)
 
@@ -249,6 +289,7 @@ fun TerminalWebWindow(
                     ended = true
                     status = if (event.kind == "exit") "Session ended (${event.detail})" else event.detail
                 }
+                is WebEvent.CtrlArmed -> ctrlArmed = event.on
             }
         }
     }
@@ -333,6 +374,31 @@ fun TerminalWebWindow(
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
                 .padding(horizontal = 10.dp, vertical = 3.dp),
         )
+        // The phone keyboard has no Esc, no Tab, no arrows and no Ctrl, so the
+        // keys a shell cannot be driven without get a row of their own. Ctrl
+        // arms the next character typed, the way holding it on a real keyboard
+        // would: Ctrl then b is the tmux prefix, Ctrl then c is SIGINT.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(InkLine)
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            TermKey("Esc") { pressKey("esc") }
+            TermKey("Tab") { pressKey("tab") }
+            TermKey("Ctrl", active = ctrlArmed) { armCtrl(!ctrlArmed) }
+            TermKey("^C") { pressKey("ctrlc") }
+            TermKey("^D") { pressKey("ctrld") }
+            TermKey("^L") { pressKey("ctrll") }
+            TermKey("←") { pressKey("left") }
+            TermKey("↑") { pressKey("up") }
+            TermKey("↓") { pressKey("down") }
+            TermKey("→") { pressKey("right") }
+        }
         AndroidView(
             modifier = Modifier
                 .fillMaxSize()

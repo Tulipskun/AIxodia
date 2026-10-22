@@ -42,6 +42,10 @@
   var overlay = document.getElementById('overlay');
   var host = document.getElementById('term');
   var fitTimer = 0;
+  // A phone keyboard has no Ctrl key, so the host arms one from its key bar.
+  // The next character typed goes out as its control code and the arm is spent
+  // — the same as holding Ctrl down for exactly one key.
+  var ctrlArmed = false;
 
   function bridge(name, args) {
     try {
@@ -57,6 +61,66 @@
   }
 
   function hide() { overlay.classList.add('hidden'); }
+
+  function sendText(text) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(new TextEncoder().encode(text));
+  }
+
+  // ctrlByte maps a typed character to what Ctrl+that key would send. Returns
+  // -1 for characters Ctrl has no meaning for.
+  function ctrlByte(ch) {
+    if (ch === ' ' || ch === '@') return 0;
+    if (ch === '?') return 127;
+    var code = ch.toUpperCase().charCodeAt(0);
+    if (code >= 0x40 && code <= 0x5f) return code & 0x1f;
+    return -1;
+  }
+
+  function setCtrlArmed(on) {
+    ctrlArmed = !!on;
+    bridge('onCtrl', [ctrlArmed]);
+  }
+
+  // Arrow and Home/End follow the cursor-key mode the terminal is in: tmux
+  // switches it on when the program inside asks, and an application-mode
+  // terminal that is sent CSI arrows instead of SS3 gets nothing but beeps.
+  function cursorKey(final) {
+    var app = false;
+    try { app = !!(term && term.modes && term.modes.applicationCursorKeysMode); } catch (e) { }
+    return (app ? '\x1bO' : '\x1b[') + final;
+  }
+
+  window.setCtrlArmed = setCtrlArmed;
+  window.toggleCtrl = function () { setCtrlArmed(!ctrlArmed); };
+  window.focusTerminal = function () { if (term) { try { term.focus(); } catch (e) { } } };
+
+  // pressKey sends a key the phone keyboard does not have. Focus is only kept
+  // if the keyboard was already up: tapping Esc to leave a program should not
+  // pull the keyboard over the screen.
+  window.pressKey = function (name) {
+    var seq;
+    switch (name) {
+      case 'esc': seq = '\x1b'; break;
+      case 'tab': seq = '\t'; break;
+      case 'up': seq = cursorKey('A'); break;
+      case 'down': seq = cursorKey('B'); break;
+      case 'right': seq = cursorKey('C'); break;
+      case 'left': seq = cursorKey('D'); break;
+      case 'home': seq = cursorKey('H'); break;
+      case 'end': seq = cursorKey('F'); break;
+      case 'pgup': seq = '\x1b[5~'; break;
+      case 'pgdn': seq = '\x1b[6~'; break;
+      case 'ctrlc': seq = '\x03'; break;
+      case 'ctrld': seq = '\x04'; break;
+      case 'ctrll': seq = '\x0c'; break;
+      default: return;
+    }
+    var typing = document.activeElement && document.activeElement.tagName === 'TEXTAREA';
+    setCtrlArmed(false);
+    sendText(seq);
+    if (typing) window.focusTerminal();
+  };
 
   function sendResize() {
     if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
@@ -102,6 +166,7 @@
 
   window.startTerminal = function (url, cols, rows) {
     ended = false;
+    setCtrlArmed(false);
     closeSocket();
     if (term) { try { term.dispose(); } catch (e) { } term = null; }
     fit = null;
@@ -126,8 +191,15 @@
     term.focus();
 
     term.onData(function (data) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(new TextEncoder().encode(data));
+      if (ctrlArmed && data.length === 1) {
+        var code = ctrlByte(data);
+        if (code >= 0) {
+          setCtrlArmed(false);
+          sendText(String.fromCharCode(code));
+          return;
+        }
+      }
+      sendText(data);
     });
     term.onResize(function () { sendResize(); });
 
