@@ -5,10 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <link rel="stylesheet" href="xterm.css">
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: #0b0e14; overflow: hidden; }
-    #term { position: absolute; inset: 0; padding: 6px 4px 4px 8px; }
+    html, body { margin: 0; padding: 0; height: 100%; width: 100%; background: #0b0e14; overflow: hidden; }
+    /* Fixed edges rather than inset: the terminal must have a real height even
+       in a WebView that has not measured its layout viewport yet. */
+    #term { position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
+    /* The gutter lives on .xterm because the fit addon subtracts the terminal
+       element's own padding from the box it measures. */
+    #term .xterm { padding: 6px 4px 4px 8px; }
     #overlay {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
       color: #aab3c0; font: 13px -apple-system, Roboto, sans-serif; background: #0b0e14;
       pointer-events: none; opacity: 1; transition: opacity .15s;
     }
@@ -23,11 +28,20 @@
 <script src="xterm-addon-fit.js"></script>
 <script>
 (function () {
+  // A phone window is never this small. Anything less is a measurement taken
+  // before the WebView laid the page out, not a real window: sending it would
+  // give the shell a one-row pty, and a one-row pty paints every line on the
+  // same row for the rest of the session.
+  var MIN_COLS = 10;
+  var MIN_ROWS = 2;
+
   var term = null;
   var fit = null;
   var ws = null;
   var ended = false;
   var overlay = document.getElementById('overlay');
+  var host = document.getElementById('term');
+  var fitTimer = 0;
 
   function bridge(name, args) {
     try {
@@ -46,14 +60,45 @@
 
   function sendResize() {
     if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
+    if (term.cols < MIN_COLS || term.rows < MIN_ROWS) return;
     ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
   }
 
-  function fitNow() {
-    if (!fit) return;
-    try { fit.fit(); } catch (e) { }
-    sendResize();
+  // applyFit resizes the terminal only when the box it measured would hold a
+  // real terminal. It reports whether that happened, so the caller can retry
+  // instead of accepting a bogus size.
+  function applyFit() {
+    if (!fit || !term) return false;
+    var d = null;
+    try { d = fit.proposeDimensions(); } catch (e) { d = null; }
+    if (!d || !isFinite(d.cols) || !isFinite(d.rows)) return false;
+    if (d.cols < MIN_COLS || d.rows < MIN_ROWS) return false;
+    try { fit.fit(); } catch (e) { return false; }
+    return true;
   }
+
+  function fitNow() {
+    if (!applyFit()) return false;
+    sendResize();
+    return true;
+  }
+
+  // A WebView can run the page before its view has been laid out (the phone
+  // opened the window folded, or the activity is still measuring). The fit
+  // addon would then see a box of zero height and report one row. Keep trying
+  // for a few seconds until the box is real — the deadline is wall time, not
+  // frames, because a WebView that is not being drawn hands out frames slowly.
+  function fitUntilSized(withinMs) {
+    if (fitNow()) return;
+    if (!term || Date.now() >= withinMs) return;
+    setTimeout(function () { fitUntilSized(withinMs); }, 50);
+  }
+
+  function retryFit(ms) { fitUntilSized(Date.now() + ms); }
+
+  // Called by the host on every layout change: the WebView size is the truth
+  // about the window, whatever the page measured when it started.
+  window.fitAndResize = function () { retryFit(3000); };
 
   window.startTerminal = function (url, cols, rows) {
     ended = false;
@@ -75,8 +120,8 @@
     });
     fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
-    term.open(document.getElementById('term'));
-    try { fit.fit(); } catch (e) { }
+    term.open(host);
+    retryFit(4000);
     term.focus();
 
     term.onData(function (data) {
@@ -84,14 +129,13 @@
       ws.send(new TextEncoder().encode(data));
     });
     term.onResize(function () { sendResize(); });
-    window.addEventListener('resize', fitNow);
 
     ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
     ws.onopen = function () {
       hide();
       bridge('onOpen', []);
-      sendResize();
+      retryFit(2000);
       term.focus();
     };
     ws.onmessage = function (event) {
@@ -134,6 +178,18 @@
     if (ws) { try { ws.close(); } catch (e) { } }
     if (term) { try { term.dispose(); } catch (e) { } }
   };
+
+  // Refit whenever the box changes: unfold, rotation, keyboard, window resize.
+  window.addEventListener('resize', function () { retryFit(1500); });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () { retryFit(1500); });
+  }
+  if (window.ResizeObserver && host) {
+    new ResizeObserver(function () {
+      if (fitTimer) return;
+      fitTimer = setTimeout(function () { fitTimer = 0; fitNow(); }, 60);
+    }).observe(host);
+  }
 })();
 </script>
 </body>

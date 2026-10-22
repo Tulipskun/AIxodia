@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -192,7 +193,13 @@ fun TerminalWebWindow(
         }
         val view = webViewRef.value ?: return@LaunchedEffect
         if (view.width > 0) {
-            terminalSize = (view.width / 8).coerceAtLeast(40) to (view.height / 18).coerceAtLeast(12)
+            // The WebView measures in pixels, xterm sizes itself in CSS pixels,
+            // and one of those is one dp on this side. Dividing raw pixels
+            // asked the shell for a 135-column window on a 411dp screen, which
+            // then had to be corrected on the first frame.
+            val density = context.resources.displayMetrics.density
+            terminalSize = (view.width / density / 8f).toInt().coerceAtLeast(20) to
+                (view.height / density / 18f).toInt().coerceAtLeast(5)
         }
         val (cols, rows) = terminalSize
         val url = buildString {
@@ -308,7 +315,12 @@ fun TerminalWebWindow(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
         )
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                // The page fits the terminal to its box. A layout change here
+                // (rotation, keyboard, unfolded screen) is a new box even when
+                // the page's own resize event never fires.
+                .onSizeChanged { webViewRef.value?.evaluateJavascript("fitAndResize()", null) },
             factory = { ctx ->
                 WebView(ctx).apply {
                     setBackgroundColor(AndroidColor.parseColor("#0B0F14"))
@@ -318,6 +330,10 @@ fun TerminalWebWindow(
                     this.settings.allowFileAccessFromFileURLs = false
                     this.settings.allowContentAccess = false
                     this.settings.mediaPlaybackRequiresUserGesture = false
+                    // Honour width=device-width so one CSS pixel is one dp and
+                    // the fit addon measures the window the user can see.
+                    this.settings.useWideViewPort = true
+                    this.settings.loadWithOverviewMode = true
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             pageReady = true
