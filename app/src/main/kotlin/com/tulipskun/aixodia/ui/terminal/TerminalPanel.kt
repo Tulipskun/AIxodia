@@ -292,10 +292,14 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
 
     // The terminal itself is still one platform ViewGroup, but the chrome no
     // longer sits above it: the session controls live in a drawer so the shell
-    // gets the whole page. A menu key or a left-to-right edge swipe opens it.
+    // gets the whole page. A menu key or a left-to-right swipe in the grid
+    // opens it.
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = true,
+        // The terminal owns the gesture. It locks the drag to one axis: vertical
+        // scrolls the shell, horizontal left-to-right opens this drawer. Letting
+        // the drawer also watch for drags is what made the two fight.
+        gesturesEnabled = false,
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = Ink,
@@ -345,6 +349,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                         inputSink = { socket.send(it) }
                         onResize = { cols, rows -> socket.resize(cols, rows) }
                         onScrollChanged = { atBottom.value = it }
+                        onSwipeRight = { drawerScope.launch { drawerState.open() } }
                         onModsConsumed = {
                             // The view has spent its latch; keep the chips in step.
                             ctrlOn.value = false

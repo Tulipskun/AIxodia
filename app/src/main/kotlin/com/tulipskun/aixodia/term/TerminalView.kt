@@ -68,6 +68,12 @@ class TerminalView @JvmOverloads constructor(
     /** Called when the view is at (or leaves) the live bottom. */
     var onScrollChanged: ((atBottom: Boolean) -> Unit)? = null
 
+    /**
+     * Called once for a deliberately horizontal, left-to-right drag. Vertical
+     * drags stay inside the terminal; the two directions never both fire.
+     */
+    var onSwipeRight: (() -> Unit)? = null
+
     /** Called after a latched modifier is spent, so the key row can un-light. */
     var onModsConsumed: (() -> Unit)? = null
 
@@ -117,6 +123,12 @@ class TerminalView @JvmOverloads constructor(
     private var downTime = 0L
     private var dragging = false
     private var wheelAccum = 0f
+
+    // A drag is assigned to one axis at the first touch slop and stays there.
+    // That is what keeps a vertical scroll from also opening the drawer.
+    private var dragAxisLocked = false
+    private var horizontalDrag = false
+    private var swipeRightSent = false
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
@@ -693,6 +705,9 @@ class TerminalView @JvmOverloads constructor(
                 downX = event.x
                 downTime = event.eventTime
                 dragging = false
+                dragAxisLocked = false
+                horizontalDrag = false
+                swipeRightSent = false
                 wheelAccum = 0f
                 velocityTracker.clear()
                 velocityTracker.addMovement(event)
@@ -704,6 +719,9 @@ class TerminalView @JvmOverloads constructor(
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger is always a scroll.
                 removeCallbacks(longPress)
+                dragAxisLocked = true
+                horizontalDrag = false
+                swipeRightSent = true
                 lastTouchY = event.y
                 return true
             }
@@ -719,6 +737,27 @@ class TerminalView @JvmOverloads constructor(
                     return true
                 }
                 velocityTracker.addMovement(event)
+                val dx = event.x - downX
+                val totalDy = event.y - downY
+                // Decide the axis once. After this point the gesture is either
+                // a terminal scroll or a drawer swipe — never both.
+                if (!dragAxisLocked &&
+                    (kotlin.math.abs(totalDy) > touchSlop || kotlin.math.abs(dx) > touchSlop)
+                ) {
+                    dragAxisLocked = true
+                    horizontalDrag = kotlin.math.abs(dx) > kotlin.math.abs(totalDy) * 1.25f
+                    dragging = true
+                    removeCallbacks(longPress)
+                }
+                if (horizontalDrag) {
+                    // Left-to-right only, with a little extra travel so a
+                    // mostly-vertical flick cannot open the drawer.
+                    if (!swipeRightSent && dx > touchSlop * 2f) {
+                        swipeRightSent = true
+                        onSwipeRight?.invoke()
+                    }
+                    return true
+                }
                 val dy = lastTouchY - event.y
                 if (kotlin.math.abs(event.y - downY) > touchSlop ||
                     kotlin.math.abs(event.x - downX) > touchSlop
@@ -737,6 +776,11 @@ class TerminalView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
+                if (horizontalDrag) {
+                    dragAxisLocked = false
+                    horizontalDrag = false
+                    return true
+                }
                 velocityTracker.addMovement(event)
                 if (selecting) {
                     // The finger has left the screen; the selection stays put
@@ -770,6 +814,8 @@ class TerminalView @JvmOverloads constructor(
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
                 dragging = false
+                dragAxisLocked = false
+                horizontalDrag = false
                 return true
             }
         }
