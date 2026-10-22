@@ -11,6 +11,7 @@ Remaining
    - ChatScreen.kt around line 760
 2. SettingsStore.kt around line 251 mentions "the room" path. Grep whether any setting or DataStore key for a room/relay path is still read or written. If nothing uses it, remove its accessor. Do not break existing installs: leaving the old stored key untouched is fine.
 3. Find strings in res/values that only the removed relay code used (grep each name) and delete the unreferenced ones.
+4. Delete the remote branch feat/terminal-webrtc-p2p (the owner's Claude session could not: its git proxy refuses ref deletion): `git push origin --delete feat/terminal-webrtc-p2p`. It holds only the abandoned WebRTC work (tip 25a1107). If you cannot push, say so in your report.
 
 Keep: DaemonDiscovery, D1Api, HistoryApi, RunSocket, TerminalSocket.
 
