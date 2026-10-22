@@ -133,8 +133,10 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
             }
 
             override fun onScreenChanged() {
-                val v = terminalView.value ?: return
-                v.post { v.onContentChanged() }
+                // write() runs on the main thread (the panel switches there
+                // before feeding the emulator), so invalidating directly saves
+                // a message-loop hop on every batch of output.
+                terminalView.value?.onContentChanged()
             }
 
             override fun onTitleChanged(title: String) = Unit
@@ -437,6 +439,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                             view.keepSoftKeyboard()
                                         },
                                         onKey = { bytes ->
+                                            view.scrollToBottom()
                                             socket.send(bytes)
                                             // Tapping a key must not take the keyboard with it.
                                             view.keepSoftKeyboard()
@@ -445,6 +448,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                     TerminalComposer(
                                         socket = socket,
                                         onSend = {
+                                            view.scrollToBottom()
                                             if (ctrlOn.value || altOn.value) {
                                                 ctrlOn.value = false
                                                 altOn.value = false

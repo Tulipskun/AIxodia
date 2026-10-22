@@ -1,5 +1,8 @@
 package com.tulipskun.aixodia.term
 
+/** How many extra history rows may accumulate before a batched trim. */
+private const val SCROLLBACK_SLACK = 256
+
 /**
  * One row of cells. The fields are parallel arrays so a screenful is a handful
  * of allocations and drawing a row is a tight loop, not a walk over objects.
@@ -139,6 +142,23 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
     val lines = ArrayList<TerminalRow>(rows)
     val scrollback = ArrayList<TerminalRow>()
 
+    /** Total rows dropped from the front of [scrollback] because it was full. */
+    var scrollbackTrimmed = 0
+        private set
+
+    /**
+     * Trimming one row at a time makes ArrayList shift every row that is left,
+     * once per output line, at exactly the moment the history is full and the
+     * shell is busiest. Allow a little slack and drop a chunk instead, so the
+     * shift is paid roughly once per [SCROLLBACK_SLACK] lines.
+     */
+    private fun trimScrollback() {
+        if (scrollback.size <= scrollbackLimit + SCROLLBACK_SLACK) return
+        val drop = scrollback.size - scrollbackLimit
+        scrollback.subList(0, drop).clear()
+        scrollbackTrimmed += drop
+    }
+
     /** Normal screen keeps history; the alternate screen does not. */
     var keepScrollback = true
 
@@ -164,6 +184,7 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
     fun reset() {
         for (row in lines) row.reset(defaultFg, defaultBg)
         scrollback.clear()
+        scrollbackTrimmed = 0
         cursorCol = 0
         cursorRow = 0
         scrollTop = 0
@@ -180,7 +201,7 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
                 // The row lives on in history, so a fresh blank takes its place
                 // rather than resetting the row we just saved.
                 scrollback.add(removed)
-                while (scrollback.size > scrollbackLimit) scrollback.removeAt(0)
+                trimScrollback()
                 lines[bottom] = TerminalRow(columns).also { it.reset(fgColor, bgColor) }
             } else {
                 removed.reset(fgColor, bgColor)
@@ -261,11 +282,14 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
         columns = newColumns
         rows = newRows
         for (row in lines) row.resize(newColumns)
+        // History rows are now painted, so they must follow a rotation too;
+        // otherwise an old-width row stops short of the right edge.
+        for (row in scrollback) row.resize(newColumns)
         while (lines.size < newRows) lines.add(TerminalRow(newColumns).also { it.reset(defaultFg, defaultBg) })
         while (lines.size > newRows) {
             if (keepScrollback) {
                 scrollback.add(lines.removeAt(0))
-                while (scrollback.size > scrollbackLimit) scrollback.removeAt(0)
+                trimScrollback()
             } else {
                 lines.removeAt(lines.size - 1)
             }

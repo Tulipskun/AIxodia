@@ -129,6 +129,18 @@ class TerminalEmulatorTest {
     }
 
     @Test
+    fun resizingWidensScrollbackRowsToo() {
+        val (term, _) = emulator(cols = 10, rows = 3)
+        term.send("a\r\nb\r\nc\r\nd")
+        val oldest = term.buffer.scrollback.first()
+        assertEquals(10, oldest.columns)
+        term.resize(30, 3)
+        // History is painted now, so it has to follow the live grid's width.
+        assertEquals(30, oldest.columns)
+        assertEquals('a'.code, oldest.chars[0])
+    }
+
+    @Test
     fun alternateScreenHidesThenRestoresTheNormalScreen() {
         val (term, _) = emulator()
         term.send("normal")

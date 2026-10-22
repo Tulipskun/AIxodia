@@ -100,11 +100,17 @@ class TerminalView @JvmOverloads constructor(
     // frame — which matters while a finger is flinging a screenful.
     private val glyph = CharArray(2)
 
+    // A whole run of plain cells is one drawText call instead of one per cell.
+    // Reused so scrolling does not allocate a String for every row on every
+    // frame.
+    private var glyphRun = CharArray(256)
+
     var fontSizeSp = 13f
         set(value) {
             if (field == value) return
             field = value
             updateMetrics()
+            resetScrollToBottom()
             requestLayout()
             invalidate()
         }
@@ -113,8 +119,15 @@ class TerminalView @JvmOverloads constructor(
     private var cellHeight = 1f
     private var baseline = 0f
 
+    // How far the page is shifted down, in pixels, from the live bottom. Zero
+    // means the live screen; values above zero reveal scrollback above it.
+    // This is what makes dragging the shell page instantaneous instead of a
+    // round trip to the engine.
     private var scrollTopPx = 0f
     private var pinnedToBottom = true
+    private var lastScrollbackCount = 0
+    private var lastScrollbackTrimmed = 0
+    private var lastBuffer: TerminalBuffer? = null
     private val scroller = OverScroller(context)
     private val velocityTracker = VelocityTracker.obtain()
     private var lastTouchY = 0f
@@ -186,6 +199,7 @@ class TerminalView @JvmOverloads constructor(
 
     fun setEmulator(emulator: TerminalEmulator) {
         this.emulator = emulator
+        resetScrollToBottom()
         resizeToView()
         invalidate()
     }
@@ -233,19 +247,49 @@ class TerminalView @JvmOverloads constructor(
         val rows = (height / cellHeight).toInt().coerceAtLeast(1)
         if (cols == em.columns && rows == em.rows) return
         em.resize(cols, rows)
+        resetScrollToBottom()
         onResize?.invoke(cols, rows)
-        scrollTopPx = 0f
     }
 
+    /**
+     * The largest useful downward shift: all the history above the live page.
+     * The alternate screen has no history of its own, so it never scrolls
+     * behind the program's back.
+     */
+    private fun maxScrollPx(): Float {
+        val em = emulator ?: return 0f
+        val buffer = em.buffer
+        if (!buffer.keepScrollback) return 0f
+        return buffer.scrollback.size * cellHeight
+    }
 
-    private fun clampScroll() {
-        scrollTopPx = 0f
-        if (!pinnedToBottom) {
-            pinnedToBottom = true
-            onScrollChanged?.invoke(true)
-        } else {
-            pinnedToBottom = true
+    /**
+     * Moves the page, clamped to the history above it. The callback only fires
+     * when crossing the live bottom, so the "scroll to bottom" chip does not
+     * recompose on every pixel of a fling.
+     */
+    private fun updateScrollOffset(value: Float) {
+        val clamped = value.coerceIn(0f, maxScrollPx())
+        // Sub-pixel offsets at the bottom make the live grid (and its cursor)
+        // look fuzzy; the last half pixel is just the bottom.
+        val next = if (clamped < 0.5f) 0f else clamped
+        val moved = next != scrollTopPx
+        scrollTopPx = next
+        val atBottom = next <= 0f
+        if (atBottom != pinnedToBottom) {
+            pinnedToBottom = atBottom
+            onScrollChanged?.invoke(atBottom)
         }
+        if (moved) invalidate()
+    }
+
+    private fun resetScrollToBottom() {
+        scroller.forceFinished(true)
+        val buffer = emulator?.buffer
+        lastBuffer = buffer
+        lastScrollbackCount = buffer?.scrollback?.size ?: 0
+        lastScrollbackTrimmed = buffer?.scrollbackTrimmed ?: 0
+        updateScrollOffset(0f)
     }
 
     /** Set the one-shot Ctrl/Alt chips; they are spent by the next keystroke. */
@@ -296,34 +340,81 @@ class TerminalView @JvmOverloads constructor(
 
     /** Called by the panel whenever the emulator produced output. */
     fun onContentChanged() {
-        // The view is a fixed page: the emulator's screen is the page, and
-        // anything that scrolled off it is not drawn. Repaint only.
+        val em = emulator ?: return
+        val buffer = em.buffer
+        if (buffer !== lastBuffer) {
+            // A full-screen program took over (or handed the page back): its
+            // screen is a fresh page, not a continuation of the history.
+            resetScrollToBottom()
+        } else {
+            val history = buffer.scrollback.size
+            val trimmed = buffer.scrollbackTrimmed - lastScrollbackTrimmed
+            if (!pinnedToBottom && (history > lastScrollbackCount || trimmed > 0)) {
+                // New output pushed the lines the user is reading further up.
+                // Follow them instead of letting the page drift under the
+                // finger. Rows dropped off a full history count as movement
+                // too, or the page would jump to newer lines at the cap.
+                val added = (history - lastScrollbackCount) + trimmed
+                updateScrollOffset(scrollTopPx + added * cellHeight)
+            } else if (scrollTopPx > maxScrollPx()) {
+                updateScrollOffset(scrollTopPx)
+            }
+            lastScrollbackCount = history
+            lastScrollbackTrimmed = buffer.scrollbackTrimmed
+        }
+        // The emulator changed cells even when the scroll position did not;
+        // onDraw paints the whole visible page, so one invalidate is enough.
         invalidate()
     }
 
     /**
      * Repaint every row, not just the cells the last write touched. A fresh
      * stream has no local dirty region to rely on: its replay may start with
-     * the screen still showing the previous connection. onDraw always paints
-     * the whole page, so one invalidate is the full redraw.
+     * the screen still showing the previous connection. A reconnect also
+     * returns to the live bottom so a replayed frame cannot appear below an
+     * old scroll position.
      */
     fun redrawAll() {
+        resetScrollToBottom()
         invalidate()
     }
 
     fun scrollToBottom() {
-        clampScroll()
+        resetScrollToBottom()
         invalidate()
     }
 
     fun pageUp() {
-        // Local scrollback is deliberately gone: a real terminal page never
-        // pans behind the program's back. PgUp reaches the program as a key.
+        // Touch dragging is the local history; the hardware keys should walk
+        // the same history when the shell has not asked for the wheel. A
+        // full-screen program keeps the key for itself.
+        if (scrollLocalPage(forward = false)) return
         inputSink?.invoke("\u001b[5~".toByteArray())
     }
 
     fun pageDown() {
+        if (scrollLocalPage(forward = true)) return
         inputSink?.invoke("\u001b[6~".toByteArray())
+    }
+
+    /**
+     * True when PgUp/PgDn was consumed by local history. At the live bottom a
+     * forward page still goes to the program, because there is nowhere local
+     * to go.
+     */
+    private fun scrollLocalPage(forward: Boolean): Boolean {
+        val em = emulator ?: return false
+        if (em.alternateScreen || em.mouseReporting() || em.fullScreenDetected) return false
+        val max = maxScrollPx()
+        if (max <= 0f) return false
+        if (forward) {
+            if (scrollTopPx <= 0f) return false
+            updateScrollOffset(scrollTopPx - (height - cellHeight).coerceAtLeast(cellHeight))
+        } else {
+            if (scrollTopPx >= max) return false
+            updateScrollOffset(scrollTopPx + (height - cellHeight).coerceAtLeast(cellHeight))
+        }
+        return true
     }
 
     // =======================================================================
@@ -334,18 +425,29 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator ?: return
         canvas.drawColor(TerminalColors.DEFAULT_BG)
         val buffer = em.buffer
-        // One fixed page: the emulator's current screen, top row at the top of
-        // the view. The scrollback the buffer keeps is for reading history
-        // elsewhere (and for correct reflow); it is never painted, so a
-        // reconnect's replay cannot leave an old frame above the live one.
-        for (v in 0 until buffer.lines.size) {
-            val row = buffer.lines[v]
-            drawRow(canvas, row, v * cellHeight, v)
+        // The live screen sits at y=0. A positive scroll offset shifts it down
+        // and exposes the history that used to be above it, so dragging is a
+        // local paint instead of a round trip to the shell.
+        val history = buffer.scrollback
+        if (scrollTopPx > 0f && history.isNotEmpty()) {
+            val first = (history.size - (scrollTopPx / cellHeight).toInt() - 1).coerceAtLeast(0)
+            for (k in first until history.size) {
+                val top = (k - history.size) * cellHeight + scrollTopPx
+                if (top >= height) break
+                if (top + cellHeight > 0f) drawRow(canvas, history[k], top, k)
+            }
+        }
+        for (v in buffer.lines.indices) {
+            val top = v * cellHeight + scrollTopPx
+            if (top >= height) break
+            if (top + cellHeight > 0f) drawRow(canvas, buffer.lines[v], top, v)
         }
 
         if (selecting) drawSelection(canvas, buffer)
 
-        if (em.cursorVisible && hasFocus()) {
+        // The cursor belongs to the live screen; while the user is reading
+        // history it would otherwise float over an old row.
+        if (scrollTopPx <= 0f && em.cursorVisible && hasFocus()) {
             drawCursor(canvas, em, buffer, buffer.cursorRow * cellHeight)
         }
     }
@@ -365,7 +467,19 @@ class TerminalView @JvmOverloads constructor(
             col = end
         }
 
+        if (glyphRun.size < count) glyphRun = CharArray(count)
         val y = top + baseline
+        var runStart = 0
+        var runLen = 0
+        var runPaint: Paint? = null
+        var runColor = 0
+
+        fun flushRun() {
+            if (runLen == 0) return
+            canvas.drawText(glyphRun, 0, runLen, runStart * cellWidth, y, runPaint!!)
+            runLen = 0
+        }
+
         col = 0
         while (col < count) {
             val cp = row.chars[col]
@@ -378,25 +492,46 @@ class TerminalView @JvmOverloads constructor(
                     canvas.drawRect(col * cellWidth, top, (col + row.width[col]) * cellWidth, top + cellHeight, bgPaint)
                 }
                 val p = paintFor(attr)
-                p.color = applyDim(cellFg, attr)
+                val color = applyDim(cellFg, attr)
                 val x = col * cellWidth
                 val combining = row.combiningAt(col)
-                if (combining == null && cp < 0x10000) {
-                    glyph[0] = cp.toChar()
-                    canvas.drawText(glyph, 0, 1, x, y, p)
-                } else {
-                    val text = if (combining != null) {
-                        String(Character.toChars(cp)) + combining
-                    } else {
-                        String(Character.toChars(cp))
+                // Plain ASCII cells can be drawn a row-run at a time. Wide,
+                // combining, and fallback-font glyphs stay one by one so their
+                // advances cannot drift away from the cell grid.
+                if (combining == null && cp < 0x80 && row.width[col].toInt() == 1) {
+                    // Flush before changing a shared Paint's colour: the run
+                    // that is already open still owns the old colour.
+                    if (runLen > 0 && (p !== runPaint || color != runColor)) flushRun()
+                    if (runLen == 0) {
+                        runPaint = p
+                        runColor = color
+                        p.color = color
+                        runStart = col
                     }
-                    canvas.drawText(text, x, y, p)
+                    glyphRun[runLen++] = cp.toChar()
+                } else {
+                    flushRun()
+                    p.color = color
+                    if (combining == null && cp < 0x10000) {
+                        glyph[0] = cp.toChar()
+                        canvas.drawText(glyph, 0, 1, x, y, p)
+                    } else {
+                        val text = if (combining != null) {
+                            String(Character.toChars(cp)) + combining
+                        } else {
+                            String(Character.toChars(cp))
+                        }
+                        canvas.drawText(text, x, y, p)
+                    }
                 }
-                if (attr and TerminalAttr.UNDERLINE != 0) drawUnderline(canvas, x, top, row.width[col], p.color)
-                if (attr and TerminalAttr.STRIKE != 0) drawStrike(canvas, x, top, row.width[col], p.color)
+                if (attr and TerminalAttr.UNDERLINE != 0) drawUnderline(canvas, x, top, row.width[col], color)
+                if (attr and TerminalAttr.STRIKE != 0) drawStrike(canvas, x, top, row.width[col], color)
+            } else {
+                flushRun()
             }
             col += maxOf(1, row.width[col].toInt())
         }
+        flushRun()
     }
 
     private fun paintFor(attr: Int): Paint {
@@ -471,15 +606,30 @@ class TerminalView @JvmOverloads constructor(
         }
     }
 
+    /** The row at a document index: scrollback first, then the live screen. */
+    private fun rowAt(buffer: TerminalBuffer, index: Int): TerminalRow? {
+        val history = buffer.scrollback
+        return if (index < history.size) {
+            history.getOrNull(index)
+        } else {
+            buffer.lines.getOrNull(index - history.size)
+        }
+    }
+
+    private fun documentRows(buffer: TerminalBuffer): Int =
+        buffer.scrollback.size + buffer.lines.size
+
     private fun drawSelection(canvas: Canvas, buffer: TerminalBuffer) {
-        val count = buffer.lines.size
+        val count = documentRows(buffer)
         if (count == 0) return
         val s = orderedSelection()
         val first = s[0].coerceIn(0, count - 1)
         val last = s[2].coerceIn(0, count - 1)
         for (r in first..last) {
-            val row = buffer.lines[r]
+            val row = rowAt(buffer, r) ?: continue
             if (row.columns == 0) continue
+            val top = (r - buffer.scrollback.size) * cellHeight + scrollTopPx
+            if (top + cellHeight <= 0f || top >= height) continue
             val from: Int
             val to: Int
             if (first == last) {
@@ -498,9 +648,9 @@ class TerminalView @JvmOverloads constructor(
             if (to < from) continue
             canvas.drawRect(
                 from * cellWidth,
-                r * cellHeight,
+                top,
                 (to + 1) * cellWidth,
-                (r + 1) * cellHeight,
+                top + cellHeight,
                 selectionPaint,
             )
         }
@@ -510,9 +660,11 @@ class TerminalView @JvmOverloads constructor(
     private fun beginSelection(x: Float, y: Float) {
         val em = emulator ?: return
         val buffer = em.buffer
-        if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
-        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
-        val line = buffer.lines[row]
+        val count = documentRows(buffer)
+        if (count == 0 || cellWidth <= 0f || cellHeight <= 0f) return
+        val row = (((y - scrollTopPx) / cellHeight).toInt() + buffer.scrollback.size)
+            .coerceIn(0, count - 1)
+        val line = rowAt(buffer, row) ?: return
         if (line.columns == 0) return
         val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
 
@@ -543,9 +695,11 @@ class TerminalView @JvmOverloads constructor(
     private fun extendSelection(x: Float, y: Float) {
         val em = emulator ?: return
         val buffer = em.buffer
-        if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
-        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
-        val line = buffer.lines[row]
+        val count = documentRows(buffer)
+        if (count == 0 || cellWidth <= 0f || cellHeight <= 0f) return
+        val row = (((y - scrollTopPx) / cellHeight).toInt() + buffer.scrollback.size)
+            .coerceIn(0, count - 1)
+        val line = rowAt(buffer, row) ?: return
         if (line.columns == 0) return
         val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
         if (row == selCursorRow && col == selCursorCol) return
@@ -559,12 +713,17 @@ class TerminalView @JvmOverloads constructor(
     private fun selectAll() {
         val em = emulator ?: return
         val buffer = em.buffer
-        if (buffer.lines.isEmpty()) return
+        val count = documentRows(buffer)
+        if (count == 0 || buffer.lines.isEmpty()) return
+        // Keep the original semantics: "all" is the live screen, not the whole
+        // multi-thousand-row history. Return to it so the action bar is on
+        // screen.
+        scrollToBottom()
         selecting = true
         selectingDrag = false
-        selAnchorRow = 0
+        selAnchorRow = buffer.scrollback.size
         selAnchorCol = 0
-        selCursorRow = buffer.lines.size - 1
+        selCursorRow = count - 1
         selCursorCol = buffer.lines.last().columns - 1
         invalidate()
         startSelectionMode()
@@ -583,13 +742,14 @@ class TerminalView @JvmOverloads constructor(
     private fun selectedText(): String {
         val em = emulator ?: return ""
         val buffer = em.buffer
-        if (buffer.lines.isEmpty()) return ""
+        val count = documentRows(buffer)
+        if (count == 0) return ""
         val s = orderedSelection()
-        val firstRow = s[0].coerceIn(0, buffer.lines.size - 1)
-        val lastRow = s[2].coerceIn(0, buffer.lines.size - 1)
+        val firstRow = s[0].coerceIn(0, count - 1)
+        val lastRow = s[2].coerceIn(0, count - 1)
         val sb = StringBuilder()
         for (r in firstRow..lastRow) {
-            val row = buffer.lines[r]
+            val row = rowAt(buffer, r) ?: continue
             if (row.columns == 0) continue
             val from = (if (r == firstRow) s[1] else 0).coerceIn(0, row.columns - 1)
             val to = (if (r == lastRow) s[3] else row.columns - 1).coerceIn(0, row.columns - 1)
@@ -668,6 +828,9 @@ class TerminalView @JvmOverloads constructor(
                 val s = orderedSelection()
                 val first = s[0]
                 val last = s[2]
+                val history = emulator?.buffer?.scrollback?.size ?: 0
+                val firstTop = (first - history) * cellHeight + scrollTopPx
+                val lastBottom = (last + 1 - history) * cellHeight + scrollTopPx
                 val left = if (first == last) minOf(s[1], s[3]) * cellWidth else 0f
                 val right = if (first == last) {
                     (maxOf(s[1], s[3]) + 1) * cellWidth
@@ -676,9 +839,9 @@ class TerminalView @JvmOverloads constructor(
                 }
                 outRect.set(
                     left.toInt(),
-                    (first * cellHeight).toInt(),
+                    firstTop.toInt(),
                     right.toInt(),
-                    ((last + 1) * cellHeight).toInt(),
+                    lastBottom.toInt(),
                 )
             }
         }, ActionMode.TYPE_FLOATING)
@@ -769,9 +932,11 @@ class TerminalView @JvmOverloads constructor(
                 if (wheelMode) {
                     wheelAccum += dy
                     dispatchWheel(em, event)
+                } else if (dragAxisLocked) {
+                    // Drag down (dy < 0) moves the page down into history;
+                    // drag up returns toward the live screen.
+                    updateScrollOffset(scrollTopPx - dy)
                 }
-                // Not a wheel: a terminal page does not pan through history.
-                // The program owns the screen; drag does nothing.
                 return true
             }
             MotionEvent.ACTION_UP -> {
@@ -788,6 +953,27 @@ class TerminalView @JvmOverloads constructor(
                     // that never moved keeps the whole word it selected.
                     if (selectingDrag) extendSelection(event.x, event.y)
                     return true
+                }
+                if (!wheelMode && dragging) {
+                    // Keep the page moving after the finger leaves, exactly as
+                    // a local scroll view would. Wheel mode is the program's
+                    // screen; there is no local history to fling there.
+                    velocityTracker.computeCurrentVelocity(1_000)
+                    val vy = velocityTracker.yVelocity
+                    val max = maxScrollPx()
+                    if (max > 0f && kotlin.math.abs(vy) > 50f) {
+                        scroller.fling(
+                            0,
+                            scrollTopPx.toInt(),
+                            0,
+                            vy.toInt(),
+                            0,
+                            0,
+                            0,
+                            max.toInt(),
+                        )
+                        postInvalidateOnAnimation()
+                    }
                 }
                 val quick = event.eventTime - downTime < 200
                 if (wheelMode) {
@@ -866,9 +1052,8 @@ class TerminalView @JvmOverloads constructor(
 
     override fun computeScroll() {
         if (scroller.computeScrollOffset()) {
-            scrollTopPx = scroller.currY.toFloat()
-            clampScroll()
-            postInvalidateOnAnimation()
+            updateScrollOffset(scroller.currY.toFloat())
+            if (!scroller.isFinished) postInvalidateOnAnimation()
         }
     }
 
@@ -900,6 +1085,9 @@ class TerminalView @JvmOverloads constructor(
 
     private fun sendText(text: String) {
         if (text.isEmpty()) return
+        // Typing is for the live prompt; do not leave the keyboard writing
+        // below a page the user parked in history.
+        if (scrollTopPx > 0f) scrollToBottom()
         inputSink?.invoke(text.toByteArray(Charsets.UTF_8))
     }
 
@@ -955,6 +1143,8 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun sendBytes(bytes: ByteArray) {
+        if (bytes.isEmpty()) return
+        if (scrollTopPx > 0f) scrollToBottom()
         inputSink?.invoke(bytes)
     }
 
