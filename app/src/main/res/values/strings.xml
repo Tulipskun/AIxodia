@@ -13,16 +13,7 @@
 
     <string name="offline_title">Cannot reach daemon</string>
     <string name="offline_unknown_host">Host not found — check the daemon and tunnel are still running</string>
-    <string name="offline_refused">Cannot connect to daemon</string>
-    <string name="offline_timeout">Connection timed out</string>
-    <string name="offline_tls">TLS certificate invalid</string>
-    <string name="offline_generic">Cannot connect — see logcat or retry</string>
     <string name="offline_retry">Retry</string>
-    <string name="offline_token_rejected">401 token rejected — daemon does not accept this D1 token</string>
-    <string name="offline_rate_limited">429 temporarily locked after 5+ wrong token guesses</string>
-    <string name="offline_token_unverified">503 daemon could not verify the token with Cloudflare</string>
-    <string name="offline_http">Cannot connect (HTTP %1$d)</string>
-    <string name="offline_closed">Connection closed (%1$d)</string>
 
     <string name="composer_hint">Send a message…</string>
     <string name="send">Send</string>

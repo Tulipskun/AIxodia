@@ -5,12 +5,14 @@ import com.tulipskun.aixodia.data.model.AttachmentRef
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** The connection state the chrome draws. */
+enum class ConnState { OFFLINE, CONNECTING, ONLINE }
+
 /**
- * What the chat screen needs from a transport. Today there are two:
- * [AiDirectSocket], the old socket where one WebSocket carried chat, terminal
- * and RPC, and [RunSocket], where a turn is a POST /v1/runs and its events
- * arrive over SSE. The repository only knows this interface, so switching does
- * not rewrite the merge logic or the UI.
+ * What the chat screen needs from a transport. [RunSocket] implements it: a
+ * turn is a POST /v1/runs and its events arrive over SSE. The repository only
+ * knows this interface, so the merge logic and the UI are independent of the
+ * wire format.
  */
 interface ChatTransport {
     val state: StateFlow<ConnState>

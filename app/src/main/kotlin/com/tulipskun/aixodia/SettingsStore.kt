@@ -98,7 +98,6 @@ class SettingsStore(private val ctx: Context) {
         val prefs = ctx.ds.data.first()
         return ConnConfig(
             endpoint = prefs[endpoint].orEmpty(),
-            wsUrl = prefs[wsUrl].orEmpty(),
             daemonUrl = prefs[daemonUrl].orEmpty(),
             token = prefs[token].orEmpty(),
             accountId = prefs[accountId].orEmpty(),
@@ -292,7 +291,6 @@ private fun formatSessionPids(pids: Map<String, Int>): String =
 
 data class ConnConfig(
     val endpoint: String,
-    val wsUrl: String,
     val daemonUrl: String,
     val token: String,
     val accountId: String,
