@@ -24,7 +24,6 @@ private val Context.ds by preferencesDataStore("aixodia")
  */
 class SettingsStore(private val ctx: Context) {
     private val endpoint = stringPreferencesKey("endpoint")
-    private val wsUrl = stringPreferencesKey("ws_url")
     private val daemonUrl = stringPreferencesKey("daemon_url")
     private val token = stringPreferencesKey("token")
     private val accountId = stringPreferencesKey("account_id")
@@ -76,7 +75,6 @@ class SettingsStore(private val ctx: Context) {
     }
 
     val endpointFlow: Flow<String> = ctx.ds.data.map { it[endpoint] ?: "" }
-    val wsUrlFlow: Flow<String> = ctx.ds.data.map { it[wsUrl] ?: "" }
     val daemonUrlFlow: Flow<String> = ctx.ds.data.map { it[daemonUrl] ?: "" }
     val tokenFlow: Flow<String> = ctx.ds.data.map { it[token] ?: "" }
     val accountIdFlow: Flow<String> = ctx.ds.data.map { it[accountId] ?: "" }
@@ -93,8 +91,8 @@ class SettingsStore(private val ctx: Context) {
 
     suspend fun current(): ConnConfig {
         // One snapshot, not seven independent first() reads: saveDaemon() writes
-        // endpoint, daemonUrl and wsUrl in one edit, and reading them across
-        // edits could pair a new address with the old socket or token.
+        // endpoint and daemonUrl in one edit, and reading them across edits
+        // could pair a new address with the old socket or token.
         val prefs = ctx.ds.data.first()
         return ConnConfig(
             endpoint = prefs[endpoint].orEmpty(),
@@ -154,7 +152,6 @@ class SettingsStore(private val ctx: Context) {
             }
             it[endpoint] = clean
             it[daemonUrl] = clean
-            it[wsUrl] = wsUrlFor(clean)
         }
     }
 
@@ -244,27 +241,7 @@ class SettingsStore(private val ctx: Context) {
      */
     suspend fun isConfigured(): Boolean = current().token.isNotBlank()
 
-    companion object {
-        /**
-         * https://host/room/name -> wss://host/room/name
-         *
-         * The path is the room and it must survive: the relay pairs the engine
-         * and the phone inside that one Durable Object, so dropping the path
-         * would dial the worker's root and pair with nothing.
-         */
-        fun wsUrlFor(address: String): String {
-            val clean = address.trim().trimEnd('/')
-            if (clean.isEmpty()) return ""
-            val scheme = when {
-                clean.startsWith("https://") -> "wss"
-                clean.startsWith("http://") -> "ws"
-                else -> return ""
-            }
-            // The engine serves its multiplexed phone socket on /room, next to
-            // the plain HTTP API the same tunnel exposes.
-            return "$scheme://" + clean.substringAfter("://") + "/room"
-        }
-    }
+
 }
 
 /**

@@ -130,7 +130,7 @@ fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     val curEndpoint by settings.endpointFlow.collectAsStateWithLifecycle(initialValue = "")
-    val curWs by settings.wsUrlFlow.collectAsStateWithLifecycle(initialValue = "")
+    val curDaemon by settings.daemonUrlFlow.collectAsStateWithLifecycle(initialValue = "")
     val curToken by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
     val curAccount by settings.accountIdFlow.collectAsStateWithLifecycle(initialValue = "")
     val curDatabase by settings.databaseIdFlow.collectAsStateWithLifecycle(initialValue = "")
@@ -466,7 +466,7 @@ fun SettingsScreen(
 
             if (page == SettingsPage.About) {
             SectionCard("App", when (conn) {
-                ConnState.ONLINE -> "Online ($curWs)"
+                ConnState.ONLINE -> "Online ($curDaemon)"
                 ConnState.CONNECTING -> "Connecting…"
                 ConnState.OFFLINE -> "Offline"
             }) {
