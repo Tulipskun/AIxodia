@@ -12,6 +12,12 @@
     /* The gutter lives on .xterm because the fit addon subtracts the terminal
        element's own padding from the box it measures. */
     #term .xterm { padding: 6px 4px 4px 8px; }
+    /* A WebView draws overlay scrollbars: they take no layout width, so xterm's
+       "difference is 0, assume 15px" guess made the fit addon reserve a bar
+       that never appears — two columns of the screen went unused. The width
+       override in the script is the real fix; this keeps a bar from being
+       painted over the last column on a browser that does draw one. */
+    .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
     #overlay {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
       color: #aab3c0; font: 13px -apple-system, Roboto, sans-serif; background: #0b0e14;
@@ -187,6 +193,23 @@
     fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    // The fit addon subtracts the viewport's scrollbar width, and xterm works
+    // that width out as "viewport width - scroll area width, or 15 when that is
+    // zero". A WebView uses overlay scrollbars, so the difference really is
+    // zero and the 15px fallback was taken for a bar that is never drawn: two
+    // columns were reserved for it and the program's frame stopped short of the
+    // right edge. Report zero — and swallow xterm's own writes to it, since it
+    // recomputes the property whenever the scroll area is synced.
+    var vp = term._core && term._core.viewport;
+    if (vp) {
+      try {
+        Object.defineProperty(vp, 'scrollBarWidth', {
+          configurable: true,
+          get: function () { return 0; },
+          set: function () { }
+        });
+      } catch (e) { /* a future xterm can keep its own number */ }
+    }
     retryFit(4000);
     term.focus();
 
@@ -252,6 +275,87 @@
   window.terminalInput = function (text) {
     if (term) term.paste(text);
   };
+
+  // A finger on glass produces no wheel event, and xterm's own touch handling
+  // gives up the moment the program turns mouse reporting on — which is exactly
+  // what a full-screen program does. So a vertical drag is turned into what a
+  // mouse wheel would have produced, by the same rules:
+  //   shell        — move the terminal's own scrollback;
+  //   TUI + mouse  — a wheel report, so the program scrolls itself;
+  //   TUI, no mouse— a page key. Arrows are what xterm itself sends here, but
+  //                  in opencode (and most TUIs) an arrow moves a cursor, and
+  //                  the message list pages with PgUp/PgDn.
+  var TOUCH_STEP = 48; // px of drag per scroll tick
+
+  function scrollTick(dir) {
+    if (!term) return;
+    var alt = false, mouse = false;
+    try { alt = term.buffer.active.type === 'alternate'; } catch (e) { }
+    if (!alt) {
+      try { term.scrollLines(dir * 3); } catch (e) { }
+      return;
+    }
+    try { mouse = term.modes.mouseTrackingMode !== 'none'; } catch (e) { }
+    if (mouse && term.element) {
+      try {
+        term.element.dispatchEvent(new WheelEvent('wheel', {
+          deltaY: dir * TOUCH_STEP, deltaMode: 0, bubbles: true, cancelable: true
+        }));
+        return;
+      } catch (e) { }
+    }
+    sendText(dir > 0 ? '\x1b[6~' : '\x1b[5~');
+  }
+
+  // A drag is only taken over where xterm cannot handle it: an alternate screen
+  // (no local scrollback to move) or a program that reads the mouse (xterm
+  // ignores touch while mouse reporting is on). A plain shell keeps xterm's own
+  // touch scrolling.
+  function takesTouch() {
+    if (!term) return false;
+    try {
+      if (term.buffer.active.type === 'alternate') return true;
+      return term.modes.mouseTrackingMode !== 'none';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  var touchOn = false, touchMoved = false, touchY = 0, touchX = 0, touchAcc = 0;
+
+  host.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1 || !takesTouch()) { touchOn = false; return; }
+    touchOn = true;
+    touchMoved = false;
+    touchAcc = 0;
+    touchY = e.touches[0].clientY;
+    touchX = e.touches[0].clientX;
+  }, { passive: true });
+
+  host.addEventListener('touchmove', function (e) {
+    if (!touchOn || e.touches.length !== 1) return;
+    var t = e.touches[0];
+    var dy = touchY - t.clientY;
+    var dx = t.clientX - touchX;
+    touchY = t.clientY;
+    touchX = t.clientX;
+    if (!touchMoved) {
+      if (Math.abs(dy) < 10 && Math.abs(dx) < 10) return;
+      if (Math.abs(dx) > Math.abs(dy)) { touchOn = false; return; } // a sideways drag is not a scroll
+      touchMoved = true;
+    }
+    e.preventDefault();
+    touchAcc += dy;
+    while (Math.abs(touchAcc) >= TOUCH_STEP) {
+      var dir = touchAcc > 0 ? 1 : -1;
+      touchAcc -= dir * TOUCH_STEP;
+      scrollTick(dir);
+    }
+  }, { passive: false });
+
+  function endTouch() { touchOn = false; touchMoved = false; touchAcc = 0; }
+  host.addEventListener('touchend', endTouch);
+  host.addEventListener('touchcancel', endTouch);
 
   // closeSocket drops the current socket on purpose. Clearing ws first is what
   // makes its handlers see themselves as stale.
