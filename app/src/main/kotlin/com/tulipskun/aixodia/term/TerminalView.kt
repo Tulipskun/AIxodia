@@ -289,6 +289,16 @@ class TerminalView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * Repaint every row, not just the cells the last write touched. A fresh
+     * stream has no local dirty region to rely on: its replay may start with
+     * the screen still showing the previous connection. onDraw always paints
+     * the whole page, so one invalidate is the full redraw.
+     */
+    fun redrawAll() {
+        invalidate()
+    }
+
     fun scrollToBottom() {
         clampScroll()
         invalidate()

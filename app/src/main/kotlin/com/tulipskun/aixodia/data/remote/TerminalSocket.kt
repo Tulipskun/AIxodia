@@ -206,13 +206,14 @@ class TerminalSocket(
     private var sessionsSynced = false
 
     /** Opens the stream, if it is not already dialing or up. */
+    @Synchronized
     fun open() {
         wanted = true
         closing = false
-        sessionsSynced = false
         // A stream left over from a previous session that died silently would
         // make this return without reconnecting, leaving a dead connection.
         if (socket != null && _state.value == TermState.OPEN) return
+        sessionsSynced = false
         dialJob?.cancel()
         closeSocket()
         _error.value = 0
@@ -257,6 +258,7 @@ class TerminalSocket(
      * long after the initial dial.
      */
     fun refreshSessions() {
+        if (!wanted) return
         if (refreshJob?.isActive == true) return
         refreshJob = scope.launch {
             val lostActive = syncSessions()
@@ -276,15 +278,23 @@ class TerminalSocket(
      * Called when the activity comes back. A stream that survived a long
      * absence can look OPEN while Android has already dropped every byte, so
      * rebuild it once; the engine replays RIS, the modes and the ring.
+     *
+     * A reattach deliberately does not also start a tab refresh: both paths
+     * would race to replace the same socket, and the redial is the urgent one.
+     * The panel's periodic refresh reconciles the tabs just after it is back.
      */
     fun onForeground(awayMs: Long) {
-        // The list also changes while the app is away (an exit, a kill, a tab
-        // opened from another phone), so reconcile it even for a short absence.
+        if (shouldReattachAfterBackground(_state.value, wanted, awayMs)) {
+            reconnectLocked()
+            return
+        }
+        // A short absence changes nothing on the wire, but the list can still
+        // have changed while the app was away (an exit, a kill, a tab opened
+        // from another phone).
         refreshSessions()
-        if (!shouldReattachAfterBackground(_state.value, wanted, awayMs)) return
-        reconnectLocked()
     }
 
+    @Synchronized
     private fun reconnectLocked() {
         if (!wanted) return
         dialJob?.cancel()
@@ -362,11 +372,14 @@ class TerminalSocket(
     }
 
     /** Hangs up. The engine keeps the shell for a reattach, as it always has. */
+    @Synchronized
     fun close() {
         wanted = false
         closing = true
         dialJob?.cancel()
         dialJob = null
+        refreshJob?.cancel()
+        refreshJob = null
         closeSocket()
         _state.value = TermState.CLOSED
     }
@@ -527,6 +540,11 @@ class TerminalSocket(
         var backoff = RETRY_MS
         var lastAddressCheck = 0L
         var waitedForSize = 0L
+        // Reconcile the tabs once for this open. Re-reading the list before
+        // every retry made a dropped link wait on D1 before it was even allowed
+        // to dial again; on a reconnect the shell id is already known, and the
+        // periodic refresh can correct the tab row afterwards.
+        var syncAttempted = sessionsSynced
         while (!closing) {
             // The view reports its real grid on its first layout, usually a
             // frame after open(). Let that land before the open frame is sent,
@@ -572,7 +590,10 @@ class TerminalSocket(
             // Reconcile the tabs with the shells the engine actually holds. A
             // saved id that survived an engine restart would otherwise be
             // reattached into a brand-new shell under an old tab.
-            syncSessions()
+            if (!syncAttempted) {
+                syncAttempted = true
+                syncSessions()
+            }
 
             val wantedId = retarget ?: _activeSessionId.value
             // The view usually has a real size by now. A placeholder is only a

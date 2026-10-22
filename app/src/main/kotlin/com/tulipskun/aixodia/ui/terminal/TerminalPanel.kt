@@ -188,6 +188,11 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                 is TermEvent.Ready -> {
                     ready = ev
                     ended = null
+                    // A new stream starts on a fresh page. Repaint the whole
+                    // grid as soon as it is up instead of waiting for the first
+                    // byte that happens to change a cell; a reconnect's replay
+                    // can otherwise leave the old frame visible below it.
+                    terminalView.value?.post { terminalView.value?.redrawAll() }
                 }
 
                 else -> ended = ev
