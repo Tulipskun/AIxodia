@@ -287,23 +287,30 @@
   //                  the message list pages with PgUp/PgDn.
   var TOUCH_STEP = 48; // px of drag per scroll tick
 
-  function scrollTick(dir) {
+  function scrollTick(dir, x, y) {
     if (!term) return;
     var alt = false, mouse = false;
     try { alt = term.buffer.active.type === 'alternate'; } catch (e) { }
-    if (!alt) {
-      try { term.scrollLines(dir * 3); } catch (e) { }
-      return;
-    }
     try { mouse = term.modes.mouseTrackingMode !== 'none'; } catch (e) { }
+    // A program that reads the mouse scrolls itself, whichever screen it is on,
+    // so the mouse is checked before the buffer. The report has to carry the
+    // cell the finger is over — opencode scrolls the pane under the pointer,
+    // and a report at the top-left corner scrolls nothing at all.
     if (mouse && term.element) {
       try {
         term.element.dispatchEvent(new WheelEvent('wheel', {
-          deltaY: dir * TOUCH_STEP, deltaMode: 0, bubbles: true, cancelable: true
+          deltaY: dir * 50, deltaMode: 0, bubbles: true, cancelable: true,
+          clientX: x, clientY: y
         }));
         return;
       } catch (e) { }
     }
+    if (!alt) {
+      try { term.scrollLines(dir * 3); } catch (e) { }
+      return;
+    }
+    // No scrollback and no mouse: the program's own paging keys are all that is
+    // left. xterm would send arrows here, which move a cursor in most TUIs.
     sendText(dir > 0 ? '\x1b[6~' : '\x1b[5~');
   }
 
@@ -349,7 +356,7 @@
     while (Math.abs(touchAcc) >= TOUCH_STEP) {
       var dir = touchAcc > 0 ? 1 : -1;
       touchAcc -= dir * TOUCH_STEP;
-      scrollTick(dir);
+      scrollTick(dir, t.clientX, t.clientY);
     }
   }, { passive: false });
 
