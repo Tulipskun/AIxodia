@@ -184,12 +184,28 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () { retryFit(1500); });
   }
+  // The observer is held in a variable on purpose: an observer nothing points
+  // at can be collected and then silently stops reporting.
+  var ro = null;
   if (window.ResizeObserver && host) {
-    new ResizeObserver(function () {
+    ro = new ResizeObserver(function () {
       if (fitTimer) return;
       fitTimer = setTimeout(function () { fitTimer = 0; fitNow(); }, 60);
-    }).observe(host);
+    });
+    ro.observe(host);
   }
+
+  // Some WebViews deliver neither a resize event nor an observer callback when
+  // their view changes while the window is not being drawn. The poll is the
+  // fallback: fit only touches the terminal when the measured box disagrees
+  // with it, so this costs two style reads a second and nothing else.
+  setInterval(function () {
+    if (!term || !fit) return;
+    var d = null;
+    try { d = fit.proposeDimensions(); } catch (e) { return; }
+    if (!d || !isFinite(d.cols) || !isFinite(d.rows)) return;
+    if (d.cols !== term.cols || d.rows !== term.rows) fitNow();
+  }, 700);
 })();
 </script>
 </body>
