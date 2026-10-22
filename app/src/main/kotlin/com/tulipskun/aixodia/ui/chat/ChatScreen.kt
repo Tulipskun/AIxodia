@@ -266,6 +266,15 @@ fun ChatScreen(
     val hasStoredRoute by vm.hasStoredRoute.collectAsStateWithLifecycle()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
+    // Back closes the chat drawer first. This handler is declared after the
+    // screen-level BackHandlers, so Compose gives it priority while the drawer
+    // is open; the app only leaves once the drawer is closed.
+    BackHandler(
+        enabled = drawer.isOpen || drawer.targetValue != DrawerValue.Closed,
+    ) {
+        scope.launch { drawer.close() }
+    }
     var draft by rememberSaveable { mutableStateOf("") }
     var pending by remember { mutableStateOf<ChatSession?>(null) }
     var renameTarget by remember { mutableStateOf<ChatSession?>(null) }
