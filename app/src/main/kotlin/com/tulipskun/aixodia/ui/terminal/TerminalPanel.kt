@@ -525,21 +525,22 @@ private fun TerminalKeys(
     onAlt: () -> Unit,
     onKey: (ByteArray) -> Unit,
 ) {
-    val arrows = listOf(
-        "\u2190" to "\u001b[D".toByteArray(),
-        "\u2191" to "\u001b[A".toByteArray(),
-        "\u2193" to "\u001b[B".toByteArray(),
-        "\u2192" to "\u001b[C".toByteArray(),
-    )
-    val controls = listOf(
+    // Exactly two rows, five keys each. The order is deliberate: the arrows
+    // sit where the thumb expects them, and DelAll is the whole-line erase
+    // (Ctrl-U/Ctrl-K) rather than a burst of backspaces.
+    val top = listOf(
         "Esc" to byteArrayOf(27),
         "Tab" to byteArrayOf(9),
-        "^C" to byteArrayOf(3),
-        "^D" to byteArrayOf(4),
-        "^Z" to byteArrayOf(26),
-        "^L" to byteArrayOf(12),
-        "PgUp" to "\u001b[5~".toByteArray(),
-        "PgDn" to "\u001b[6~".toByteArray(),
+        "^P" to byteArrayOf(16),
+        "\u2191" to "\u001b[A".toByteArray(),
+        // Ctrl-U then Ctrl-K: kill back to the start and forward to the end,
+        // so the whole line goes even when the cursor was left in the middle.
+        "DelAll" to byteArrayOf(21, 11),
+    )
+    val bottom = listOf(
+        "\u2190" to "\u001b[D".toByteArray(),
+        "\u2193" to "\u001b[B".toByteArray(),
+        "\u2192" to "\u001b[C".toByteArray(),
     )
     Column(
         Modifier
@@ -547,31 +548,30 @@ private fun TerminalKeys(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // The arrows get a row of their own, spread across the width and in
-        // reading order. Mixed into the control flow they landed in the middle
-        // of a wrapped block and moved every time a key was added.
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            arrows.forEach { (label, bytes) ->
+            top.forEach { (label, bytes) ->
                 Box(Modifier.weight(1f)) {
                     KeyChip(label, wide = true, onClick = { onKey(bytes) })
                 }
             }
         }
-        // Everything else wraps instead of scrolling sideways: a row that has
-        // to be dragged left and right hides the key you want behind the edge
-        // of the screen.
-        FlowRow(
+        Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
-            KeyChip("Alt", active = altOn, onClick = onAlt)
-            controls.forEach { (label, bytes) ->
-                KeyChip(label, onClick = { onKey(bytes) })
+            Box(Modifier.weight(1f)) {
+                KeyChip("Ctrl", active = ctrlOn, wide = true, onClick = onCtrl)
+            }
+            Box(Modifier.weight(1f)) {
+                KeyChip("Alt", active = altOn, wide = true, onClick = onAlt)
+            }
+            bottom.forEach { (label, bytes) ->
+                Box(Modifier.weight(1f)) {
+                    KeyChip(label, wide = true, onClick = { onKey(bytes) })
+                }
             }
         }
     }
