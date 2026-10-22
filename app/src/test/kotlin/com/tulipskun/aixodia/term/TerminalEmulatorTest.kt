@@ -273,6 +273,29 @@ class TerminalEmulatorTest {
     }
 
     @Test
+    fun deviceAttributeQueriesGetTheReportTheyAskedFor() {
+        val (term, out) = emulator()
+
+        // DA1 (CSI c) asks what kind of terminal this is.
+        term.send("\u001b[c")
+        assertEquals("\u001b[?1;2c", out.responses.toString())
+
+        // DA2 (CSI > c) asks a different question and needs a secondary DA
+        // report. Sending the DA1 answer makes tmux treat it as input for the
+        // pane, which shows up as digits typed at a prompt.
+        out.responses.setLength(0)
+        term.send("\u001b[>c")
+        assertEquals("\u001b[>0;276;0c", out.responses.toString())
+    }
+
+    @Test
+    fun cursorStatusReportsTheCursorPosition() {
+        val (term, out) = emulator()
+        term.send("\u001b[3;5H\u001b[6n")
+        assertEquals("\u001b[3;5R", out.responses.toString())
+    }
+
+    @Test
     fun resetClearsEverything() {
         val (term, out) = emulator()
         term.send("junk\u001b[?1000h\u001b[31m")

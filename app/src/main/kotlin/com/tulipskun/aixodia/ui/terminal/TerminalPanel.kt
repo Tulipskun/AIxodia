@@ -525,47 +525,75 @@ private fun TerminalKeys(
     onAlt: () -> Unit,
     onKey: (ByteArray) -> Unit,
 ) {
-    val keys = listOf(
-        "^C" to byteArrayOf(3),
-        "^D" to byteArrayOf(4),
-        "^Z" to byteArrayOf(26),
-        "^L" to byteArrayOf(12),
-        "Tab" to byteArrayOf(9),
-        "Esc" to byteArrayOf(27),
+    val arrows = listOf(
         "\u2190" to "\u001b[D".toByteArray(),
         "\u2191" to "\u001b[A".toByteArray(),
         "\u2193" to "\u001b[B".toByteArray(),
         "\u2192" to "\u001b[C".toByteArray(),
+    )
+    val controls = listOf(
+        "Esc" to byteArrayOf(27),
+        "Tab" to byteArrayOf(9),
+        "^C" to byteArrayOf(3),
+        "^D" to byteArrayOf(4),
+        "^Z" to byteArrayOf(26),
+        "^L" to byteArrayOf(12),
         "PgUp" to "\u001b[5~".toByteArray(),
         "PgDn" to "\u001b[6~".toByteArray(),
     )
-    // The keys wrap instead of scrolling sideways: a row that has to be dragged
-    // left and right hides the key you want behind the edge of the screen.
-    FlowRow(
+    Column(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
-        KeyChip("Alt", active = altOn, onClick = onAlt)
-        keys.forEach { (label, bytes) ->
-            KeyChip(label, onClick = { onKey(bytes) })
+        // The arrows get a row of their own, spread across the width and in
+        // reading order. Mixed into the control flow they landed in the middle
+        // of a wrapped block and moved every time a key was added.
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            arrows.forEach { (label, bytes) ->
+                Box(Modifier.weight(1f)) {
+                    KeyChip(label, wide = true, onClick = { onKey(bytes) })
+                }
+            }
+        }
+        // Everything else wraps instead of scrolling sideways: a row that has
+        // to be dragged left and right hides the key you want behind the edge
+        // of the screen.
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
+            KeyChip("Alt", active = altOn, onClick = onAlt)
+            controls.forEach { (label, bytes) ->
+                KeyChip(label, onClick = { onKey(bytes) })
+            }
         }
     }
 }
 
 /** One tappable key; [active] fills it in while a modifier is latched. */
 @Composable
-private fun KeyChip(label: String, active: Boolean = false, onClick: () -> Unit) {
+private fun KeyChip(
+    label: String,
+    active: Boolean = false,
+    wide: Boolean = false,
+    onClick: () -> Unit,
+) {
     Surface(
         color = if (active) Color(0xFF2A3A4A) else InkLine,
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = (if (wide) Modifier.fillMaxWidth() else Modifier)
+            .clickable(onClick = onClick),
     ) {
         Box(
             Modifier
+                .then(if (wide) Modifier.fillMaxWidth() else Modifier)
                 .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp)
                 .padding(horizontal = 8.dp),
             contentAlignment = Alignment.Center,

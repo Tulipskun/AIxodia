@@ -462,7 +462,14 @@ class TerminalEmulator(
                 5 -> respond("\u001b[0n")
                 6 -> respond("\u001b[${buffer.cursorRow + 1};${buffer.cursorCol + 1}R")
             }
-            'c' -> respond("\u001b[?1;2c")
+            'c' -> when (privateMarker) {
+                // A secondary DA (CSI > c) is not the same question as the
+                // primary one. Answering it with the primary report left tmux
+                // with a reply it was not waiting for, which came back as
+                // keyboard input and echoed as "1;2c0;276;0c".
+                '>'.code -> respond("\u001b[>0;276;0c")
+                else -> respond("\u001b[?1;2c")
+            }
             'q' -> if (intermediate == ' '.code) cursorStyle = param(0, 0)
             't' -> Unit
             else -> Unit
