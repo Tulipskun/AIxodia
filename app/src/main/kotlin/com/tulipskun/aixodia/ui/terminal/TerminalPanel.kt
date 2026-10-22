@@ -439,7 +439,6 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                             view.keepSoftKeyboard()
                                         },
                                         onKey = { bytes ->
-                                            view.scrollToBottom()
                                             socket.send(bytes)
                                             // Tapping a key must not take the keyboard with it.
                                             view.keepSoftKeyboard()
@@ -448,7 +447,6 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                     TerminalComposer(
                                         socket = socket,
                                         onSend = {
-                                            view.scrollToBottom()
                                             if (ctrlOn.value || altOn.value) {
                                                 ctrlOn.value = false
                                                 altOn.value = false

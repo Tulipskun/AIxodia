@@ -142,10 +142,6 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
     val lines = ArrayList<TerminalRow>(rows)
     val scrollback = ArrayList<TerminalRow>()
 
-    /** Total rows dropped from the front of [scrollback] because it was full. */
-    var scrollbackTrimmed = 0
-        private set
-
     /**
      * Trimming one row at a time makes ArrayList shift every row that is left,
      * once per output line, at exactly the moment the history is full and the
@@ -154,9 +150,7 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
      */
     private fun trimScrollback() {
         if (scrollback.size <= scrollbackLimit + SCROLLBACK_SLACK) return
-        val drop = scrollback.size - scrollbackLimit
-        scrollback.subList(0, drop).clear()
-        scrollbackTrimmed += drop
+        scrollback.subList(0, scrollback.size - scrollbackLimit).clear()
     }
 
     /** Normal screen keeps history; the alternate screen does not. */
@@ -184,7 +178,6 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
     fun reset() {
         for (row in lines) row.reset(defaultFg, defaultBg)
         scrollback.clear()
-        scrollbackTrimmed = 0
         cursorCol = 0
         cursorRow = 0
         scrollTop = 0
