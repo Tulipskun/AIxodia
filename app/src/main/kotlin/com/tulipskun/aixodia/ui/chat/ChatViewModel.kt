@@ -12,6 +12,7 @@ import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.ToolStep
+import com.tulipskun.aixodia.data.remote.ApprovalRequest
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.CHAT_PAGE
 import com.tulipskun.aixodia.data.repo.ChatRepository
@@ -238,6 +239,7 @@ class ChatViewModel(
 
     /** Why the socket is down, straight from the daemon's HTTP answer. */
     val socketError = repo.socketError
+    val approval = repo.approval
 
     /**
      * The footer's field list for the provider in use. Switched on the endpoint
@@ -858,6 +860,11 @@ class ChatViewModel(
         }
     }
 
+    /** Answers the run's pending mutating tool. */
+    fun approve(runId: String, callId: String, allow: Boolean, reason: String = "") {
+        repo.approve(runId, callId, allow, reason)
+    }
+
     private fun onTurnDone(frame: AiOutput) {
         val stage = frame.stage
         if (stage == "cancelled") {
@@ -1194,6 +1201,13 @@ class ChatViewModel(
         val attachments = pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
         val online = conn.value == ConnState.ONLINE
+        // A live turn already owns the bubble and the stream. Queueing text is
+        // only meaningful while offline; sending over a healthy stream would
+        // reset the answer the user is already reading.
+        if (online && busy.value) {
+            notice.value = "Wait for the current answer before sending another"
+            return
+        }
         if (!online && attachments.isNotEmpty()) {
             notice.value = "Connect to the daemon before sending attachments"
             return

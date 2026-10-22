@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <link rel="stylesheet" href="xterm.css">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0e14; overflow: hidden; }
+    #term { position: absolute; inset: 0; padding: 6px 4px 4px 8px; }
+    #overlay {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #aab3c0; font: 13px -apple-system, Roboto, sans-serif; background: #0b0e14;
+      pointer-events: none; opacity: 1; transition: opacity .15s;
+    }
+    #overlay.hidden { opacity: 0; }
+    .xterm .xterm-viewport { background: #0b0e14 !important; }
+  </style>
+</head>
+<body>
+<div id="term"></div>
+<div id="overlay">Connecting…</div>
+<script src="xterm.js"></script>
+<script src="xterm-addon-fit.js"></script>
+<script>
+(function () {
+  var term = null;
+  var fit = null;
+  var ws = null;
+  var ended = false;
+  var overlay = document.getElementById('overlay');
+
+  function bridge(name, args) {
+    try {
+      if (window.AndroidTerminal && typeof window.AndroidTerminal[name] === 'function') {
+        window.AndroidTerminal[name].apply(window.AndroidTerminal, args || []);
+      }
+    } catch (e) { /* bridge is optional in a plain browser */ }
+  }
+
+  function show(text) {
+    overlay.textContent = text;
+    overlay.classList.remove('hidden');
+  }
+
+  function hide() { overlay.classList.add('hidden'); }
+
+  function sendResize() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
+    ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+  }
+
+  function fitNow() {
+    if (!fit) return;
+    try { fit.fit(); } catch (e) { }
+    sendResize();
+  }
+
+  window.startTerminal = function (url, cols, rows) {
+    ended = false;
+    if (ws) { try { ws.close(); } catch (e) { } ws = null; }
+    if (term) { try { term.dispose(); } catch (e) { } term = null; }
+    show('Connecting…');
+    term = new Terminal({
+      cursorBlink: true,
+      convertEol: false,
+      scrollback: 5000,
+      fontSize: 13,
+      fontFamily: 'monospace',
+      theme: {
+        background: '#0b0e14', foreground: '#d7dce5', cursor: '#7aa2f7',
+        selectionBackground: '#33467c', black: '#15161e', red: '#f7768e',
+        green: '#9ece6a', yellow: '#e0af68', blue: '#7aa2f7', magenta: '#bb9af7',
+        cyan: '#7dcfff', white: '#a9b1d6'
+      }
+    });
+    fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById('term'));
+    try { fit.fit(); } catch (e) { }
+    term.focus();
+
+    term.onData(function (data) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(new TextEncoder().encode(data));
+    });
+    term.onResize(function () { sendResize(); });
+    window.addEventListener('resize', fitNow);
+
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = function () {
+      hide();
+      bridge('onOpen', []);
+      sendResize();
+      term.focus();
+    };
+    ws.onmessage = function (event) {
+      if (typeof event.data === 'string') {
+        var msg;
+        try { msg = JSON.parse(event.data); } catch (e) { return; }
+        if (msg.type === 'ready') {
+          hide();
+          bridge('onReady', [msg.shell || '', msg.cwd || '', msg.id || '', msg.cols || 0, msg.rows || 0, msg.pid || 0]);
+        } else if (msg.type === 'exit') {
+          ended = true;
+          show('Session ended' + (msg.code != null ? ' (' + msg.code + ')' : ''));
+          bridge('onEnded', ['exit', String(msg.code == null ? 0 : msg.code)]);
+        } else if (msg.type === 'error') {
+          ended = true;
+          show(msg.error || 'Terminal error');
+          bridge('onEnded', ['error', msg.error || 'Terminal error']);
+        }
+      } else {
+        term.write(new Uint8Array(event.data));
+      }
+    };
+    ws.onerror = function () { show('Connection failed'); };
+    ws.onclose = function () {
+      if (ended) return;
+      show('Disconnected — reconnecting…');
+      bridge('onDisconnected', []);
+    };
+  };
+
+  window.terminalInput = function (text) {
+    if (term) term.paste(text);
+  };
+
+  window.closeTerminal = function () {
+    ended = true;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'close' })); } catch (e) { }
+    }
+    if (ws) { try { ws.close(); } catch (e) { } }
+    if (term) { try { term.dispose(); } catch (e) { } }
+  };
+})();
+</script>
+</body>
+</html>

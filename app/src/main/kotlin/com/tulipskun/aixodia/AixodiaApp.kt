@@ -1,14 +1,11 @@
 package com.tulipskun.aixodia
 
 import android.app.Application
-import android.net.ConnectivityManager
-import android.net.Network
 import com.tulipskun.aixodia.data.local.AppDatabase
-import com.tulipskun.aixodia.data.remote.AiDirectSocket
+import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
-import com.tulipskun.aixodia.data.remote.RelayClient
-import com.tulipskun.aixodia.data.remote.TerminalSocket
+import com.tulipskun.aixodia.data.remote.RunSocket
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,11 +22,6 @@ class AixodiaApp : Application() {
         // the app is in the background (a kernel ends, a new one is pushed), and
         // the chat should be current on the next open without anyone asking.
         container.discovery.start()
-        // The socket is opened here too, not by a screen: the address only
-        // exists after discovery has read it, and the relay waits for that
-        // address by itself. A phone that only opens the settings screen would
-        // otherwise never dial at all.
-        container.relay.connect()
     }
 }
 
@@ -38,27 +30,12 @@ class AppContainer(app: Application) {
 
     val db: AppDatabase = AppDatabase.get(app)
     val settings = SettingsStore(app)
-    // One socket for the whole app: chat, terminal and the HTTP API all ride it.
-    val relay = RelayClient(settings)
     val historyApi = HistoryApi(settings)
-    val socket = AiDirectSocket(settings, relay)
-    val terminal = TerminalSocket(settings, relay, historyApi)
-    val repo = ChatRepository(db, historyApi, socket)
-    val discovery = DaemonDiscovery(settings, historyApi, socket, terminal, scope)
+    // No shared socket: chat is POST + SSE and the terminal is its own
+    // WebSocket. Discovery only has to nudge the run stream when the engine
+    // address changes.
+    val chat: ChatTransport = RunSocket(settings, app)
+    val repo = ChatRepository(db, historyApi, chat)
+    val discovery = DaemonDiscovery(settings, historyApi, chat, scope)
 
-    // A phone that moves from Wi-Fi to cellular leaves the old socket bound to
-    // a dead interface. Rediscovering the address does not help — the address
-    // is stable — so the link itself is redialed as soon as a network exists.
-    // The callback lives as long as the process, like the relay it wakes.
-    private val networks = app.getSystemService(ConnectivityManager::class.java)
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            relay.reconnectIfDown()
-            terminal.reconnect()
-        }
-    }
-
-    init {
-        networks?.registerDefaultNetworkCallback(networkCallback)
-    }
 }

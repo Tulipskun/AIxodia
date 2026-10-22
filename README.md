@@ -7,7 +7,8 @@ screens draw. Cloudflare D1 is read directly by the phone for one thing only:
 the daemon's own row in `system_state`, which says where that tunnel is. There
 is no Cloudflare Worker in this project (D-011).
 
-- **One socket for everything live**: authenticated WebSocket to the engine's `/room` — JSON chat frames plus multiplexed terminal streams and HTTP-over-socket rpcs. The engine serves it in `io/relay` (transport) on top of the `io/mobile` hub; frames mirror the daemon's `io/mobile` wire types.
+- **Chat is a run**: `POST /v1/runs` starts a turn and returns immediately; its events arrive over SSE (`/v1/runs/{id}/events?after=seq`), numbered and replayable. Closing the app does not stop the agent, and reopening resumes from the last applied seq. `RunSocket` is the transport.
+- **Terminal is its own WebSocket**: a WebView running xterm.js connects to `/terminal` with a single-use 90-second ticket. Chat no longer shares a socket with terminal bytes or HTTP rpc calls. tmux keeps shells alive across engine restarts.
 - **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers.
 - **Daemon discovery from D1**: `data/remote/D1Api.kt` runs one `SELECT` against `system_state` (`daemon/url`, `daemon/version`, `daemon/heartbeat`) with the operator's Cloudflare API token. That is how the phone learns the current quick-tunnel URL and whether the daemon is alive without asking anyone.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
@@ -33,9 +34,10 @@ db/             Cloudflare D1 schema + migrations (applied with wrangler, no Wor
    `wrangler d1 execute aixodia --file=db/schema.sql` — both go straight to the
    Cloudflare API, nothing is deployed. The schema is provider config plus the
    `system_state` keys the daemon writes and the phone reads. See `db/README.md`.
-2. **Daemon**: run `Tulipskun/aixodia-engine` (`main.go`) — it serves `/room`,
-   opens the quick tunnel, writes its URL and heartbeat into the D1
-   `system_state` rows and stores the chat history itself.
+2. **Daemon**: run `Tulipskun/aixodia-engine` (`main.go`) — it serves the run
+   API, the terminal WebSocket and `/v1/...`, opens the quick tunnel, writes
+   its URL and heartbeat into the D1 `system_state` rows and stores the chat
+   history itself.
 3. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
    **Cloudflare API token** — the account and database ids are resolved from it
    and cached, so no id is ever typed. Discovery then finds the daemon's tunnel
@@ -53,16 +55,17 @@ is older than 90s. `ai` keeps no local state: config and sessions live in D1, an
 the Cloudflare API token (sent in the WS hello, memory-only) is the daemon's
 credential too.
 
-One credential, three transports:
+One credential, three paths:
 
-- **`/room` WebSocket** — the live tail, terminal streams and every HTTP call
-  made as an rpc frame (`RelayClient`). One handshake, one token, one reconnect
-  loop (`RelayClient.loop`), which redials with a capped backoff that only
-  resets after a socket stayed up (see `nextBackoffMs`).
+- **Run SSE** — `RunSocket` POSTs a turn, reads numbered events, reconnects with
+  `Last-Event-ID`, and answers approval requests. The agent runs on the engine,
+  not in the app.
 - **HTTP over the tunnel** — history paging, session create/rename/delete, the
-  provider catalogue, provider health, per-chat model pins and the agent
-  settings (`HistoryApi`). The daemon's router validates those, which is why
-  they are not read from the database.
+  provider catalogue, provider health, per-chat model pins, run control and
+  terminal tickets (`HistoryApi`).
+- **Terminal WebSocket** — a dedicated `/terminal` socket opened by xterm.js in
+  a WebView, authenticated with a short-lived ticket rather than the long-lived
+  API token.
 - **D1 REST** — only discovery: the daemon's tunnel URL, version and heartbeat
   (`D1Api.node()`). Nothing the phone edits lives in D1.
 
@@ -70,39 +73,36 @@ One credential, three transports:
 
 1. The daemon is only reachable through a random `*.trycloudflare.com` quick
    tunnel (nothing published, no port forwarding).
-2. The app sends the **Cloudflare API token** as `Authorization: Bearer …` — in
-   the WebSocket handshake for `/room` and in a header on every `/v1/...` HTTP
-   call. The daemon checks it before upgrading or answering and keeps it in
-   memory only.
+2. The app sends the **Cloudflare API token** as `Authorization: Bearer …` on
+   every run/terminal-ticket `/v1/...` call. The xterm WebSocket carries only a
+   single-use ticket in its URL, so the long-lived token never appears in a
+   WebView URL or browser log. The daemon keeps the token in memory only.
 
 An engine that cannot verify its `CF_TOKEN` against Cloudflare D1 at startup
-exits instead of serving (`db.Verify`). After that, every request — the `/room`
-handshake and each `/v1/...` call — compares the bearer to that token and
-answers `401` when it is missing or wrong, so a tunnel with a rotated token
+exits instead of serving (`db.Verify`). After that, every `/v1/...` call and
+the terminal upgrade compare the bearer (or a consumed ticket) to that token
+and answer `401` when it is missing or wrong, so a tunnel with a rotated token
 does not let a stranger in. There is **no second token** and none may be added
 without approval; the daemon owns no credential of its own.
 
 ## Reconnecting
 
-One loop owns the socket (`RelayClient.loop`); every trigger below only asks it
-to dial now, so there is never a second connection racing the first.
-
-- **Failure or close** — redial with a capped, jittered backoff (1s → 8s). The
-  delay resets to 1s only after a socket stayed up 10s (`nextBackoffMs`), so a
-  server that accepts and immediately drops is not retried once a second.
-- **Engine absent while the socket is up** (`{"ctl":"presence","engine":false}`)
-  — the state drops to CONNECTING and the socket is kept: the room is the
-  phone's, the engine is what left. The hello is sent again when presence
-  returns, which is when the streamed answer resumes arriving.
-- **Foreground or network change** — `reconnectIfDown()` redials only when the
-  link is not ONLINE, so coming back to the app never resets a healthy socket.
-- **Daemon moved** — discovery adopts the new tunnel URL (`Adopt`), or sees the
-  same URL with a new `started` (`Keep` + replaced). In both cases the socket
-  and the terminal are redialed, because every stream died with the old process.
-- **Terminal** — a dropped stream reattaches on the same socket; a stream the
-  engine never answered is redialed with a new stream id, and the socket itself
-  is replaced only when it is not ONLINE, so a swallowed terminal open cannot
-  kill a chat turn that is streaming on it.
+- **Run stream** — `RunSocket` probes `/v1/sessions` while offline (5s), then
+  resumes the remembered run. A dropped SSE connection reconnects with a
+  capped backoff and `after=<lastSeq>`, so no token is applied twice in the same
+  process.
+- **App closed** — the engine keeps working. The run id is remembered per chat;
+  on reopen the status is checked and an active run is streamed from zero (the
+  live UI is empty, so replay is safe), while a finished run is left to the
+  normal history refresh.
+- **Foreground** — `MainActivity` reconnects when the transport is offline or
+  the app was away 30s. A long background trip can hide a dead tunnel.
+- **Daemon moved** — discovery adopts the new URL or notices a new `started` and
+  calls `RunSocket.reconnect()`; terminal tabs reconnect with a fresh ticket
+  from their own WebView.
+- **Terminal** — a dropped xterm socket asks the host for a new ticket and
+  redraws from the engine's ring. Closing a tab sends `close`, so the shell and
+  its tmux slot are freed; merely leaving the screen only detaches.
 
 ## Production DB (runtime config, nothing hardcoded)
 
@@ -110,8 +110,8 @@ to dial now, so there is never a second connection racing the first.
   daemon's `system_state` keys. Chat history is the engine's own store, not a
   D1 table.
 - One credential does the work: the Cloudflare API token typed in Settings reads
-  the daemon row out of D1, and the same token authenticates both the `/room`
-  WebSocket and the `/v1/...` HTTP calls.
+  the daemon row out of D1, and the same token authenticates the `/v1/...`
+  calls (the WebView terminal uses a short-lived ticket derived from it).
 - The token used for `wrangler` stays in the shell (`CLOUDFLARE_API_TOKEN`); the
   repo contains config (`config/aixodia.example.json`) and no secrets. It needs
   Account → **D1: Edit**, which is what the app and the daemon both use it for.
@@ -141,22 +141,17 @@ The key is not in this repository: it lives in the private
 ## Test it right now
 
 Start the daemon (`Tulipskun/aixodia-engine`), paste the Cloudflare API token in
-the app's settings, and send a message: discovery finds the tunnel URL and the
-socket dials `/room` without any further setup. The provider, key and per-agent
-model are set from the phone (AX-083..094).
+the app's settings, and send a message: discovery finds the tunnel URL, the app
+POSTs a run and follows its SSE events. The terminal button opens a ticket-backed
+xterm WebView. The provider, key and per-agent model are set from the phone
+(AX-083..094).
 
-## Terminal transport: WebRTC P2P (planned)
+## Terminal transport
 
-The current terminal stream is carried as a stream inside the app's one WebSocket to the engine (`/room`, reached through the engine's Cloudflare quick tunnel). Terminal input and output therefore share that socket with chat and with the HTTP rpc calls for the entire session.
-
-The target design is to move **terminal bytes only** to a WebRTC DataChannel:
-
-- Cloudflare Durable Objects are signaling only: pair the phone and engine, then forward SDP offers/answers and ICE candidates. They must not proxy terminal input or output.
-- Android uses libwebrtc; the Linux engine uses Pion WebRTC.
-- Prefer a direct ICE path with STUN. Configure TURN as a fallback for networks where direct connectivity fails.
-- Once the DataChannel is open, terminal input, PTY output, resize events, and terminal control messages use that channel. Keep the existing PTY session and terminal UI semantics.
-- If the P2P connection fails, reconnect through the existing socket transport so terminal access remains available.
-- Authenticate signaling and session attachment with short-lived, scoped credentials. Do not expose an unauthenticated shell or send the Cloudflare API token to an arbitrary peer.
-
-**Status:** design target only. The current TerminalSocket still uses RelayClient; P2P is not active until both the Android and engine implementations, signaling protocol, TURN fallback, and tests are merged. Chat and HTTP RPC continue using the existing transport unless separately redesigned.
-
+There is no P2P/WebRTC/TURN path. The terminal is a dedicated WebSocket through
+the same Cloudflare quick tunnel. xterm.js runs in an Android WebView and sends
+binary input; output is replayed from a 4 MiB ring preceded by a reset and the
+saved terminal modes. Authentication is a single-use 90-second ticket obtained
+over authenticated HTTP. Shells live in tmux (`aix-<id>`) when tmux is available,
+so a terminal survives an app or engine restart and can be reattached from the
+session list.

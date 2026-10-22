@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     ChatScreen(
                         repo = c.repo, settings = c.settings, history = c.historyApi,
-                        socket = c.socket, terminal = c.terminal, discovery = c.discovery,
+                        socket = c.chat, discovery = c.discovery,
                     )
                 }
             }
@@ -37,10 +37,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * A link that died while the app was in the background must not have to wait
-     * for a ping timeout to be noticed: coming back to the foreground is exactly
-     * when the socket is likely stale, so an offline one is redialed at once and
-     * an open terminal window re-dials too.
+     * A stream that died while the app was in the background must not have to
+     * wait for a timeout to be noticed: coming back to the foreground is
+     * exactly when the connection is likely stale, so an offline one is
+     * re-established at once.
      */
     override fun onPause() {
         backgroundedAt = SystemClock.elapsedRealtime()
@@ -50,25 +50,19 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         val c = (application as AixodiaApp).container
-        val relayWasOnline = c.relay.isOnline
-        c.relay.reconnectIfDown()
         val away = if (backgroundedAt > 0L) {
             SystemClock.elapsedRealtime() - backgroundedAt
         } else {
             0L
         }
         backgroundedAt = 0L
-        // Only force the terminal when the link really was down or the app was
-        // away long enough for Android to have silently frozen the stream. A
-        // quick trip to another app should not clear and replay a healthy
-        // screen.
-        if (!relayWasOnline) c.terminal.reconnect() else c.terminal.onForeground(away)
-        // Chat frames are not replayed by a dead-but-still-"online" socket. A
-        // long background trip redials on purpose, which makes the repository
-        // refresh D1, flush unacked rows, and run the unfinished-turn recovery.
-        // When the relay was already down, reconnectIfDown() above has started
-        // the redial; calling reconnect() again would tear that attempt down.
-        if (relayWasOnline && away >= 30_000L) c.socket.reconnect()
+        // The SSE stream is not replayed by a connection Android froze while
+        // the app was away, and a long background trip may also mean the
+        // daemon was replaced. Reconnect deliberately; the transport resumes at
+        // its last sequence number.
+        if (c.chat.state.value != com.tulipskun.aixodia.data.remote.ConnState.ONLINE || away >= 30_000L) {
+            c.chat.reconnect()
+        }
     }
 
     /**
@@ -81,8 +75,8 @@ class MainActivity : ComponentActivity() {
      *     --es aixodia.session work-1
      *
      * `aixodia.account` and `aixodia.database` override the ids that are
-     * otherwise discovered from the token, and the live socket follows from the
-     * daemon address (wss://<host>/ws).
+     * otherwise discovered from the token, and the run stream follows from the
+     * daemon address.
      *
      * It is compiled out of release builds: BuildConfig.DEBUG is false there,
      * so a shipped APK has no way to receive connection values this way, and

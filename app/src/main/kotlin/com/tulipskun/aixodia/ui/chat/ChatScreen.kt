@@ -110,11 +110,10 @@ import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.model.StoredTotals
-import com.tulipskun.aixodia.data.remote.AiDirectSocket
+import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
-import com.tulipskun.aixodia.data.remote.TerminalSocket
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.chat.ChatViewModel.LiveBlock
 import com.tulipskun.aixodia.ui.display.AttachSheet
@@ -141,7 +140,7 @@ import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
 import com.tulipskun.aixodia.ui.sessions.sessionTitle
 import com.tulipskun.aixodia.ui.providers.ProvidersScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
-import com.tulipskun.aixodia.ui.terminal.TerminalWindow
+import com.tulipskun.aixodia.ui.terminal.TerminalWebWindow
 import com.tulipskun.aixodia.update.UpdateManager
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -157,8 +156,7 @@ fun ChatScreen(
     repo: ChatRepository,
     settings: SettingsStore,
     history: HistoryApi,
-    socket: AiDirectSocket,
-    terminal: TerminalSocket,
+    socket: ChatTransport,
     discovery: DaemonDiscovery? = null,
 ) {
     val token by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
@@ -221,7 +219,11 @@ fun ChatScreen(
     // shell in a letterbox. It needs no session and no view model: it talks to
     // the machine, not to the chat.
     if (showTerminal) {
-        TerminalWindow(socket = terminal, onClose = { showTerminal = false })
+        TerminalWebWindow(
+            settings = settings,
+            history = history,
+            onClose = { showTerminal = false },
+        )
         return
     }
 
@@ -238,6 +240,7 @@ fun ChatScreen(
     val conn by vm.conn.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
     var showOfflineCard by remember { mutableStateOf(false) }
     val socketErr by vm.socketError.collectAsStateWithLifecycle(initialValue = 0)
+    val approval by vm.approval.collectAsStateWithLifecycle(initialValue = null)
     val status by vm.status.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -474,6 +477,29 @@ fun ChatScreen(
             onDismiss = { renameTarget = null },
         )
     }
+    approval?.let { pending ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Approve ${pending.name}?") },
+            text = {
+                Text(
+                    pending.arguments.take(1200).ifBlank { "The agent wants to run this tool." },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.approve(pending.runId, pending.callId, true)
+                }) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.approve(pending.runId, pending.callId, false, "denied in app")
+                }) { Text("Deny") }
+            },
+        )
+    }
+
     if (showPushNowDialog) {
         AlertDialog(
             onDismissRequest = { if (!pushNowBusy) showPushNowDialog = false },

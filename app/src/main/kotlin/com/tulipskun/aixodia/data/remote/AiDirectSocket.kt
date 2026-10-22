@@ -6,6 +6,7 @@ import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiInput
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.ContentPart
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -22,13 +23,16 @@ enum class ConnState { OFFLINE, CONNECTING, ONLINE }
 class AiDirectSocket(
     settings: SettingsStore,
     private val relay: RelayClient = RelayClient(settings),
-) {
+) : ChatTransport {
     private val inAdapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         .adapter(AiInput::class.java)
 
-    val state: StateFlow<ConnState> = relay.state
-    val lastError: StateFlow<Int> = relay.lastError
-    val frames: SharedFlow<AiOutput> = relay.chatFrames
+    override val state: StateFlow<ConnState> = relay.state
+    override val lastError: StateFlow<Int> = relay.lastError
+    override val frames: SharedFlow<AiOutput> = relay.chatFrames
+    // The old socket has no pause-for-approval step; the daemon runs tools
+    // directly, so there is never anything to answer here.
+    override val approval: StateFlow<ApprovalRequest?> = MutableStateFlow(null)
 
     @Volatile
     private var session: String = "default"
@@ -54,25 +58,25 @@ class AiDirectSocket(
     }
 
     /** Starts the single connection (idempotent) for [sessionId]. */
-    fun open(sessionId: String, fromSeq: Long) {
+    override fun open(sessionId: String, fromSeq: Long) {
         session = sessionId
         resumeFrom = fromSeq
         relay.connect()
     }
 
     /** Switches the session used for subsequent sends + reconnects. */
-    fun switchSession(sessionId: String) {
+    override fun switchSession(sessionId: String) {
         session = sessionId
     }
 
     /** The stop button: cancels the turn running in this chat. */
-    fun cancel(sessionId: String): Boolean {
+    override fun cancel(sessionId: String): Boolean {
         val frame = AiInput(type = "cancel", sessionId = sessionId)
         return relay.sendChat(inAdapter.toJson(frame))
     }
 
     /** Closes the socket and tells the engine no turn is still wanted. */
-    fun close() {
+    override fun close() {
         relay.bye()
         relay.disconnect()
     }
@@ -81,7 +85,7 @@ class AiDirectSocket(
      * Drops the current socket so it dials again immediately. Discovery calls
      * this when the engine's address changed.
      */
-    fun reconnect() {
+    override fun reconnect() {
         relay.reconnect()
     }
 
@@ -90,17 +94,17 @@ class AiDirectSocket(
      * stored. It sends no text: a retry must not create another user bubble or
      * feed the question to the model twice.
      */
-    fun retry(sessionId: String, clientMsgId: String): Boolean {
+    override fun retry(sessionId: String, clientMsgId: String): Boolean {
         val frame = AiInput(type = "retry", sessionId = sessionId, clientMsgId = clientMsgId)
         return relay.sendChat(inAdapter.toJson(frame))
     }
 
     /** Returns true when the frame was handed to the socket. */
-    fun send(
+    override fun send(
         sessionId: String,
         text: String,
         clientMsgId: String,
-        attachments: List<com.tulipskun.aixodia.data.model.AttachmentRef> = emptyList(),
+        attachments: List<com.tulipskun.aixodia.data.model.AttachmentRef>,
     ): Boolean {
         val frame = AiInput(
             sessionId = sessionId,
@@ -110,4 +114,6 @@ class AiDirectSocket(
         )
         return relay.sendChat(inAdapter.toJson(frame))
     }
+
+    override fun approve(runId: String, callId: String, allow: Boolean, reason: String): Boolean = false
 }

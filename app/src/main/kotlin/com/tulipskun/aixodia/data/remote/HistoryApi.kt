@@ -700,6 +700,58 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrNull()
     }
 
+    /** A single-use ticket for the terminal WebView. A browser socket cannot
+     * set an Authorization header, and putting the long-lived token in a URL
+     * would leak it into logs. */
+    suspend fun terminalTicket(): String? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/v1/terminals/ticket")
+                .header("Authorization", "Bearer ${c.token}")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                runCatching { JSONObject(text).optString("ticket") }.getOrNull().orEmpty().ifBlank { null }
+            }
+        }.getOrNull()
+    }
+
+    /** Ends a shell the phone closed, even when another tab is attached. */
+    suspend fun closeTerminal(id: String): Boolean = withContext(Dispatchers.IO) {
+        if (id.isBlank()) return@withContext false
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
+        runCatching {
+            val req = Request.Builder().url("$base/v1/terminals/${URLEncoder.encode(id, "UTF-8")}")
+                .header("Authorization", "Bearer ${c.token}")
+                .delete().build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
+    /** Sessions the engine still holds, including tmux shells that survived a restart. */
+    suspend fun terminals(): List<JSONObject> = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+        runCatching {
+            val req = Request.Builder().url("$base/v1/terminals")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                val array = runCatching { JSONObject(text).optJSONArray("terminals") }.getOrNull()
+                buildList {
+                    if (array != null) for (i in 0 until array.length()) {
+                        array.optJSONObject(i)?.let { add(it) }
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) {
         val c = settings.current()

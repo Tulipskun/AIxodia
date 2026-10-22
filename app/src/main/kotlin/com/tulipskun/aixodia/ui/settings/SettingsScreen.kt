@@ -95,7 +95,7 @@ import com.tulipskun.aixodia.data.model.ModelView
 import com.tulipskun.aixodia.data.model.SettingsView
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
-import com.tulipskun.aixodia.data.remote.AiDirectSocket
+import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.DiscoveryPhase
@@ -123,7 +123,7 @@ private enum class SettingsPage { Main, Connection, Agent, About }
 fun SettingsScreen(
     settings: SettingsStore,
     history: HistoryApi,
-    socket: AiDirectSocket,
+    socket: ChatTransport,
     sessionId: String,
     onBack: () -> Unit,
     discovery: DaemonDiscovery? = null,

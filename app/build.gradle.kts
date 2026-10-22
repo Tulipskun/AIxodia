@@ -92,6 +92,9 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     testImplementation("junit:junit:4.13.2")
+    // Android stubs org.json in local unit tests; the real one is needed to
+    // exercise the run-event mapper without a device.
+    testImplementation("org.json:json:20240303")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

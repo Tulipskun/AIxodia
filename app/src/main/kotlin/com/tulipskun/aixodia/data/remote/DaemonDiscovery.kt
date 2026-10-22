@@ -48,8 +48,7 @@ sealed interface Discovery {
 class DaemonDiscovery(
     private val settings: SettingsStore,
     private val history: HistoryApi,
-    private val socket: AiDirectSocket,
-    private val terminal: TerminalSocket,
+    private val socket: ChatTransport,
     private val scope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow(DiscoveryState())
@@ -115,7 +114,6 @@ class DaemonDiscovery(
                         // open window follows the daemon without waiting for its
                         // old link to fail first.
                         socket.reconnect()
-                        terminal.reconnect()
                         _state.value = DiscoveryState(
                             phase = DiscoveryPhase.CONNECTED,
                             tunnelUrl = action.url,
@@ -139,7 +137,6 @@ class DaemonDiscovery(
                         if (replaced) {
                             Log.i(TAG, "daemon restarted at $started; redialing the socket and terminal")
                             socket.reconnect()
-                            terminal.reconnect()
                         }
                         _state.value = DiscoveryState(
                             phase = DiscoveryPhase.CONNECTED,
