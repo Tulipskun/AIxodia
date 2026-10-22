@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -250,9 +253,22 @@ fun TerminalWebWindow(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Ink).windowInsetsPadding(WindowInsets.safeDrawing)) {
+    // A shell is a full-width instrument: only the keyboard, the status bar and
+    // the navigation bar may take space from it. A cutout inset on the sides
+    // (landscape, a folded screen) would letterbox the terminal, so the gutter
+    // for the controls is applied to the controls instead of the whole window.
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Ink)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical)),
+    ) {
         Row(
-            Modifier.fillMaxWidth().background(InkLine).padding(horizontal = 6.dp, vertical = 2.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(InkLine)
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                .padding(horizontal = 6.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
@@ -312,7 +328,10 @@ fun TerminalWebWindow(
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                .padding(horizontal = 10.dp, vertical = 3.dp),
         )
         AndroidView(
             modifier = Modifier

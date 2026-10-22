@@ -102,8 +102,9 @@
 
   window.startTerminal = function (url, cols, rows) {
     ended = false;
-    if (ws) { try { ws.close(); } catch (e) { } ws = null; }
+    closeSocket();
     if (term) { try { term.dispose(); } catch (e) { } term = null; }
+    fit = null;
     show('Connecting…');
     term = new Terminal({
       cursorBlink: true,
@@ -131,14 +132,21 @@
     term.onResize(function () { sendResize(); });
 
     ws = new WebSocket(url);
-    ws.binaryType = 'arraybuffer';
-    ws.onopen = function () {
+    // Every handler below belongs to this one socket. Switching tabs disposes
+    // the previous one, and its close would otherwise arrive after the new
+    // socket is in place — reported as a disconnect, which asks the host to
+    // reconnect, which closes the socket again: a loop that never settles.
+    var sock = ws;
+    sock.binaryType = 'arraybuffer';
+    sock.onopen = function () {
+      if (sock !== ws) return;
       hide();
       bridge('onOpen', []);
       retryFit(2000);
       term.focus();
     };
-    ws.onmessage = function (event) {
+    sock.onmessage = function (event) {
+      if (sock !== ws) return;
       if (typeof event.data === 'string') {
         var msg;
         try { msg = JSON.parse(event.data); } catch (e) { return; }
@@ -158,9 +166,12 @@
         term.write(new Uint8Array(event.data));
       }
     };
-    ws.onerror = function () { show('Connection failed'); };
-    ws.onclose = function () {
-      if (ended) return;
+    sock.onerror = function () {
+      if (sock !== ws) return;
+      show('Connection failed');
+    };
+    sock.onclose = function () {
+      if (sock !== ws || ended) return;
       show('Disconnected — reconnecting…');
       bridge('onDisconnected', []);
     };
@@ -170,13 +181,23 @@
     if (term) term.paste(text);
   };
 
+  // closeSocket drops the current socket on purpose. Clearing ws first is what
+  // makes its handlers see themselves as stale.
+  function closeSocket() {
+    var old = ws;
+    ws = null;
+    if (!old) return;
+    try { old.close(); } catch (e) { }
+  }
+
   window.closeTerminal = function () {
     ended = true;
     if (ws && ws.readyState === WebSocket.OPEN) {
       try { ws.send(JSON.stringify({ type: 'close' })); } catch (e) { }
     }
-    if (ws) { try { ws.close(); } catch (e) { } }
-    if (term) { try { term.dispose(); } catch (e) { } }
+    closeSocket();
+    if (term) { try { term.dispose(); } catch (e) { } term = null; }
+    fit = null;
   };
 
   // Refit whenever the box changes: unfold, rotation, keyboard, window resize.
