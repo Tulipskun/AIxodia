@@ -8,7 +8,7 @@ the daemon's own row in `system_state`, which says where that tunnel is. There
 is no Cloudflare Worker in this project (D-011).
 
 - **Chat is a run**: `POST /v1/runs` starts a turn and returns immediately; its events arrive over SSE (`/v1/runs/{id}/events?after=seq`), numbered and replayable. Closing the app does not stop the agent, and reopening resumes from the last applied seq. `RunSocket` is the transport.
-- **Terminal is native and its own WebSocket**: the app's own `TerminalEmulator` draws the grid in `TerminalView` and connects to `/terminal` with a single-use 90-second ticket. There is no WebView, JavaScript terminal, or Termux dependency. Chat no longer shares a socket with terminal bytes or HTTP rpc calls. tmux keeps shells alive across engine restarts.
+- **Terminal is native and its own WebSocket**: the app's own `TerminalEmulator` draws every cell in `TerminalView` and connects to `/terminal` with a single-use 90-second ticket. There is no JavaScript terminal or external terminal library. Chat uses its own transport, so terminal bytes and HTTP rpc calls never share its socket. tmux keeps shells alive across engine restarts.
 - **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers.
 - **Daemon discovery from D1**: `data/remote/D1Api.kt` runs one `SELECT` against `system_state` (`daemon/url`, `daemon/version`, `daemon/heartbeat`) with the operator's Cloudflare API token. That is how the phone learns the current quick-tunnel URL and whether the daemon is alive without asking anyone.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
@@ -152,7 +152,7 @@ There is no P2P/WebRTC/TURN path. The terminal is a dedicated WebSocket through
 the same Cloudflare quick tunnel. The app owns both halves of the screen —
 `TerminalEmulator` parses VT/ANSI and `TerminalView` paints the grid — and sends
 binary input; output is replayed from a 4 MiB ring preceded by a reset and the
-saved terminal modes. No WebView, xterm.js, or Termux library is involved.
+saved terminal modes, with no external terminal library involved.
 Authentication is a single-use 90-second ticket obtained over authenticated
 HTTP. Shells live in tmux (`aix-<id>`) when tmux is available, so a terminal
 survives an app or engine restart and can be reattached from the session list.
