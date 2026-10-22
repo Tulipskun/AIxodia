@@ -70,21 +70,16 @@ fi
 echo "pushing $branch"
 git push origin "HEAD:refs/heads/$branch"
 
-# Next version is one past the highest published release, so an install always
-# moves forward and updates over the previous APK in place.
-latest=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' 2>/dev/null \
-  | sed -n 's/^v0\.1\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)
-next=$(( ${latest:-0} + 1 ))
-tag="v0.1.$next"
+# One rolling release, like the engine's engine-latest: the tag never changes,
+# the asset is replaced in place. The version code still moves forward on every
+# build so an install overwrites the previous APK instead of being rejected.
+tag="latest"
+VERSION_CODE="$(date +%s)"
+VERSION_NAME="1.0.$(date +%Y%m%d%H%M)"
 
-if gh release view "$tag" >/dev/null 2>&1; then
-  echo "error: $tag already exists" >&2
-  exit 1
-fi
-
-echo "latest release: ${latest:-none}  ->  building $tag (versionCode=$next)"
+echo "building $tag (versionCode=$VERSION_CODE)"
 gradle assembleDebug --console=plain \
-  -PaixodiaVersionCode="$next" -PaixodiaVersionName="0.1.$next"
+  -PaixodiaVersionCode="$VERSION_CODE" -PaixodiaVersionName="$VERSION_NAME"
 
 APK=app/build/outputs/apk/debug/app-debug.apk
 [ -f "$APK" ] || { echo "error: $APK was not produced" >&2; exit 1; }
@@ -98,14 +93,19 @@ case "$signer" in
 esac
 
 cp "$APK" AIxodia.apk
-gh release create "$tag" AIxodia.apk \
-  --title "AIxodia $tag" \
-  --target "$(git rev-parse HEAD)" \
-  --generate-notes
+if gh release view "$tag" >/dev/null 2>&1; then
+  gh release edit "$tag" --title "AIxodia $tag" --target "$(git rev-parse HEAD)"
+  gh release upload "$tag" AIxodia.apk --clobber
+else
+  gh release create "$tag" AIxodia.apk \
+    --title "AIxodia $tag" \
+    --target "$(git rev-parse HEAD)" \
+    --generate-notes
+fi
 echo "released $tag"
 
-# Only the newest release is kept, so the operator never prunes by hand and an
-# install always has exactly one valid APK to find.
+# Keep a single release, the rolling one. Legacy v0.1.x tags from the old
+# scheme are removed on the first run and never come back.
 gh release list --limit 1000 --json tagName --jq '.[].tagName' \
   | while read -r t; do
       [ "$t" = "$tag" ] && continue
