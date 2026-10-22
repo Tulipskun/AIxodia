@@ -700,9 +700,8 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrNull()
     }
 
-    /** A single-use ticket for the terminal WebView. A browser socket cannot
-     * set an Authorization header, and putting the long-lived token in a URL
-     * would leak it into logs. */
+    /** A single-use ticket for the dedicated terminal WebSocket. It keeps the
+     * long-lived API token out of a URL that a proxy or log may keep. */
     suspend fun terminalTicket(): String? = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
@@ -731,26 +730,42 @@ class HistoryApi(private val settings: SettingsStore) {
         }.getOrDefault(false)
     }
 
-    /** Sessions the engine still holds, including tmux shells that survived a restart. */
-    suspend fun terminals(): List<JSONObject> = withContext(Dispatchers.IO) {
+    /**
+     * Sessions the engine still holds, including tmux shells that survived a
+     * restart. Null means the list could not be read, which is different from
+     * an engine that really holds no shells: the caller must not wipe the tabs
+     * it already has just because the tunnel blinked.
+     */
+    suspend fun terminalList(): List<JSONObject>? = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
-                val text = r.body?.string().orEmpty()
-                val array = runCatching { JSONObject(text).optJSONArray("terminals") }.getOrNull()
-                buildList {
-                    if (array != null) for (i in 0 until array.length()) {
-                        array.optJSONObject(i)?.let { add(it) }
+                if (!r.isSuccessful) {
+                    null
+                } else {
+                    val text = r.body?.string().orEmpty()
+                    val array = runCatching { JSONObject(text).optJSONArray("terminals") }.getOrNull()
+                    if (array == null) {
+                        null
+                    } else {
+                        val rows = ArrayList<JSONObject>(array.length())
+                        for (i in 0 until array.length()) {
+                            array.optJSONObject(i)?.let(rows::add)
+                        }
+                        rows
                     }
                 }
             }
-        }.getOrDefault(emptyList())
+        }.getOrNull()
     }
+
+    /** Sessions the engine still holds; an unreachable engine reads as empty. */
+    suspend fun terminals(): List<JSONObject> = terminalList().orEmpty()
 
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) {

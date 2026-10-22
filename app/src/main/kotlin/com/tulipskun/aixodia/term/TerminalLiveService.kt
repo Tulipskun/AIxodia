@@ -14,7 +14,7 @@ import com.tulipskun.aixodia.MainActivity
 import com.tulipskun.aixodia.R
 
 /**
- * Keeps the process (and the WebView's terminal socket) alive while the user is
+ * Keeps the process (and the native terminal socket) alive while the user is
  * looking at a live terminal, including with the screen folded. It does not
  * own the shell: agent turns and terminals run on the engine either way.
  */

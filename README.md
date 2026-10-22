@@ -8,7 +8,7 @@ the daemon's own row in `system_state`, which says where that tunnel is. There
 is no Cloudflare Worker in this project (D-011).
 
 - **Chat is a run**: `POST /v1/runs` starts a turn and returns immediately; its events arrive over SSE (`/v1/runs/{id}/events?after=seq`), numbered and replayable. Closing the app does not stop the agent, and reopening resumes from the last applied seq. `RunSocket` is the transport.
-- **Terminal is its own WebSocket**: a WebView running xterm.js connects to `/terminal` with a single-use 90-second ticket. Chat no longer shares a socket with terminal bytes or HTTP rpc calls. tmux keeps shells alive across engine restarts.
+- **Terminal is native and its own WebSocket**: the app's own `TerminalEmulator` draws the grid in `TerminalView` and connects to `/terminal` with a single-use 90-second ticket. There is no WebView, JavaScript terminal, or Termux dependency. Chat no longer shares a socket with terminal bytes or HTTP rpc calls. tmux keeps shells alive across engine restarts.
 - **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers.
 - **Daemon discovery from D1**: `data/remote/D1Api.kt` runs one `SELECT` against `system_state` (`daemon/url`, `daemon/version`, `daemon/heartbeat`) with the operator's Cloudflare API token. That is how the phone learns the current quick-tunnel URL and whether the daemon is alive without asking anyone.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
@@ -63,8 +63,8 @@ One credential, three paths:
 - **HTTP over the tunnel** — history paging, session create/rename/delete, the
   provider catalogue, provider health, per-chat model pins, run control and
   terminal tickets (`HistoryApi`).
-- **Terminal WebSocket** — a dedicated `/terminal` socket opened by xterm.js in
-  a WebView, authenticated with a short-lived ticket rather than the long-lived
+- **Terminal WebSocket** — a dedicated `/terminal` socket opened by the native
+  terminal, authenticated with a short-lived ticket rather than the long-lived
   API token.
 - **D1 REST** — only discovery: the daemon's tunnel URL, version and heartbeat
   (`D1Api.node()`). Nothing the phone edits lives in D1.
@@ -74,9 +74,9 @@ One credential, three paths:
 1. The daemon is only reachable through a random `*.trycloudflare.com` quick
    tunnel (nothing published, no port forwarding).
 2. The app sends the **Cloudflare API token** as `Authorization: Bearer …` on
-   every run/terminal-ticket `/v1/...` call. The xterm WebSocket carries only a
-   single-use ticket in its URL, so the long-lived token never appears in a
-   WebView URL or browser log. The daemon keeps the token in memory only.
+   every run/terminal-ticket `/v1/...` call. The terminal WebSocket carries only
+   a single-use ticket in its URL, so the long-lived token never appears in a
+   socket URL or proxy log. The daemon keeps the token in memory only.
 
 An engine that cannot verify its `CF_TOKEN` against Cloudflare D1 at startup
 exits instead of serving (`db.Verify`). After that, every `/v1/...` call and
@@ -98,11 +98,11 @@ without approval; the daemon owns no credential of its own.
 - **Foreground** — `MainActivity` reconnects when the transport is offline or
   the app was away 30s. A long background trip can hide a dead tunnel.
 - **Daemon moved** — discovery adopts the new URL or notices a new `started` and
-  calls `RunSocket.reconnect()`; terminal tabs reconnect with a fresh ticket
-  from their own WebView.
-- **Terminal** — a dropped xterm socket asks the host for a new ticket and
-  redraws from the engine's ring. Closing a tab sends `close`, so the shell and
-  its tmux slot are freed; merely leaving the screen only detaches.
+  calls `RunSocket.reconnect()`; the terminal socket reconnects with a fresh
+  ticket.
+- **Terminal** — a dropped socket asks for a new ticket and redraws from the
+  engine's ring. Closing a tab sends `close`, so the shell and its tmux slot are
+  freed; merely leaving the screen only detaches.
 
 ## Production DB (runtime config, nothing hardcoded)
 
@@ -111,7 +111,7 @@ without approval; the daemon owns no credential of its own.
   D1 table.
 - One credential does the work: the Cloudflare API token typed in Settings reads
   the daemon row out of D1, and the same token authenticates the `/v1/...`
-  calls (the WebView terminal uses a short-lived ticket derived from it).
+  calls (the terminal WebSocket uses a short-lived ticket derived from it).
 - The token used for `wrangler` stays in the shell (`CLOUDFLARE_API_TOKEN`); the
   repo contains config (`config/aixodia.example.json`) and no secrets. It needs
   Account → **D1: Edit**, which is what the app and the daemon both use it for.
@@ -142,16 +142,17 @@ The key is not in this repository: it lives in the private
 
 Start the daemon (`Tulipskun/aixodia-engine`), paste the Cloudflare API token in
 the app's settings, and send a message: discovery finds the tunnel URL, the app
-POSTs a run and follows its SSE events. The terminal button opens a ticket-backed
-xterm WebView. The provider, key and per-agent model are set from the phone
-(AX-083..094).
+POSTs a run and follows its SSE events. The terminal button opens the native
+ticket-backed terminal. The provider, key and per-agent model are set from the
+phone (AX-083..094).
 
 ## Terminal transport
 
 There is no P2P/WebRTC/TURN path. The terminal is a dedicated WebSocket through
-the same Cloudflare quick tunnel. xterm.js runs in an Android WebView and sends
+the same Cloudflare quick tunnel. The app owns both halves of the screen —
+`TerminalEmulator` parses VT/ANSI and `TerminalView` paints the grid — and sends
 binary input; output is replayed from a 4 MiB ring preceded by a reset and the
-saved terminal modes. Authentication is a single-use 90-second ticket obtained
-over authenticated HTTP. Shells live in tmux (`aix-<id>`) when tmux is available,
-so a terminal survives an app or engine restart and can be reattached from the
-session list.
+saved terminal modes. No WebView, xterm.js, or Termux library is involved.
+Authentication is a single-use 90-second ticket obtained over authenticated
+HTTP. Shells live in tmux (`aix-<id>`) when tmux is available, so a terminal
+survives an app or engine restart and can be reattached from the session list.

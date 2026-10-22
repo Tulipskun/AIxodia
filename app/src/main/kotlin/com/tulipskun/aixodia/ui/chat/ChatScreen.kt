@@ -114,6 +114,7 @@ import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
+import com.tulipskun.aixodia.data.remote.TerminalSocket
 import com.tulipskun.aixodia.data.repo.ChatRepository
 import com.tulipskun.aixodia.ui.chat.ChatViewModel.LiveBlock
 import com.tulipskun.aixodia.ui.display.AttachSheet
@@ -140,7 +141,7 @@ import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
 import com.tulipskun.aixodia.ui.sessions.sessionTitle
 import com.tulipskun.aixodia.ui.providers.ProvidersScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
-import com.tulipskun.aixodia.ui.terminal.TerminalWebWindow
+import com.tulipskun.aixodia.ui.terminal.TerminalWindow
 import com.tulipskun.aixodia.update.UpdateManager
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -219,9 +220,12 @@ fun ChatScreen(
     // shell in a letterbox. It needs no session and no view model: it talks to
     // the machine, not to the chat.
     if (showTerminal) {
-        TerminalWebWindow(
-            settings = settings,
-            history = history,
+        // The native terminal owns one dedicated socket for the life of this
+        // branch. Leaving the window only detaches; the shell stays on the
+        // engine for a later reattach, exactly as the engine's tmux session is.
+        val terminal = remember(settings, history) { TerminalSocket(settings, history) }
+        TerminalWindow(
+            socket = terminal,
             onClose = { showTerminal = false },
         )
         return

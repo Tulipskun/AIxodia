@@ -1,7 +1,5 @@
 package com.tulipskun.aixodia.data.remote
 
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -101,11 +99,9 @@ class TerminalSocketTest {
 
     @Test
     fun resizeFrameCarriesBothDimensions() {
-        val adapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-            .adapter(ResizeFrame::class.java)
-        val json = adapter.toJson(ResizeFrame(type = "resize", cols = 100, rows = 30))
         // The engine ignores a resize that names only one dimension, so both
         // keys have to be in this frame — it is the whole point of the frame.
+        val json = resizeFrame(cols = 100, rows = 30)
         assertTrue(json, json.contains("\"type\":\"resize\""))
         assertTrue(json, json.contains("\"cols\":100"))
         assertTrue(json, json.contains("\"rows\":30"))

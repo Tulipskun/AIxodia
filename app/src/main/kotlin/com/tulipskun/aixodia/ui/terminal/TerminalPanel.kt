@@ -3,6 +3,7 @@ package com.tulipskun.aixodia.ui.terminal
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -56,12 +57,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.remote.TermEvent
 import com.tulipskun.aixodia.data.remote.TermState
 import com.tulipskun.aixodia.data.remote.TerminalSocket
 import com.tulipskun.aixodia.term.TerminalEmulator
+import com.tulipskun.aixodia.term.TerminalLiveService
 import com.tulipskun.aixodia.term.TerminalOutput
 import com.tulipskun.aixodia.term.TerminalView
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
@@ -138,12 +143,43 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     }
 
     DisposableEffect(Unit) {
+        // The process and this native socket have to stay alive while the
+        // screen is open, including with the display folded or the app behind
+        // the keyboard. The shell itself lives on the engine either way.
+        TerminalLiveService.start(context)
         socket.open()
         onDispose {
             // The shell outlives this window; its modes must outlive it too.
             socket.rememberModes(socket.activeSessionId.value, emulator.snapshotModes())
             socket.close()
+            TerminalLiveService.stop(context)
         }
+    }
+
+    // A socket Android froze in the background can look OPEN while every byte
+    // after the freeze is gone. A long absence rebuilds it; a quick glance at a
+    // notification leaves the screen alone. The engine's replay (RIS, modes,
+    // ring) is exactly the recovery a fresh attach gives.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        var backgroundedAt = 0L
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> backgroundedAt = SystemClock.elapsedRealtime()
+                Lifecycle.Event.ON_RESUME -> {
+                    val away = if (backgroundedAt > 0L) {
+                        SystemClock.elapsedRealtime() - backgroundedAt
+                    } else {
+                        0L
+                    }
+                    backgroundedAt = 0L
+                    socket.onForeground(away)
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(Unit) {

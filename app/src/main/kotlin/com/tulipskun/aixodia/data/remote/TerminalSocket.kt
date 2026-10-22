@@ -1,11 +1,13 @@
 package com.tulipskun.aixodia.data.remote
 
 import android.util.Log
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.term.TerminalModes
+import java.net.URLEncoder
+import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,17 +18,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 
 private const val TAG = "TerminalSocket"
 
-/** The gap between open attempts. Discovery polls every 30s, so this covers it. */
+/** The gap between connection attempts. Discovery polls every 30s, so this covers it. */
 private const val RETRY_MS = 1_500L
 
 /**
@@ -38,24 +46,18 @@ private const val RETRY_MS = 1_500L
  */
 private const val REATTACH_AFTER_BACKGROUND_MS = 30_000L
 
-/** Whether returning to the foreground should rebuild an existing stream. */
-internal fun shouldReattachAfterBackground(state: TermState, wanted: Boolean, awayMs: Long): Boolean =
-    wanted && state == TermState.OPEN && awayMs >= REATTACH_AFTER_BACKGROUND_MS
-
 /**
- * How long a freshly opened stream may stay silent before it is treated as
+ * How long a freshly opened socket may stay silent before it is treated as
  * dead. The engine answers an open with ready (or error) at once; no answer
- * means the frame or the stream id was stale, and dialing again with a new id
- * is the only way out.
+ * means the tunnel or the engine did not deliver the upgrade, and dialing again
+ * with a fresh ticket is the only way out.
  */
 private const val READY_TIMEOUT = 10_000L
 
 /**
  * How often a dialing terminal re-reads the daemon address itself. Discovery
  * polls every 30s, but an engine redeploy replaces the quick-tunnel URL and the
- * app may still be holding the old one when the window opens. Waiting for the
- * next discovery tick made the terminal sit on "connecting" until an unrelated
- * chat send woke it; opening a terminal now checks the row before dialing.
+ * app may still be holding the old one when the window opens.
  */
 private const val DAEMON_RECHECK_MS = 30_000L
 
@@ -85,25 +87,30 @@ sealed interface TermEvent {
 }
 
 /**
- * One terminal, carried as a stream inside the app's single engine socket.
+ * One native terminal, carried by its own WebSocket to the engine's `/terminal`
+ * endpoint.
  *
- * It used to be its own WebSocket to `/terminal`, which needed a second
- * handshake and a second reachable path. The one `/room` socket carries chat,
- * the API and every terminal instead. A terminal is opened with a control
- * frame, addressed by an id, and closed when the window goes.
+ * There is no WebView and no JavaScript terminal: [TerminalView] draws the
+ * app's own emulator, so input and output are bytes all the way. The socket is
+ * authenticated with a single-use, short-lived ticket fetched over the normal
+ * authenticated HTTP path, so the long-lived API token never appears in a URL.
  *
- * The shell itself still lives on the engine, keyed by the persisted session
- * id, so a killed-and-reopened app comes back to the same shell and its ring
- * buffer.
+ * The shell itself lives on the engine (in tmux when available), keyed by the
+ * persisted session id, so a killed-and-reopened app comes back to the same
+ * shell and its ring buffer.
  */
 class TerminalSocket(
     private val settings: SettingsStore,
-    private val relay: RelayClient? = null,
-    private val history: HistoryApi? = null,
+    private val history: HistoryApi,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val resizeAdapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-        .adapter(ResizeFrame::class.java)
+    private val client = OkHttpClient.Builder()
+        // A ping every twenty seconds notices a tunnel edge that stopped
+        // forwarding, without tearing down an idle but healthy shell.
+        .pingInterval(Duration.ofSeconds(20))
+        .connectTimeout(Duration.ofSeconds(10))
+        .readTimeout(Duration.ZERO)
+        .build()
 
     // The initial dial and the periodic refresh both reconcile the tab list.
     // Serializing them keeps an older answer from overwriting a newer one.
@@ -142,10 +149,10 @@ class TerminalSocket(
     /**
      * The last modes seen for a session. The engine replays only the tail of a
      * session's output, so a window that reattaches to a running program gets
-     * pixels but not the mode sequences that said "this is a full-screen app
-     * with the mouse on". The panel puts these back before the replay is drawn.
+     * pixels but not always every mode sequence. The panel puts these back
+     * before the replay is drawn.
      */
-    private val sessionModes = java.util.concurrent.ConcurrentHashMap<String, TerminalModes>()
+    private val sessionModes = ConcurrentHashMap<String, TerminalModes>()
 
     fun rememberedModes(id: String): TerminalModes? =
         if (id.isBlank()) null else sessionModes[id]
@@ -157,46 +164,28 @@ class TerminalSocket(
     private val _events = Channel<TermEvent>(Channel.UNLIMITED)
     val events: Flow<TermEvent> = _events.receiveAsFlow()
 
-    /** The stream id this socket opened; addresses every byte of the stream. */
-    @Volatile
-    private var sid: Int? = null
-
     // The one dialing coroutine. open() and close() cancel it before starting a
     // new one, so a stream that is being replaced can never race its successor
-    // back to life — the previous design let an old dial's late callbacks run
-    // against the new session.
+    // back to life.
     private var dialJob: Job? = null
 
     // The periodic tab refresh, so a slow list call cannot queue one per tick.
     private var refreshJob: Job? = null
 
-    init {
-        // The engine can drop and re-register while the phone's socket never
-        // moves (a relay edge used to tell us with presence false/true). Every
-        // stream id lives in that engine-side session, so at that moment all of
-        // them are dead even though ours look open. Presence coming back is the
-        // signal to reattach the shell on screen.
-        scope.launch {
-            var wasUp = relay?.enginePresent?.value ?: true
-            relay?.enginePresent?.collect { up ->
-                if (up && !wasUp && wanted) reconnectLocked()
-                wasUp = up
-            }
-        }
-    }
-
     // Whether the window wants a terminal. open() sets it, close() clears it.
-    // Unlike [isLive] it stays true while dial() is still waiting for the relay
-    // address, which is the state a fresh sign-in starts in.
     @Volatile
     private var wanted = false
 
-    // Touched from the socket's own callback thread as well as the UI's, so the
-    // two flags that decide what a close means have to be visible across threads.
     @Volatile
     private var closing = false
 
-    /** The last size the page asked for, sent when the stream opens. */
+    /** Bumped on every new socket and on close; old callbacks compare it. */
+    private val connection = AtomicInteger(0)
+
+    @Volatile
+    private var socket: WebSocket? = null
+
+    /** The last size the view reported, sent when the stream opens. */
     @Volatile
     private var pendingSize: Pair<Int, Int>? = null
 
@@ -219,46 +208,43 @@ class TerminalSocket(
     /** Opens the stream, if it is not already dialing or up. */
     fun open() {
         wanted = true
-        sessionsSynced = false
-        scope.launch {
-            // The initial dialog and the first reconcile both touch the tab
-            // list. Holding the same lock as syncSessions keeps whichever runs
-            // second from painting stale saved ids over the engine's answer.
-            sessionSync.withLock {
-                if (sessionsSynced) return@withLock
-                when (val target = retarget) {
-                    null -> _activeSessionId.value = settings.currentTerminalSessionId()
-                    "" -> _activeSessionId.value = ""
-                    else -> _activeSessionId.value = target
-                }
-                _sessions.value = settings.currentTerminalSessionIds()
-                _sessionPids.value = settings.currentTerminalSessionPids()
-            }
-        }
-        // A stream left over from a previous session that died silently (app
-        // backgrounded, Doze, dropped Wi-Fi) would make this return without
-        // reconnecting, leaving the terminal stuck on a dead connection. Only
-        // skip dialing when the stream is genuinely open.
-        if (sid != null && _state.value == TermState.OPEN) return
-        dialJob?.cancel()
-        sid?.let { closeStream(it) }
-        sid = null
         closing = false
+        sessionsSynced = false
+        // A stream left over from a previous session that died silently would
+        // make this return without reconnecting, leaving a dead connection.
+        if (socket != null && _state.value == TermState.OPEN) return
+        dialJob?.cancel()
+        closeSocket()
         _error.value = 0
         // Events from the session that just ended are still sitting in the
-        // unbounded channel if nobody was collecting when they arrived (the
-        // panel was already disposed). Draining them here is what keeps a
-        // reopened window from instantly showing the previous run's exit.
+        // unbounded channel if nobody was collecting when they arrived. Draining
+        // them keeps a reopened window from instantly showing the old exit.
         drainEvents()
         drainOutput()
         _state.value = TermState.CONNECTING
-        dialJob = scope.launch { dial() }
+        dialJob = scope.launch {
+            // Load the saved tabs before the first dial: if the engine is
+            // unreachable, dial() continues with this active id rather than
+            // starting a new shell under an old tab.
+            sessionSync.withLock {
+                if (!sessionsSynced) {
+                    when (val target = retarget) {
+                        null -> _activeSessionId.value = settings.currentTerminalSessionId()
+                        "" -> _activeSessionId.value = ""
+                        else -> _activeSessionId.value = target
+                    }
+                    _sessions.value = settings.currentTerminalSessionIds()
+                    _sessionPids.value = settings.currentTerminalSessionPids()
+                }
+            }
+            dial()
+        }
     }
 
     /**
-     * Re-dials now, without waiting for the current link to fail. Used when
-     * discovery has just moved the engine address, or when the app returns to
-     * the foreground and the stream may have been dropped while away.
+     * Re-dials now, without waiting for the current link to fail. Used when the
+     * app returns to the foreground after a long absence, or when discovery has
+     * just moved the engine address.
      */
     fun reconnect() {
         if (!wanted) return
@@ -266,24 +252,18 @@ class TerminalSocket(
     }
 
     /**
-     * Re-reads the engine's list of live shells while the window is open. The
-     * initial dial already does this once; a shell can be killed from another
-     * terminal, or another phone can open one, long after that. Without this
-     * poll the tab row kept a dead pid and a tap reattached the same dead id.
-     *
-     * It is deliberately silent: a failed list (relay briefly offline, an old
-     * engine without /v1/terminals) leaves the current tabs alone, exactly as
-     * the dial's reconcile does.
+     * Re-reads the engine's list of live shells while the window is open. A
+     * shell can be killed from another terminal, or another phone can open one,
+     * long after the initial dial.
      */
     fun refreshSessions() {
-        val r = relay ?: return
-        if (r.state.value != ConnState.ONLINE || refreshJob?.isActive == true) return
+        if (refreshJob?.isActive == true) return
         refreshJob = scope.launch {
-            val lostActive = syncSessions(r, settings.currentTerminalSessionId())
-            // The shell on screen disappeared between polls. A live stream
-            // may not know yet (the engine dropped the pty but its reader has
-            // not delivered the exit), so replace it with the newest surviving
-            // tab, or a fresh shell when none are left.
+            val lostActive = syncSessions()
+            // The shell on screen disappeared between polls. A live socket may
+            // not know yet (the engine dropped the pty but its reader has not
+            // delivered the exit), so replace it with the newest surviving tab,
+            // or a fresh shell when none are left.
             if (lostActive && wanted &&
                 (_state.value == TermState.OPEN || _state.value == TermState.CONNECTING)
             ) {
@@ -295,9 +275,7 @@ class TerminalSocket(
     /**
      * Called when the activity comes back. A stream that survived a long
      * absence can look OPEN while Android has already dropped every byte, so
-     * rebuild it once; the engine replays RIS, the modes and the ring, which is
-     * exactly the recovery a fresh attach gives. A short absence keeps the
-     * current screen untouched.
+     * rebuild it once; the engine replays RIS, the modes and the ring.
      */
     fun onForeground(awayMs: Long) {
         // The list also changes while the app is away (an exit, a kill, a tab
@@ -308,10 +286,9 @@ class TerminalSocket(
     }
 
     private fun reconnectLocked() {
+        if (!wanted) return
         dialJob?.cancel()
-        sid?.let { closeStream(it) }
-        sid = null
-        closing = false
+        closeSocket()
         _error.value = 0
         _state.value = TermState.CONNECTING
         dialJob = scope.launch { dial() }
@@ -339,9 +316,9 @@ class TerminalSocket(
     fun switchSession(id: String) {
         if (id.isBlank()) return
         // Tapping the tab that is already attached must not close and re-open
-        // the stream: that replays the screen (RIS + ring) and, in the status
-        // line, looked like a counter going up on every tap.
-        if (id == _activeSessionId.value && sid != null && _state.value == TermState.OPEN) return
+        // the stream: that replays the screen and, in the status line, looked
+        // like a counter going up on every tap.
+        if (id == _activeSessionId.value && socket != null && _state.value == TermState.OPEN) return
         retarget = id
         _activeSessionId.value = id
         scope.launch {
@@ -359,18 +336,20 @@ class TerminalSocket(
      */
     fun closeSession() {
         val id = _activeSessionId.value
-        val stream = sid
+        // End the shell, not just the stream. Leaving it attached only hangs up;
+        // the engine keeps the shell and its slot alive. The control frame goes
+        // out before the socket is closed below.
+        if (id.isNotBlank()) {
+            socket?.send("""{"type":"close"}""")
+        }
         retarget = ""
         _activeSessionId.value = ""
-        // End the shell, not just the stream. Hanging up leaves the engine's
-        // shell — and its slot — alive, so a handful of closes made every new
-        // terminal fail with "too many terminals". The control frame goes out
-        // before the close below on the same socket, so the engine sees it first.
-        if (stream != null) relay?.termJSON(stream, """{"type":"close"}""")
         scope.launch {
             if (id.isNotBlank()) {
                 sessionModes.remove(id)
                 settings.removeTerminalSessionId(id)
+                // If the socket was already gone the engine never saw close.
+                runCatching { history.closeTerminal(id) }
             }
             _sessions.value = settings.currentTerminalSessionIds()
             _sessionPids.value = settings.currentTerminalSessionPids()
@@ -388,9 +367,17 @@ class TerminalSocket(
         closing = true
         dialJob?.cancel()
         dialJob = null
-        sid?.let { closeStream(it) }
-        sid = null
+        closeSocket()
         _state.value = TermState.CLOSED
+    }
+
+    private fun closeSocket() {
+        // Invalidate every callback from the socket being replaced before it is
+        // closed; a late onClosed must not finish the next dial's deferreds.
+        connection.incrementAndGet()
+        val old = socket
+        socket = null
+        old?.close(1000, "client closed")
     }
 
     /**
@@ -410,8 +397,7 @@ class TerminalSocket(
 
     /**
      * True while a dial is in flight or a shell is up — the terminal is doing
-     * something and does not need to be poked. Used when the app returns to the
-     * foreground, where a link that has quietly died should be redialed.
+     * something and does not need to be poked.
      */
     fun isLive(): Boolean =
         wanted && (_state.value == TermState.OPEN || _state.value == TermState.CONNECTING)
@@ -421,9 +407,9 @@ class TerminalSocket(
      * not commands (Ctrl-C is 0x03). False when the stream is not up.
      */
     fun send(bytes: ByteArray): Boolean {
-        if (bytes.isEmpty()) return false
-        val id = sid ?: return false
-        return relay?.termSend(id, bytes) == true
+        if (bytes.isEmpty() || _state.value != TermState.OPEN) return false
+        val ws = socket ?: return false
+        return ws.send(bytes.toByteString())
     }
 
     /** Tells the shell its window changed, so full-screen programs redraw. */
@@ -433,21 +419,15 @@ class TerminalSocket(
         // before the stream is up. Keeping it means the shell is never left at
         // the default 80x24 while the screen draws something else.
         pendingSize = cols to rows
-        val id = sid ?: return false
-        return relay?.termJSON(id, resizeFrame(cols, rows)) == true
-    }
-
-    private fun resizeFrame(cols: Int, rows: Int): String =
-        resizeAdapter.toJson(ResizeFrame(type = "resize", cols = cols, rows = rows))
-
-    private fun closeStream(id: Int) {
-        relay?.closeTerminal(id)
+        if (_state.value != TermState.OPEN) return false
+        val ws = socket ?: return false
+        return ws.send(resizeFrame(cols, rows))
     }
 
     /**
-     * Aligns the tab list and pid labels with the engine's live shells. An
-     * engine too old to serve /v1/terminals answers 404; the saved tabs are
-     * then left alone, which is the old behaviour.
+     * Aligns the tab list and pid labels with the engine's live shells. A null
+     * list (engine unreachable or an old engine without /v1/terminals) leaves
+     * the saved tabs alone.
      *
      * A shell id is not a shell: after the engine restarts, the same saved id
      * would make acquireSession start a brand-new shell under the tab the user
@@ -455,19 +435,13 @@ class TerminalSocket(
      * what makes a reconnect land on the right shell — or on a new tab when
      * that shell really is gone.
      */
-    private suspend fun syncSessions(r: RelayClient, savedId: String): Boolean =
+    private suspend fun syncSessions(): Boolean =
         sessionSync.withLock {
-            val reply = withTimeoutOrNull(5_000) { r.rpc("GET", "/v1/terminals") }
-                ?: return@withLock false
-            if (!reply.isSuccessful) return@withLock false
-            val array = runCatching {
-                JSONObject(reply.text()).optJSONArray("terminals")
-            }.getOrNull() ?: return@withLock false
+            val rows = withTimeoutOrNull(5_000) { history.terminalList() } ?: return@withLock false
 
             val ids = mutableListOf<String>()
             val pids = mutableMapOf<String, Int>()
-            for (i in 0 until array.length()) {
-                val o = array.optJSONObject(i) ?: continue
+            for (o in rows) {
                 val id = o.optString("id").trim()
                 // The engine already checks the pid; the alive flag keeps an
                 // older engine's finished rows out of the tabs as well.
@@ -497,7 +471,7 @@ class TerminalSocket(
 
             val explicit = retarget
             if (explicit == null) {
-                val active = before.ifBlank { savedId }
+                val active = before.ifBlank { settings.currentTerminalSessionId() }
                 _activeSessionId.value = when {
                     active.isNotBlank() && active in ids -> active
                     ids.isNotEmpty() -> ids.last()
@@ -521,11 +495,9 @@ class TerminalSocket(
      * Discovery owns this normally, but its next tick can be up to 30s away
      * (longer after a failed read). During that gap a terminal opened right
      * after an engine self-update keeps dialing the dead quick-tunnel host and
-     * looks disconnected. Returns true when the address changed, so the relay
-     * socket is redialed with the new one too.
+     * looks disconnected.
      */
     private suspend fun refreshDaemonAddress(): Boolean {
-        val h = history ?: return false
         val current = try {
             settings.current()
         } catch (t: Throwable) {
@@ -533,7 +505,7 @@ class TerminalSocket(
         }
         if (current.token.isBlank()) return false
         val node = try {
-            withTimeoutOrNull(5_000) { h.node() }
+            withTimeoutOrNull(5_000) { history.node() }
         } catch (t: Throwable) {
             Log.w(TAG, "daemon address refresh failed", t)
             null
@@ -554,11 +526,22 @@ class TerminalSocket(
     private suspend fun dial() {
         var backoff = RETRY_MS
         var lastAddressCheck = 0L
+        var waitedForSize = 0L
         while (!closing) {
+            // The view reports its real grid on its first layout, usually a
+            // frame after open(). Let that land before the open frame is sent,
+            // so a reattach does not briefly force the 80x24 placeholder onto
+            // a full-screen program. A view that never measures is not allowed
+            // to hold the terminal hostage.
+            if (pendingSize == null && waitedForSize < 1_000L) {
+                delay(16)
+                waitedForSize += 16
+                continue
+            }
             val now = System.currentTimeMillis()
-            if (history != null && now - lastAddressCheck >= DAEMON_RECHECK_MS) {
+            if (now - lastAddressCheck >= DAEMON_RECHECK_MS) {
                 lastAddressCheck = now
-                if (refreshDaemonAddress()) relay?.reconnect()
+                refreshDaemonAddress()
             }
             val c = try {
                 settings.current()
@@ -572,117 +555,76 @@ class TerminalSocket(
             }
             if (c.token.isBlank()) {
                 // Nothing to connect with: the sign-in gate has not been passed.
-                _error.value = R.string.terminal_no_address
+                _error.value = com.tulipskun.aixodia.R.string.terminal_no_address
                 _state.value = TermState.CLOSED
                 _detail.value = "token blank in settings"
                 return
             }
-            if (c.wsUrl.isBlank()) {
+            val base = terminalUrlFor(c.daemonUrl)
+            if (base.isBlank()) {
                 // The token is set but the address is not known yet: the app
-                // opened before discovery read D1. Keep waiting for as long as
-                // the window is open; dial() re-reads settings every pass.
-                _detail.value = "wsUrl empty; waiting for discovery"
+                // opened before discovery found D1. Keep waiting.
+                _detail.value = "daemon address unknown; waiting for discovery"
                 delay(RETRY_MS)
-                continue
-            }
-            val r = relay
-            if (r == null) {
-                _error.value = R.string.terminal_no_address
-                _state.value = TermState.CLOSED
-                _detail.value = "no relay client"
-                return
-            }
-            r.connect()
-            _detail.value = "waiting for the relay"
-            val online = withTimeoutOrNull(15_000) {
-                r.state.first { it == ConnState.ONLINE }
-            } != null
-            if (!online) {
-                _detail.value = "relay offline; retrying"
-                delay(backoff)
-                backoff = minOf(backoff * 2, 10_000L)
                 continue
             }
 
             // Reconcile the tabs with the shells the engine actually holds. A
             // saved id that survived an engine restart would otherwise be
-            // reattached into a brand-new shell under an old tab, and the tab
-            // would keep claiming to be the shell the user left. The list also
-            // carries each shell's pid, so the labels are right before the
-            // ready frame arrives.
-            syncSessions(r, settings.currentTerminalSessionId())
+            // reattached into a brand-new shell under an old tab.
+            syncSessions()
 
-            // Reattach to a surviving shell when we have its id; otherwise the
-            // engine hands back a fresh one in its ready frame. syncSessions
-            // has already put the saved id (or the newest live one) in
-            // activeSessionId when it still exists on the engine.
             val wantedId = retarget ?: _activeSessionId.value
-            // Zero when the view has not been laid out yet: the engine then
-            // keeps the shell's current size instead of forcing 80x24 onto a
-            // running program. The view sends the real size as soon as it is
-            // measured, which resizes the pty and repaints a full-screen app.
-            val (cols, rows) = pendingSize ?: (0 to 0)
+            // The view usually has a real size by now. A placeholder is only a
+            // fallback for the first frame before Android measures the view.
+            val (cols, rows) = pendingSize ?: (80 to 24)
             _detail.value = "opening terminal stream"
-            // Completed once the stream goes away: true when the shell ended on
-            // its own (exit or error frame), false when the link dropped. That
-            // is the difference between "show the result" and "dial again".
+            val ticket = try {
+                withTimeoutOrNull(8_000) { history.terminalTicket() }
+            } catch (t: Throwable) {
+                Log.w(TAG, "terminal ticket failed", t)
+                null
+            }
+            if (ticket.isNullOrBlank()) {
+                _detail.value = "could not get a terminal ticket"
+                delay(backoff)
+                backoff = minOf(backoff * 2, 10_000L)
+                continue
+            }
+
+            val opened = CompletableDeferred<Boolean>()
             val ended = CompletableDeferred<Boolean>()
-            // Completed by any control frame; dial() only waits for it to
-            // tell "the engine answered" from "the open was swallowed".
-            val readyFrame = CompletableDeferred<Unit>()
-            var mySid = -2
-            val stream = object : TermStream {
-                // A stream that is no longer the current one must not touch
-                // shared state; its close callback can arrive after the next
-                // dial has already begun. Before openTerminal has returned,
-                // sid is still null and mySid is still -2: events that arrive
-                // in that window belong to this stream, not to a stale one.
-                private fun stale(): Boolean {
-                    val current = sid ?: return mySid != -2
-                    return current != mySid
+            val readySeen = AtomicBoolean(false)
+            val token = connection.incrementAndGet()
+            val listener = object : WebSocketListener() {
+                private fun stale(): Boolean = token != connection.get()
+
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (stale()) return
+                    _detail.value = "connected; waiting for the shell"
                 }
 
-                override fun onText(json: String) {
+                override fun onMessage(webSocket: WebSocket, text: String) {
                     if (stale()) return
-                    when (val ev = parseEvent(json)) {
-                        is TermEvent.Exit -> {
-                            // The shell finished: an outcome to show, not
-                            // something to retry, so dial() stops here.
-                            _state.value = TermState.ENDED
-                            _events.trySend(ev)
-                            readyFrame.complete(Unit)
-                            ended.complete(true)
-                        }
-
-                        is TermEvent.Failed -> {
-                            _state.value = TermState.ENDED
-                            _events.trySend(ev)
-                            readyFrame.complete(Unit)
-                            ended.complete(true)
-                        }
-
+                    when (val ev = parseEvent(text)) {
                         is TermEvent.Ready -> {
-                            readyFrame.complete(Unit)
+                            readySeen.set(true)
+                            opened.complete(true)
                             if (ev.id.isNotBlank()) {
                                 // Synchronously, so a retry inside dial() and
-                                // the tabs see the id before the DataStore
-                                // write completes.
+                                // the tabs see the id before the DataStore write.
                                 retarget = ev.id
                                 _activeSessionId.value = ev.id
+                                _sessions.value = (_sessions.value + ev.id).distinct()
+                                if (ev.pid > 0) {
+                                    _sessionPids.value = _sessionPids.value + (ev.id to ev.pid)
+                                }
                                 scope.launch {
                                     settings.saveTerminalSessionId(ev.id)
                                     settings.addTerminalSessionId(ev.id)
                                     if (ev.pid > 0) settings.saveTerminalSessionPid(ev.id, ev.pid)
                                     _sessions.value = settings.currentTerminalSessionIds()
                                     _sessionPids.value = settings.currentTerminalSessionPids()
-                                }
-                            } else if (ev.pid > 0) {
-                                // A ready frame without an id cannot happen on
-                                // the relay path; keep the pid for the active
-                                // tab anyway rather than dropping the identity.
-                                val id = _activeSessionId.value
-                                if (id.isNotBlank()) {
-                                    _sessionPids.value = _sessionPids.value + (id to ev.pid)
                                 }
                             }
                             _state.value = TermState.OPEN
@@ -691,97 +633,135 @@ class TerminalSocket(
                             _events.trySend(ev)
                         }
 
+                        is TermEvent.Exit -> {
+                            _state.value = TermState.ENDED
+                            _events.trySend(ev)
+                            opened.complete(true)
+                            ended.complete(true)
+                        }
+
+                        is TermEvent.Failed -> {
+                            _state.value = TermState.ENDED
+                            _events.trySend(ev)
+                            opened.complete(true)
+                            ended.complete(true)
+                        }
+
                         // An unreadable control frame is not worth ending a
                         // working shell over; the bytes keep flowing either way.
-                        null -> Log.w(TAG, "unreadable control frame: ${json.take(120)}")
+                        null -> Log.w(TAG, "unreadable control frame: ${text.take(120)}")
                     }
                 }
 
-                override fun onBytes(bytes: ByteArray) {
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     if (stale()) return
-                    _output.trySend(bytes)
+                    _output.trySend(bytes.toByteArray())
                 }
 
-                override fun onClosed() {
-                    readyFrame.complete(Unit)
-                    ended.complete(false)
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(1000, null)
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     if (stale()) return
-                    sid = null
+                    if (readySeen.get()) {
+                        ended.complete(false)
+                    } else {
+                        opened.complete(false)
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (stale()) return
+                    Log.w(TAG, "terminal socket failed: ${t.message}", t)
+                    _detail.value = "connection failed: ${t.message.orEmpty()}"
+                    if (readySeen.get()) {
+                        ended.complete(false)
+                    } else {
+                        opened.complete(false)
+                    }
                 }
             }
-            val opened = r.openTerminal(wantedId, cols, rows, stream)
-            if (opened == null) {
-                _detail.value = "could not open a terminal stream"
+
+            val url = buildString {
+                append(base)
+                append("?ticket=")
+                append(URLEncoder.encode(ticket, "UTF-8"))
+                if (wantedId.isNotBlank()) {
+                    append("&id=")
+                    append(URLEncoder.encode(wantedId, "UTF-8"))
+                }
+                append("&cols=").append(cols)
+                append("&rows=").append(rows)
+            }
+            val ws = try {
+                client.newWebSocket(Request.Builder().url(url).build(), listener)
+            } catch (t: Throwable) {
+                Log.w(TAG, "could not open terminal socket", t)
+                _detail.value = "invalid terminal address"
                 delay(backoff)
                 backoff = minOf(backoff * 2, 10_000L)
                 continue
             }
-            mySid = opened
-            sid = opened
-            backoff = RETRY_MS
-            // Still CONNECTING, not OPEN: the frame has been written but the
-            // engine has not named the shell yet. Claiming OPEN here made the
-            // header lose both "connecting" and the ready details for up to
-            // READY_TIMEOUT, and showed a terminal as attached when the open
-            // had in fact been swallowed.
-            // No stream id here: it is an implementation detail that changes on
-            // every attach, and the ready frame (above) already names the shell
-            // and its directory. Printing it made a healthy terminal look like
-            // it was counting attempts every time a tab was tapped.
+            socket = ws
 
-            // A stream the engine never answers is dead even though the relay
-            // socket is up: the open frame can be swallowed by a stale engine-
-            // side stream id (the phone starts its ids over when its process
-            // restarts). Dial again with a new id rather than waiting forever.
-            if (withTimeoutOrNull(READY_TIMEOUT) { readyFrame.await() } == null) {
-                if (sid == opened) {
-                    closeStream(opened)
-                    sid = null
-                }
-                if (closing) return
-                _state.value = TermState.CONNECTING
-                _error.value = 0
+            // The engine answers an upgrade with ready (or an error frame) at
+            // once. A silent socket is a dead tunnel, not a slow shell.
+            val answered = withTimeoutOrNull(READY_TIMEOUT) { opened.await() }
+            if (answered == null) {
                 _detail.value = "no answer from the engine; redialing"
-                // Only replace the socket when the link itself is not up. While
-                // the relay is ONLINE the engine answered the presence frame, so
-                // a swallowed open is a stream id the engine no longer knows: a
-                // new id on the same socket is enough, and tearing the socket
-                // down would drop a chat turn that is streaming on it for a
-                // terminal that never attached. When the state is not ONLINE
-                // the socket may point at a tunnel edge that died with the old
-                // engine, and redialing the stream alone would lose the open
-                // frame forever.
-                if (r.state.value != ConnState.ONLINE) r.reconnect()
+                if (socket === ws) {
+                    connection.incrementAndGet()
+                    socket = null
+                }
+                ws.cancel()
                 delay(RETRY_MS)
                 continue
             }
-            // The view can be laid out while openTerminal() is in flight. Its
-            // resize is stored but cannot be sent yet (sid is not assigned),
-            // so the open frame carried the size from before the race. Now that
-            // the stream is up, send whatever the view last measured. Without
-            // this the pty stays at 80x24 under a much taller view, and a
-            // full-screen program paints only the top of the screen.
+            if (!answered) {
+                // The handshake failed or the socket closed before ready. It
+                // has already reported why; wait a little longer each time.
+                if (socket === ws) socket = null
+                ws.cancel()
+                delay(backoff)
+                backoff = minOf(backoff * 2, 10_000L)
+                continue
+            }
+
+            backoff = RETRY_MS
+            // The view can be laid out while the socket handshake is in
+            // flight. Its resize was stored but could not be sent before the
+            // ready frame; now that the shell exists, send the latest size so
+            // the pty is not stuck at the size measured a frame earlier.
             sizeToResend(pendingSize, cols, rows)?.let { (latestCols, latestRows) ->
-                r.termJSON(opened, resizeFrame(latestCols, latestRows))
+                ws.send(resizeFrame(latestCols, latestRows))
             }
             val shellEnded = ended.await()
-            if (sid == opened) sid = null
+            if (socket === ws) {
+                // The shell's exit frame does not itself close the WebSocket.
+                // Drop it here instead of leaving an idle socket behind the
+                // "session ended" screen.
+                connection.incrementAndGet()
+                socket = null
+                ws.close(1000, "shell ended")
+            }
             if (closing) return
             if (shellEnded) return
             // The link dropped under a window that is still open — the app was
-            // backgrounded, the engine moved, Wi-Fi changed. Reconnect instead of
-            // leaving the panel on a dead connection.
+            // backgrounded, the engine moved, Wi-Fi changed. Reconnect instead
+            // of leaving the panel on a dead connection.
             _state.value = TermState.CONNECTING
             _error.value = 0
+            _detail.value = "disconnected; reconnecting"
             delay(RETRY_MS)
         }
     }
 
     companion object {
         /**
-         * The direct-terminal address of the pre-relay engine. The app no longer
-         * dials it, but the mapping is still what a local engine run publishes,
-         * and the panel's status line shows it.
+         * Maps an HTTP(S) daemon address to the dedicated terminal WebSocket.
+         * The old `/ws` room URL is accepted too, so starting points that still
+         * hand one over keep working.
          */
         fun terminalUrlFor(wsUrl: String): String {
             val clean = wsUrl.trim().trimEnd('/')
@@ -801,8 +781,8 @@ class TerminalSocket(
 
 /**
  * The size the view measured after the open frame was already sent. A layout
- * can finish while openTerminal() is in flight; resize() stores that size but
- * cannot send it until the stream has an id.
+ * can finish while the socket is being opened; resize() stores that size but
+ * cannot send it until the stream is up.
  */
 internal fun sizeToResend(
     pending: Pair<Int, Int>?,
@@ -812,44 +792,35 @@ internal fun sizeToResend(
     cols > 0 && rows > 0 && (cols != sentCols || rows != sentRows)
 }
 
-private val controlMoshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-private val controlAdapter = controlMoshi.adapter(ControlFrame::class.java)
-
 /** Parses one control frame; null when it is not one we know. */
 internal fun parseEvent(text: String): TermEvent? {
     val f = try {
-        controlAdapter.fromJson(text)
+        JSONObject(text)
     } catch (_: Exception) {
-        null
-    } ?: return null
-    return when (f.type) {
-        "ready" -> TermEvent.Ready(f.shell.orEmpty(), f.cwd.orEmpty(), f.cols ?: 0, f.rows ?: 0, f.id.orEmpty(), f.pid ?: 0)
-        "exit" -> TermEvent.Exit(f.code ?: 0)
-        "error" -> TermEvent.Failed(f.error.orEmpty())
+        return null
+    }
+    return when (f.optString("type")) {
+        "ready" -> TermEvent.Ready(
+            shell = f.optString("shell"),
+            cwd = f.optString("cwd"),
+            cols = f.optInt("cols", 0),
+            rows = f.optInt("rows", 0),
+            id = f.optString("id"),
+            pid = f.optInt("pid", 0),
+        )
+        "exit" -> TermEvent.Exit(f.optInt("code", 0))
+        "error" -> TermEvent.Failed(f.optString("error"))
         else -> null
     }
 }
 
-/**
- * The engine's text frames, §3 of the engine spec. Every field is nullable with
- * the key possibly absent, so one reader covers all three frame types and an
- * unknown field is simply ignored.
- */
-internal data class ControlFrame(
-    val type: String?,
-    val shell: String?,
-    val cwd: String?,
-    val cols: Int?,
-    val rows: Int?,
-    val code: Int?,
-    val error: String?,
-    val id: String?,
-    val pid: Int?,
-)
-
 /** `{"type":"resize","cols":100,"rows":30}` — both sizes are always sent. */
-internal data class ResizeFrame(
-    val type: String,
-    val cols: Int,
-    val rows: Int,
-)
+internal fun resizeFrame(cols: Int, rows: Int): String =
+    JSONObject().put("type", "resize").put("cols", cols).put("rows", rows).toString()
+
+/**
+ * Whether returning to the foreground should rebuild an existing stream.
+ * Shared with the panel's lifecycle handling.
+ */
+internal fun shouldReattachAfterBackground(state: TermState, wanted: Boolean, awayMs: Long): Boolean =
+    wanted && state == TermState.OPEN && awayMs >= REATTACH_AFTER_BACKGROUND_MS
