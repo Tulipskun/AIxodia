@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -273,6 +274,15 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
 
+    // Back closes the drawer before it closes the terminal window. Compose's
+    // BackHandler callbacks run newest-first, so this one is layered above the
+    // chat screen's "leave terminal" handler.
+    BackHandler(
+        enabled = drawerState.isOpen || drawerState.targetValue != DrawerValue.Closed,
+    ) {
+        drawerScope.launch { drawerState.close() }
+    }
+
     val restart = {
         ended = null
         ready = null
@@ -298,10 +308,11 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     // opens it.
     ModalNavigationDrawer(
         drawerState = drawerState,
-        // The terminal owns the gesture. It locks the drag to one axis: vertical
-        // scrolls the shell, horizontal left-to-right opens this drawer. Letting
-        // the drawer also watch for drags is what made the two fight.
-        gesturesEnabled = false,
+        // The terminal owns the gesture while the drawer is closed: a
+        // left-to-right swipe opens it. Once it is open, let the drawer own its
+        // own gestures again so the scrim can be tapped and a swipe can dismiss
+        // it; there is no terminal drag to fight with at that point.
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = Ink,
