@@ -124,6 +124,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val ctrlOn = remember { mutableStateOf(false) }
     val altOn = remember { mutableStateOf(false) }
     val atBottom = remember { mutableStateOf(true) }
+    val selecting = remember { mutableStateOf(false) }
 
     val emulator = remember {
         val out = object : TerminalOutput {
@@ -308,11 +309,11 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     // opens it.
     ModalNavigationDrawer(
         drawerState = drawerState,
-        // The terminal owns the gesture while the drawer is closed: a
-        // left-to-right swipe opens it. Once it is open, let the drawer own its
-        // own gestures again so the scrim can be tapped and a swipe can dismiss
-        // it; there is no terminal drag to fight with at that point.
-        gesturesEnabled = drawerState.isOpen,
+        // The drawer itself owns the horizontal drag, exactly as it does on the
+        // chat screen: the menu follows the finger and can be dragged back.
+        // Vertical drags still fall through to the terminal. While text is
+        // selected the drawer steps aside so dragging a selection stays local.
+        gesturesEnabled = drawerState.isOpen || !selecting.value,
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = Ink,
@@ -362,7 +363,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                         inputSink = { socket.send(it) }
                         onResize = { cols, rows -> socket.resize(cols, rows) }
                         onScrollChanged = { atBottom.value = it }
-                        onSwipeRight = { drawerScope.launch { drawerState.open() } }
+                        onSelectionChanged = { selecting.value = it }
                         onModsConsumed = {
                             // The view has spent its latch; keep the chips in step.
                             ctrlOn.value = false

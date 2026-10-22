@@ -69,10 +69,11 @@ class TerminalView @JvmOverloads constructor(
     var onScrollChanged: ((atBottom: Boolean) -> Unit)? = null
 
     /**
-     * Called once for a deliberately horizontal, left-to-right drag. Vertical
-     * drags stay inside the terminal; the two directions never both fire.
+     * Called when text selection starts or ends. While a selection is live the
+     * drawer must stop watching horizontal drags, or dragging a selection
+     * handle would slide the menu open instead.
      */
-    var onSwipeRight: (() -> Unit)? = null
+    var onSelectionChanged: ((selecting: Boolean) -> Unit)? = null
 
     /** Called after a latched modifier is spent, so the key row can un-light. */
     var onModsConsumed: (() -> Unit)? = null
@@ -127,12 +128,6 @@ class TerminalView @JvmOverloads constructor(
     private var downTime = 0L
     private var dragging = false
     private var wheelAccum = 0f
-
-    // A drag is assigned to one axis at the first touch slop and stays there.
-    // That is what keeps a vertical scroll from also opening the drawer.
-    private var dragAxisLocked = false
-    private var horizontalDrag = false
-    private var swipeRightSent = false
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
@@ -563,11 +558,17 @@ class TerminalView @JvmOverloads constructor(
         selAnchorCol = from
         selCursorRow = row
         selCursorCol = to
-        selecting = true
+        setSelecting(true)
         selectingDrag = false
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         startSelectionMode()
         invalidate()
+    }
+
+    private fun setSelecting(value: Boolean) {
+        if (selecting == value) return
+        selecting = value
+        onSelectionChanged?.invoke(value)
     }
 
     private fun isWordCell(row: TerminalRow, col: Int): Boolean {
@@ -597,7 +598,7 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator ?: return
         val buffer = em.buffer
         if (buffer.lines.isEmpty()) return
-        selecting = true
+        setSelecting(true)
         selectingDrag = false
         selAnchorRow = 0
         selAnchorCol = 0
@@ -610,7 +611,7 @@ class TerminalView @JvmOverloads constructor(
 
     private fun clearSelection() {
         if (!selecting) return
-        selecting = false
+        setSelecting(false)
         invalidate()
         selectionMode?.finish()
         selectionMode = null
@@ -692,7 +693,7 @@ class TerminalView @JvmOverloads constructor(
 
             override fun onDestroyActionMode(mode: ActionMode) {
                 if (!selecting) return
-                selecting = false
+                setSelecting(false)
                 selectionMode = null
                 invalidate()
             }
@@ -742,9 +743,6 @@ class TerminalView @JvmOverloads constructor(
                 downX = event.x
                 downTime = event.eventTime
                 dragging = false
-                dragAxisLocked = false
-                horizontalDrag = false
-                swipeRightSent = false
                 wheelAccum = 0f
                 velocityTracker.clear()
                 velocityTracker.addMovement(event)
@@ -756,9 +754,6 @@ class TerminalView @JvmOverloads constructor(
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger is always a scroll.
                 removeCallbacks(longPress)
-                dragAxisLocked = true
-                horizontalDrag = false
-                swipeRightSent = true
                 lastTouchY = event.y
                 return true
             }
@@ -775,29 +770,13 @@ class TerminalView @JvmOverloads constructor(
                 }
                 velocityTracker.addMovement(event)
                 val dx = event.x - downX
-                val totalDy = event.y - downY
-                // Decide the axis once. After this point the gesture is either
-                // a terminal scroll or a drawer swipe — never both.
-                if (!dragAxisLocked &&
-                    (kotlin.math.abs(totalDy) > touchSlop || kotlin.math.abs(dx) > touchSlop)
-                ) {
-                    dragAxisLocked = true
-                    horizontalDrag = kotlin.math.abs(dx) > kotlin.math.abs(totalDy) * 1.25f
-                    dragging = true
-                    removeCallbacks(longPress)
-                }
-                if (horizontalDrag) {
-                    // Left-to-right only, with a little extra travel so a
-                    // mostly-vertical flick cannot open the drawer.
-                    if (!swipeRightSent && dx > touchSlop * 2f) {
-                        swipeRightSent = true
-                        onSwipeRight?.invoke()
-                    }
-                    return true
-                }
                 val dy = lastTouchY - event.y
-                if (kotlin.math.abs(event.y - downY) > touchSlop ||
-                    kotlin.math.abs(event.x - downX) > touchSlop
+                // The drawer watches horizontal drags above this view; a
+                // vertical drag belongs to the terminal. Once the finger has
+                // moved past the slop, it is no longer a long press.
+                if (!dragging &&
+                    (kotlin.math.abs(event.y - downY) > touchSlop ||
+                        kotlin.math.abs(dx) > touchSlop)
                 ) {
                     dragging = true
                     removeCallbacks(longPress)
@@ -813,11 +792,6 @@ class TerminalView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
-                if (horizontalDrag) {
-                    dragAxisLocked = false
-                    horizontalDrag = false
-                    return true
-                }
                 velocityTracker.addMovement(event)
                 if (selecting) {
                     // The finger has left the screen; the selection stays put
@@ -851,8 +825,6 @@ class TerminalView @JvmOverloads constructor(
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
                 dragging = false
-                dragAxisLocked = false
-                horizontalDrag = false
                 return true
             }
         }
@@ -1025,7 +997,7 @@ class TerminalView @JvmOverloads constructor(
         removeCallbacks(pendingResize)
         removeCallbacks(longPress)
         removeCallbacks(restoreKeyboard)
-        selecting = false
+        setSelecting(false)
         selectionMode = null
         velocityTracker.recycle()
     }
