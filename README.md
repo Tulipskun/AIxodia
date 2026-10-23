@@ -8,7 +8,7 @@ the daemon's own row in `system_state`, which says where that tunnel is. There
 is no Cloudflare Worker in this project (D-011).
 
 - **Chat is a run**: `POST /v1/runs` starts a turn and returns immediately; its events arrive over SSE (`/v1/runs/{id}/events?after=seq`), numbered and replayable. Closing the app does not stop the agent, and reopening resumes from the last applied seq. `RunSocket` is the transport.
-- **Terminal is native and its own WebSocket**: the app's own `TerminalEmulator` draws every cell in `TerminalView` and connects to `/terminal` with a single-use 90-second ticket. There is no JavaScript terminal or external terminal library. Chat uses its own transport, so terminal bytes and HTTP rpc calls never share its socket. tmux keeps shells alive across engine restarts.
+- **Terminal is native and its own WebSocket**: the app's own `TerminalEmulator` draws every cell in `TerminalView`, and every open tab keeps its own `/terminal` socket with a single-use 90-second ticket. There is no JavaScript terminal or external terminal library. Chat uses its own transport, so terminal bytes and HTTP rpc calls never share its socket. tmux keeps shells alive across engine restarts.
 - **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers.
 - **Daemon discovery from D1**: `data/remote/D1Api.kt` runs one `SELECT` against `system_state` (`daemon/url`, `daemon/version`, `daemon/heartbeat`) with the operator's Cloudflare API token. That is how the phone learns the current quick-tunnel URL and whether the daemon is alive without asking anyone.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
@@ -63,9 +63,9 @@ One credential, three paths:
 - **HTTP over the tunnel** — history paging, session create/rename/delete, the
   provider catalogue, provider health, per-chat model pins, run control and
   terminal tickets (`HistoryApi`).
-- **Terminal WebSocket** — a dedicated `/terminal` socket opened by the native
-  terminal, authenticated with a short-lived ticket rather than the long-lived
-  API token.
+- **Terminal WebSocket** — one dedicated `/terminal` socket per open tab,
+  opened by the native terminal and authenticated with a short-lived ticket
+  rather than the long-lived API token.
 - **D1 REST** — only discovery: the daemon's tunnel URL, version and heartbeat
   (`D1Api.node()`). Nothing the phone edits lives in D1.
 

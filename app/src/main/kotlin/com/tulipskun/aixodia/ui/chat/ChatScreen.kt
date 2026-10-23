@@ -220,9 +220,9 @@ fun ChatScreen(
     // shell in a letterbox. It needs no session and no view model: it talks to
     // the machine, not to the chat.
     if (showTerminal) {
-        // The native terminal owns one dedicated socket for the life of this
-        // branch. Leaving the window only detaches; the shell stays on the
-        // engine for a later reattach, exactly as the engine's tmux session is.
+        // The native terminal owns one socket per open tab for the life of
+        // this branch. Leaving the window only detaches; the shells stay on
+        // the engine for a later reattach, exactly as their tmux sessions are.
         val terminal = remember(settings, history) { TerminalSocket(settings, history) }
         TerminalWindow(
             socket = terminal,

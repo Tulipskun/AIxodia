@@ -218,6 +218,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun setEmulator(emulator: TerminalEmulator) {
+        if (this.emulator !== emulator) clearSelection()
         this.emulator = emulator
         resizeToView()
         invalidate()

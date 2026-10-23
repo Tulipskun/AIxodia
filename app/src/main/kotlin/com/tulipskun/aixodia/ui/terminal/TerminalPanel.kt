@@ -93,7 +93,9 @@ import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -112,8 +114,9 @@ private val Danger = Color(0xFFFF8A8A)
  *
  * The rendering and the emulation are the app's own — a native [TerminalView]
  * drawing a [TerminalEmulator] — so a finger is a mouse click, a key is a byte,
- * and nothing stands between the socket and the screen. The window owns the
- * connection: it dials when it appears and hangs up when it goes away.
+ * and nothing stands between the socket and the screen. Every tab owns its own
+ * connection and emulator: switching tabs never redials, and all of them hang
+ * up together when the window goes away.
  *
  * The shell is the engine's, on the engine's host — this is the phone looking at
  * that machine, not a shell on the phone.
@@ -124,6 +127,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val errorRes by socket.error.collectAsStateWithLifecycle()
     val detail by socket.detail.collectAsStateWithLifecycle()
     val activeSessionId by socket.activeSessionId.collectAsStateWithLifecycle()
+    val sessions by socket.sessions.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var ready by remember { mutableStateOf<TermEvent.Ready?>(null) }
@@ -138,18 +142,28 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val selecting = remember { mutableStateOf(false) }
     val verticalDrag = remember { mutableStateOf(false) }
 
-    val emulator = remember {
-        val out = object : TerminalOutput {
-            // Anything the emulator owes the shell — a device-status reply, a
-            // mouse report — goes back down the same socket.
+    // One emulator per tab, not one for the window. A tab keeps receiving its
+    // shell's bytes while another tab is on screen, so switching only swaps
+    // which grid the view draws — no redial, no replay, no blank page.
+    val emulators = remember { mutableMapOf<String, TerminalEmulator>() }
+    val activeEmulator = remember { mutableStateOf<TerminalEmulator?>(null) }
+    // Every tab's grid matches the view, not just the visible one. An inactive
+    // full-screen program keeps painting while it is hidden, and those bytes
+    // must land on a grid of the same size as the one it will be shown on.
+    val gridSize = remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val output = remember {
+        object : TerminalOutput {
+            // Anything an emulator owes the shell — a device-status reply, a
+            // mouse report — goes back down the tab that is on screen.
             override fun write(bytes: ByteArray) {
                 socket.send(bytes)
             }
 
             override fun onScreenChanged() {
                 // write() runs on the main thread (the panel switches there
-                // before feeding the emulator), so invalidating directly saves
-                // a message-loop hop on every batch of output.
+                // before feeding an emulator), so invalidating directly saves
+                // a message-loop hop on every batch of output. An inactive tab
+                // repaints the same view; it is just a cheap invalidate.
                 terminalView.value?.onContentChanged()
             }
 
@@ -161,13 +175,22 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                 cm.setPrimaryClip(ClipData.newPlainText("terminal", text))
             }
         }
-        // A placeholder size until the view is measured and reports the real one.
-        val em = TerminalEmulator(80, 24, out)
-        // Reattaching to a session that is already running: put its modes back
-        // before the engine's replay lands, so a full-screen program keeps its
-        // alternate screen and a swipe stays a wheel.
-        socket.rememberedModes(socket.activeSessionId.value)?.let(em::applyModes)
-        em
+    }
+    // A placeholder size until the view is measured and reports the real one.
+    val placeholder = remember { TerminalEmulator(80, 24, output) }
+
+    fun emulatorFor(id: String): TerminalEmulator = emulators.getOrPut(id) {
+        if (id.isBlank()) {
+            placeholder
+        } else {
+            TerminalEmulator(80, 24, output).also { em ->
+                // Reattaching to a session that is already running: put its
+                // modes back before the engine's replay lands, so a full-screen
+                // program keeps its alternate screen and a swipe stays a wheel.
+                socket.rememberedModes(id)?.let(em::applyModes)
+                gridSize.value?.let { (cols, rows) -> em.resize(cols, rows) }
+            }
+        }
     }
 
     DisposableEffect(Unit) {
@@ -178,7 +201,10 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         socket.open()
         onDispose {
             // The shell outlives this window; its modes must outlive it too.
-            socket.rememberModes(socket.activeSessionId.value, emulator.snapshotModes())
+            val id = socket.activeSessionId.value
+            if (id.isNotBlank()) {
+                emulators[id]?.let { socket.rememberModes(id, it.snapshotModes()) }
+            }
             socket.close()
             TerminalLiveService.stop(context)
         }
@@ -194,7 +220,11 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> backgroundedAt = SystemClock.elapsedRealtime()
-                Lifecycle.Event.ON_RESUME -> {
+                // The user's boundary: while the app is in the background no
+                // tab keeps a socket. The shells stay on the engine; START
+                // revalidates the tab list and attaches them all again.
+                Lifecycle.Event.ON_STOP -> socket.onBackground()
+                Lifecycle.Event.ON_START -> {
                     val away = if (backgroundedAt > 0L) {
                         SystemClock.elapsedRealtime() - backgroundedAt
                     } else {
@@ -211,8 +241,11 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
-        socket.events.collect { ev ->
-            when (ev) {
+        socket.events.collect { tabEvent ->
+            // Inactive tabs keep running, but their exit banners belong to
+            // those tabs. Only the visible one drives this screen.
+            if (tabEvent.sessionId != socket.activeSessionId.value) return@collect
+            when (val ev = tabEvent.event) {
                 is TermEvent.Ready -> {
                     ready = ev
                     ended = null
@@ -238,49 +271,49 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         }
     }
 
-    // Output is raw bytes and can arrive in many small writes per keystroke.
-    // They are gathered for a few milliseconds and written once, on the main
-    // thread — the emulator and the view both belong to it.
-    LaunchedEffect(Unit) {
-        val pending = ByteArrayOutputStream(8 * 1024)
-        val lock = Any()
-        val arrived = Channel<Unit>(Channel.CONFLATED)
-        val pump = launch {
-            socket.output.collect { bytes ->
-                synchronized(lock) { pending.write(bytes) }
-                arrived.trySend(Unit)
-            }
-        }
-        try {
-            while (true) {
-                arrived.receive()
-                delay(4)
-                val batch = synchronized(lock) {
-                    val b = pending.toByteArray()
-                    pending.reset()
-                    b
+    // Every open tab drains its own output. A tab that is not on screen keeps
+    // its emulator current, so switching to it shows the live screen at once
+    // instead of reattaching and replaying. Output is raw bytes and can arrive
+    // in many small writes per keystroke, so each tab batches for a few
+    // milliseconds and writes on the main thread, where its emulator lives.
+    LaunchedEffect(sessions) {
+        sessions.forEach { id ->
+            launch {
+                var output = socket.outputFor(id)
+                // A tab is listed from the saved state before its link starts.
+                // Wait for the link rather than silently dropping its replay.
+                while (output == null) {
+                    delay(50)
+                    output = socket.outputFor(id)
                 }
-                if (batch.isEmpty()) continue
-                withContext(Dispatchers.Main) { emulator.write(batch) }
+                // Let the view report its real grid before building a new
+                // emulator, so the engine's first replay is laid out at the
+                // size it will actually be drawn at. A view that never measures
+                // still gets the placeholder after a second.
+                var waitedForSize = 0L
+                while (gridSize.value == null && waitedForSize < 1_000L) {
+                    delay(16)
+                    waitedForSize += 16
+                }
+                pumpTabOutput(output, emulatorFor(id))
             }
-        } finally {
-            pump.cancel()
         }
     }
 
-    // Remember the modes of the screen being left, and forget the previous run's
-    // exit banner. The new screen itself is cleared by the engine: every attach
-    // starts with RIS and the session's own modes, so resetting the emulator
-    // here would race the replay — when the replay arrived first, this reset ran
-    // second and wiped the screen it had just drawn.
-    val lastSession = remember { mutableStateOf<String?>(null) }
+    // Bind the visible tab. Switching is only an emulator swap: every tab's
+    // socket and grid stayed alive while it was in the background.
     LaunchedEffect(activeSessionId) {
-        if (lastSession.value != null && activeSessionId != lastSession.value) {
-            lastSession.value?.let { socket.rememberModes(it, emulator.snapshotModes()) }
-            ended = null
-            ready = null
+        val id = activeSessionId
+        ready = if (id.isBlank()) null else socket.tabReady(id)
+        ended = if (id.isBlank()) {
+            null
+        } else {
+            socket.lastEvent(id)?.takeIf { it !is TermEvent.Ready }
         }
-        if (activeSessionId.isNotBlank()) lastSession.value = activeSessionId
+        val em = if (id.isBlank()) placeholder else emulatorFor(id)
+        activeEmulator.value = em
+        terminalView.value?.setEmulator(em)
+        terminalView.value?.scrollToBottom()
     }
 
     val currentOnClose by rememberUpdatedState(onClose)
@@ -299,7 +332,6 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val restart = {
         ended = null
         ready = null
-        emulator.hardReset()
         terminalView.value?.scrollToBottom()
         terminalView.value?.keepSoftKeyboard()
         socket.newSession()
@@ -307,7 +339,6 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val closeSession = {
         ended = null
         ready = null
-        emulator.hardReset()
         terminalView.value?.scrollToBottom()
         terminalView.value?.keepSoftKeyboard()
         socket.closeSession()
@@ -374,9 +405,15 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     val middle = FrameLayout(ctx)
                     val view = TerminalView(ctx).apply {
                         setBackgroundColor(Ink.toArgb())
-                        setEmulator(emulator)
+                        setEmulator(activeEmulator.value ?: placeholder)
                         inputSink = { socket.send(it) }
-                        onResize = { cols, rows -> socket.resize(cols, rows) }
+                        onResize = { cols, rows ->
+                            gridSize.value = cols to rows
+                            socket.resize(cols, rows)
+                            emulators.values.toList().forEach { em ->
+                                if (em.columns != cols || em.rows != rows) em.resize(cols, rows)
+                            }
+                        }
                         onScrollChanged = { atBottom.value = it }
                         onSelectionChanged = { selecting.value = it }
                         onVerticalDrag = { verticalDrag.value = it }
@@ -502,6 +539,41 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                 terminalView.value?.requestFocus()
             }
         }
+    }
+}
+
+/**
+ * Feeds one tab's bytes into its emulator without making the shell wait for a
+ * frame. Every tab has its own pump, so a busy background tab cannot add
+ * latency to the one on screen.
+ */
+private suspend fun pumpTabOutput(
+    output: Flow<ByteArray>,
+    emulator: TerminalEmulator,
+) = coroutineScope {
+    val pending = ByteArrayOutputStream(8 * 1024)
+    val lock = Any()
+    val arrived = Channel<Unit>(Channel.CONFLATED)
+    val pump = launch {
+        output.collect { bytes ->
+            synchronized(lock) { pending.write(bytes) }
+            arrived.trySend(Unit)
+        }
+    }
+    try {
+        while (true) {
+            arrived.receive()
+            delay(4)
+            val batch = synchronized(lock) {
+                val b = pending.toByteArray()
+                pending.reset()
+                b
+            }
+            if (batch.isEmpty()) continue
+            withContext(Dispatchers.Main) { emulator.write(batch) }
+        }
+    } finally {
+        pump.cancel()
     }
 }
 
