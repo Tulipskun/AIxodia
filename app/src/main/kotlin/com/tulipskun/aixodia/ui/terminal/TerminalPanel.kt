@@ -3,7 +3,6 @@ package com.tulipskun.aixodia.ui.terminal
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.os.SystemClock
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -85,6 +84,7 @@ import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.remote.TermEvent
 import com.tulipskun.aixodia.data.remote.TermState
 import com.tulipskun.aixodia.data.remote.TerminalSocket
+import com.tulipskun.aixodia.term.TerminalConnections
 import com.tulipskun.aixodia.term.TerminalEmulator
 import com.tulipskun.aixodia.term.TerminalLiveService
 import com.tulipskun.aixodia.term.TerminalOutput
@@ -194,9 +194,10 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     }
 
     DisposableEffect(Unit) {
-        // The process and this native socket have to stay alive while the
-        // screen is open, including with the display folded or the app behind
-        // the keyboard. The shell itself lives on the engine either way.
+        // The process and every tab's socket have to stay alive while the
+        // screen is open, including after switching to another app. The shell
+        // itself lives on the engine either way.
+        TerminalConnections.attach(socket)
         TerminalLiveService.start(context)
         socket.open()
         onDispose {
@@ -205,34 +206,28 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
             if (id.isNotBlank()) {
                 emulators[id]?.let { socket.rememberModes(id, it.snapshotModes()) }
             }
+            TerminalConnections.detach(socket)
             socket.close()
             TerminalLiveService.stop(context)
         }
     }
 
-    // A socket Android froze in the background can look OPEN while every byte
-    // after the freeze is gone. A long absence rebuilds it; a quick glance at a
-    // notification leaves the screen alone. The engine's replay (RIS, modes,
-    // ring) is exactly the recovery a fresh attach gives.
+    // Backgrounding is intentionally cheap: the foreground service keeps the
+    // process and every WebSocket alive, so START does not redial. It only
+    // stops the tab-list poll while the window is not visible and asks for one
+    // fresh list when the user comes back.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
-        var backgroundedAt = 0L
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE -> backgroundedAt = SystemClock.elapsedRealtime()
-                // The user's boundary: while the app is in the background no
-                // tab keeps a socket. The shells stay on the engine; START
-                // revalidates the tab list and attaches them all again.
-                Lifecycle.Event.ON_STOP -> socket.onBackground()
                 Lifecycle.Event.ON_START -> {
-                    val away = if (backgroundedAt > 0L) {
-                        SystemClock.elapsedRealtime() - backgroundedAt
-                    } else {
-                        0L
-                    }
-                    backgroundedAt = 0L
-                    socket.onForeground(away)
+                    // If the system stopped the service while the task was
+                    // still around, coming back restores the foreground
+                    // protection before any socket is touched.
+                    TerminalLiveService.start(context)
+                    socket.setAppVisible(true)
                 }
+                Lifecycle.Event.ON_STOP -> socket.setAppVisible(false)
                 else -> Unit
             }
         }

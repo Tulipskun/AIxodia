@@ -13,17 +13,6 @@ import org.junit.Test
 class TerminalSocketTest {
 
     @Test
-    fun aLongBackgroundReturnRebuildsAnOpenStream() {
-        assertTrue(shouldReattachAfterBackground(TermState.OPEN, wanted = true, awayMs = 60_000))
-        // A glance at a notification must not reset the screen.
-        assertEquals(false, shouldReattachAfterBackground(TermState.OPEN, wanted = true, awayMs = 2_000))
-        // A panel that is closed, ended or still dialing is not reattached here.
-        assertEquals(false, shouldReattachAfterBackground(TermState.CLOSED, wanted = false, awayMs = 60_000))
-        assertEquals(false, shouldReattachAfterBackground(TermState.ENDED, wanted = true, awayMs = 60_000))
-        assertEquals(false, shouldReattachAfterBackground(TermState.CONNECTING, wanted = true, awayMs = 60_000))
-    }
-
-    @Test
     fun terminalUrlKeepsTheTunnelAndSwapsThePath() {
         assertEquals(
             "wss://flat-clip.trycloudflare.com/terminal",

@@ -38,15 +38,6 @@ private const val TAG = "TerminalSocket"
 private const val RETRY_MS = 1_500L
 
 /**
- * How long the app may spend in the background before a still-"open" terminal
- * stream is treated as suspect. Android can freeze or drop the socket while
- * Doze keeps the process alive; the old listener then stays OPEN forever and
- * the screen never gets a replay. A quick app switch is left alone so a healthy
- * screen is not reset for a glance at a notification.
- */
-private const val REATTACH_AFTER_BACKGROUND_MS = 30_000L
-
-/**
  * How long a freshly opened socket may stay silent before it is treated as
  * dead. The engine answers an open with ready (or error) at once; no answer
  * means the tunnel or the engine did not deliver the upgrade, and dialing again
@@ -183,10 +174,10 @@ class TerminalSocket(
     @Volatile
     private var wanted = false
 
-    // True while Android has the app in the background. All links are paused
-    // then, and the next foreground revalidates the tab list before dialing.
+    // Whether the app is on screen. Backgrounding only stops the periodic tab
+    // list poll; the foreground-service-held WebSockets stay attached.
     @Volatile
-    private var paused = false
+    private var appVisible = true
 
     // Whether an empty tab list should start a fresh shell. Opening the window
     // (and losing every shell) does; closing the last tab on purpose does not,
@@ -227,7 +218,6 @@ class TerminalSocket(
     @Synchronized
     fun open() {
         wanted = true
-        paused = false
         autoNew = true
         // A window that is already dialing or up owns its links. This also makes
         // the initial open and the lifecycle's start callback harmless together.
@@ -248,7 +238,7 @@ class TerminalSocket(
             if (!wanted) return@launch
             syncSessions()
             if (!wanted) return@launch
-            reconcileLinks(restartAll = false)
+            reconcileLinks()
         }
     }
 
@@ -258,7 +248,7 @@ class TerminalSocket(
      * discovery has just moved the engine address.
      */
     fun reconnect() {
-        if (!wanted || paused) return
+        if (!wanted) return
         synchronized(this) {
             links.values.forEach { if (it.state.value != TermState.ENDED) it.reconnect() }
         }
@@ -271,67 +261,29 @@ class TerminalSocket(
      */
     @Synchronized
     fun refreshSessions() {
-        if (!wanted || paused) return
+        if (!wanted || !appVisible) return
         if (refreshJob?.isActive == true) return
         refreshJob = scope.launch {
             syncSessions()
-            if (!wanted || paused) return@launch
-            reconcileLinks(restartAll = false)
+            if (!wanted || !appVisible) return@launch
+            reconcileLinks()
         }
     }
 
     /**
-     * The app is no longer visible. Every stream is hung up — the shells stay
-     * on the engine — instead of leaving Android to freeze a socket that looks
-     * OPEN but no longer carries bytes. Coming back rebuilds them all.
+     * The activity came on or went off screen. Backgrounding must not hang up
+     * anything: the foreground service keeps the process and every tab's
+     * WebSocket alive, so returning to the app is instant. It only stops the
+     * five-second tab-list poll while nobody can see the list.
      */
-    @Synchronized
-    fun onBackground() {
-        if (!wanted || paused) return
-        paused = true
-        dialJob?.cancel()
-        refreshJob?.cancel()
-        refreshJob = null
-        links.values.forEach { it.pause() }
-        _state.value = TermState.CLOSED
-        _detail.value = "backgrounded"
-    }
-
-    /**
-     * Called when the activity comes back. After a background pause every tab
-     * is revalidated and reattached; if the app never actually went to the
-     * background, a long absence still rebuilds links that Android may have
-     * frozen in place.
-     */
-    @Synchronized
-    fun onForeground(awayMs: Long) {
-        if (!wanted) return
-        if (links.isEmpty()) {
-            // The user closed the last tab and is looking at the finished
-            // screen. Do not turn that into a new shell just by foregrounding.
-            if (!autoNew && _state.value == TermState.ENDED) return
-            open()
-            return
+    fun setAppVisible(visible: Boolean) {
+        appVisible = visible
+        if (!visible) {
+            refreshJob?.cancel()
+            refreshJob = null
+        } else if (wanted) {
+            refreshSessions()
         }
-        if (paused) {
-            paused = false
-            dialJob?.cancel()
-            _state.value = TermState.CONNECTING
-            dialJob = scope.launch {
-                syncSessions()
-                if (!wanted || paused) return@launch
-                reconcileLinks(restartAll = true)
-            }
-            return
-        }
-        if (awayMs >= REATTACH_AFTER_BACKGROUND_MS) {
-            links.values.forEach { link ->
-                if (shouldReattachAfterBackground(link.state.value, true, awayMs)) {
-                    link.reconnect()
-                }
-            }
-        }
-        refreshSessions()
     }
 
     /**
@@ -415,7 +367,6 @@ class TerminalSocket(
     @Synchronized
     fun close() {
         wanted = false
-        paused = false
         dialJob?.cancel()
         dialJob = null
         refreshJob?.cancel()
@@ -550,11 +501,11 @@ class TerminalSocket(
     /**
      * Brings the live links in line with [sessions]: stale sockets are hung up,
      * missing tabs are attached, and the visible tab is kept if it still
-     * exists. [restartAll] re-dials paused links after a background return.
+     * exists.
      */
     @Synchronized
-    private fun reconcileLinks(restartAll: Boolean) {
-        if (!wanted || paused) return
+    private fun reconcileLinks() {
+        if (!wanted) return
         val ids = _sessions.value
 
         // The engine no longer has these shells. Hang up the links; the shells
@@ -585,7 +536,7 @@ class TerminalSocket(
                 activate(link)
                 link.open()
             } else {
-                if (restartAll || pending.state.value == TermState.CLOSED) pending.open()
+                if (pending.state.value == TermState.CLOSED) pending.open()
                 if (activeLink == null) activate(pending)
             }
             return
@@ -595,7 +546,6 @@ class TerminalSocket(
             val link = links[id]
             when {
                 link == null -> createLink(id).open()
-                restartAll && link.state.value != TermState.ENDED -> link.open()
                 link.state.value == TermState.CLOSED -> link.open()
             }
         }
@@ -767,7 +717,7 @@ class TerminalSocket(
     private suspend fun dialLink(link: TabLink) {
         var backoff = RETRY_MS
         var waitedForSize = 0L
-        while (wanted && !paused && link.wanted && !link.closing) {
+        while (wanted && link.wanted && !link.closing) {
             // The view reports its real grid on its first layout, usually a
             // frame after open(). Let that land before the open frame is sent,
             // so a reattach does not briefly force the 80x24 placeholder onto
@@ -957,7 +907,7 @@ class TerminalSocket(
                 link.socket = null
                 ws.close(1000, "shell ended")
             }
-            if (wanted.not() || paused || !link.wanted || link.closing) return
+            if (wanted.not() || !link.wanted || link.closing) return
             if (shellEnded) return
             // The link dropped under a window that is still open — the app was
             // backgrounded, the engine moved, Wi-Fi changed. Reconnect instead
@@ -1113,10 +1063,3 @@ internal fun parseEvent(text: String): TermEvent? {
 /** `{"type":"resize","cols":100,"rows":30}` — both sizes are always sent. */
 internal fun resizeFrame(cols: Int, rows: Int): String =
     JSONObject().put("type", "resize").put("cols", cols).put("rows", rows).toString()
-
-/**
- * Whether returning to the foreground should rebuild an existing stream.
- * Shared with the panel's lifecycle handling.
- */
-internal fun shouldReattachAfterBackground(state: TermState, wanted: Boolean, awayMs: Long): Boolean =
-    wanted && state == TermState.OPEN && awayMs >= REATTACH_AFTER_BACKGROUND_MS
