@@ -75,6 +75,14 @@ class TerminalView @JvmOverloads constructor(
      */
     var onSelectionChanged: ((selecting: Boolean) -> Unit)? = null
 
+    /**
+     * Called when the current drag is locked to the vertical axis. The drawer
+     * must stop watching horizontal movement for the rest of that gesture:
+     * otherwise a little sideways drift halfway through a scroll hands the
+     * touch stream to the menu and the terminal stops moving under the finger.
+     */
+    var onVerticalDrag: ((vertical: Boolean) -> Unit)? = null
+
     /** Called after a latched modifier is spent, so the key row can un-light. */
     var onModsConsumed: (() -> Unit)? = null
 
@@ -128,6 +136,10 @@ class TerminalView @JvmOverloads constructor(
     private var downTime = 0L
     private var dragging = false
     private var wheelAccum = 0f
+    // A drag chooses one axis at the first touch slop and keeps it until the
+    // finger lifts. A vertical scroll must never become a drawer swipe midway.
+    private var dragAxisLocked = false
+    private var verticalDrag = false
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
@@ -743,6 +755,7 @@ class TerminalView @JvmOverloads constructor(
                 downX = event.x
                 downTime = event.eventTime
                 dragging = false
+                endDragAxis()
                 wheelAccum = 0f
                 velocityTracker.clear()
                 velocityTracker.addMovement(event)
@@ -754,6 +767,11 @@ class TerminalView @JvmOverloads constructor(
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger is always a scroll.
                 removeCallbacks(longPress)
+                dragAxisLocked = true
+                if (!verticalDrag) {
+                    verticalDrag = true
+                    onVerticalDrag?.invoke(true)
+                }
                 lastTouchY = event.y
                 return true
             }
@@ -770,28 +788,35 @@ class TerminalView @JvmOverloads constructor(
                 }
                 velocityTracker.addMovement(event)
                 val dx = event.x - downX
+                val totalDy = event.y - downY
                 val dy = lastTouchY - event.y
-                // The drawer watches horizontal drags above this view; a
-                // vertical drag belongs to the terminal. Once the finger has
-                // moved past the slop, it is no longer a long press.
-                if (!dragging &&
-                    (kotlin.math.abs(event.y - downY) > touchSlop ||
+                // Decide the axis once. Until the finger lifts, a vertical
+                // scroll stays a scroll even if it drifts sideways later; that
+                // drift used to hand the gesture to the drawer mid-scroll.
+                if (!dragAxisLocked &&
+                    (kotlin.math.abs(totalDy) > touchSlop ||
                         kotlin.math.abs(dx) > touchSlop)
                 ) {
+                    dragAxisLocked = true
+                    verticalDrag = kotlin.math.abs(totalDy) >= kotlin.math.abs(dx)
+                    if (verticalDrag) onVerticalDrag?.invoke(true)
+                }
+                if (!dragging && dragAxisLocked) {
                     dragging = true
                     removeCallbacks(longPress)
                 }
                 lastTouchY = event.y
-                if (wheelMode) {
+                if (wheelMode && verticalDrag) {
                     wheelAccum += dy
                     dispatchWheel(em, event)
                 }
-                // Not a wheel: a terminal page does not pan through history.
-                // The program owns the screen; drag does nothing.
+                // A horizontal drag belongs to the drawer. A terminal page
+                // does not pan through history; the program owns the screen.
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
+                endDragAxis()
                 velocityTracker.addMovement(event)
                 if (selecting) {
                     // The finger has left the screen; the selection stays put
@@ -825,10 +850,18 @@ class TerminalView @JvmOverloads constructor(
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
                 dragging = false
+                endDragAxis()
                 return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    /** Releases the gesture's axis lock and re-arms the drawer for the next one. */
+    private fun endDragAxis() {
+        if (verticalDrag) onVerticalDrag?.invoke(false)
+        dragAxisLocked = false
+        verticalDrag = false
     }
 
     /** Hands accumulated vertical motion to the program as wheel notches. */
