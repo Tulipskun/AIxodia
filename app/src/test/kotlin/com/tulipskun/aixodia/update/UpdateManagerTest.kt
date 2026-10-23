@@ -21,11 +21,4 @@ class UpdateManagerTest {
         assertFalse(UpdateManager.rollingNeedsUpdate(-1L, 1))
         assertFalse(UpdateManager.rollingNeedsUpdate(0L, 1))
     }
-
-    @Test
-    fun legacyVersionedTagsStillCompare() {
-        assertTrue(UpdateManager.legacyNeedsUpdate("v0.1.461", "v0.1.460"))
-        assertFalse(UpdateManager.legacyNeedsUpdate("v0.1.460", "v0.1.460"))
-        assertFalse(UpdateManager.legacyNeedsUpdate("latest", "v0.1.460"))
-    }
 }

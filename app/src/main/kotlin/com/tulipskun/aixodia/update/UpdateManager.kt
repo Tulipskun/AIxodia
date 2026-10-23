@@ -41,11 +41,10 @@ object UpdateManager {
     /**
      * Returns an Update when the published build is newer than this one.
      *
-     * The release tag is now the rolling `latest`, so it carries no version.
-     * The release script publishes [VERSION_ASSET] beside the APK; its
-     * versionCode is the same value burned into the APK, which makes the
-     * comparison exact. Older v0.1.N releases have no metadata and still fall
-     * back to the tag comparison.
+     * The release tag is the rolling `latest`, so it carries no version. The
+     * release script publishes [VERSION_ASSET] beside the APK; its versionCode
+     * is the same value burned into the APK, which makes the comparison exact.
+     * A latest release without that asset is incomplete, not an update.
      */
     suspend fun check(): Update? = withContext(Dispatchers.IO) {
         val o = getJson("https://api.github.com/repos/$REPO/releases/latest")
@@ -68,26 +67,19 @@ object UpdateManager {
                 }
             }
         }
-        if (apkUrl.isEmpty()) return@withContext null
+        if (apkUrl.isEmpty() || metadataUrl.isEmpty()) return@withContext null
 
-        if (metadataUrl.isNotEmpty()) {
-            val meta = getJson(metadataUrl) ?: return@withContext null
-            val remoteCode = meta.optLong("versionCode", -1L)
-            if (!rollingNeedsUpdate(remoteCode, BuildConfig.VERSION_CODE)) {
-                return@withContext null
-            }
-            return@withContext Update(
-                tag = tag,
-                apkUrl = apkUrl,
-                size = apkSize,
-                versionName = meta.optString("versionName").trim(),
-            )
-        }
-
-        if (!legacyNeedsUpdate(tag, "v" + BuildConfig.VERSION_NAME)) {
+        val meta = getJson(metadataUrl) ?: return@withContext null
+        val remoteCode = meta.optLong("versionCode", -1L)
+        if (!rollingNeedsUpdate(remoteCode, BuildConfig.VERSION_CODE)) {
             return@withContext null
         }
-        Update(tag, apkUrl, apkSize)
+        Update(
+            tag = tag,
+            apkUrl = apkUrl,
+            size = apkSize,
+            versionName = meta.optString("versionName").trim(),
+        )
     }
 
     private fun getJson(url: String): JSONObject? {
@@ -145,10 +137,4 @@ object UpdateManager {
     /** A rolling release is newer only when its metadata versionCode is higher. */
     internal fun rollingNeedsUpdate(remoteCode: Long, currentCode: Int): Boolean =
         remoteCode > 0 && remoteCode > currentCode.toLong()
-
-    /** Legacy tag format v0.1.N — newer means larger N. */
-    internal fun legacyNeedsUpdate(latest: String, current: String): Boolean {
-        fun num(tag: String) = tag.trimStart('v').split(".").lastOrNull()?.toIntOrNull() ?: -1
-        return num(latest) > num(current)
-    }
 }
