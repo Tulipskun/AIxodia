@@ -24,6 +24,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
+import android.widget.Toast
 
 /**
  * How long the layout has to hold still before the grid and the shell are
@@ -44,6 +45,10 @@ private const val KEYBOARD_RESTORE_MS = 120L
 
 private const val MENU_COPY = 1
 private const val MENU_SELECT_ALL = 2
+
+private const val HANDLE_NONE = 0
+private const val HANDLE_START = 1
+private const val HANDLE_END = 2
 
 /**
  * Draws a [TerminalEmulator] and turns fingers and keys into bytes. Everything
@@ -143,19 +148,35 @@ class TerminalView @JvmOverloads constructor(
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
-    // Text selection: a long press anchors a selection and raises a floating
-    // action bar with Copy. The anchor (where the gesture began, usually the
-    // start of a word) stays put while the cursor follows the finger.
+    // Text selection: a long press selects a word and raises a floating action
+    // bar with Copy. Both ends stay where the word starts and ends; the two
+    // round handles below move one end each, the way text selection works in a
+    // browser. The endpoints are always ordered, so copying is one walk from
+    // the earlier cell to the later one.
     private val selectionPaint = Paint().apply {
         style = Paint.Style.FILL
         color = 0x664A90D9
     }
+    private val density = resources.displayMetrics.density
+    private val handleRadius = 8f * density
+    private val handleGap = 2f * density
+    private val handleTouchRadius = 24f * density
+    private val handleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = 0xFFFFFFFF.toInt()
+    }
+    private val handleStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+        color = 0xFF4A90D9.toInt()
+    }
     private var selecting = false
     private var selectingDrag = false
-    private var selAnchorRow = 0
-    private var selAnchorCol = 0
-    private var selCursorRow = 0
-    private var selCursorCol = 0
+    private var selectingHandle = HANDLE_NONE
+    private var selStartRow = 0
+    private var selStartCol = 0
+    private var selEndRow = 0
+    private var selEndCol = 0
     private var selectionMode: ActionMode? = null
 
     private val longPress = Runnable { beginSelection(downX, downY) }
@@ -504,53 +525,108 @@ class TerminalView @JvmOverloads constructor(
     // selection and copy
     // =======================================================================
 
-    /** The ordered selection: start row/col then end row/col, both inclusive. */
-    private fun orderedSelection(): IntArray {
-        val forward = selAnchorRow < selCursorRow ||
-            (selAnchorRow == selCursorRow && selAnchorCol <= selCursorCol)
-        return if (forward) {
-            intArrayOf(selAnchorRow, selAnchorCol, selCursorRow, selCursorCol)
-        } else {
-            intArrayOf(selCursorRow, selCursorCol, selAnchorRow, selAnchorCol)
-        }
+    private fun comparePositions(r1: Int, c1: Int, r2: Int, c2: Int): Int = when {
+        r1 < r2 -> -1
+        r1 > r2 -> 1
+        c1 < c2 -> -1
+        c1 > c2 -> 1
+        else -> 0
     }
 
+    /**
+     * Paint only the cells that actually contain text. A multi-row selection
+     * used to fill the whole terminal width from edge to edge, which made a
+     * copied line look like it included the empty right half of the screen.
+     */
     private fun drawSelection(canvas: Canvas, buffer: TerminalBuffer) {
         val count = buffer.lines.size
         if (count == 0) return
-        val s = orderedSelection()
-        val first = s[0].coerceIn(0, count - 1)
-        val last = s[2].coerceIn(0, count - 1)
+        val first = selStartRow.coerceIn(0, count - 1)
+        val last = selEndRow.coerceIn(0, count - 1)
         for (r in first..last) {
             val row = buffer.lines[r]
             if (row.columns == 0) continue
-            val from: Int
-            val to: Int
-            if (first == last) {
-                from = s[1].coerceIn(0, row.columns - 1)
-                to = s[3].coerceIn(0, row.columns - 1)
-            } else if (r == first) {
-                from = s[1].coerceIn(0, row.columns - 1)
-                to = row.columns - 1
-            } else if (r == last) {
-                from = 0
-                to = s[3].coerceIn(0, row.columns - 1)
-            } else {
-                from = 0
-                to = row.columns - 1
-            }
-            if (to < from) continue
+            val rawFrom = if (r == first) selStartCol else 0
+            val rawTo = if (r == last) selEndCol else row.columns - 1
+            val from = rawFrom.coerceIn(0, row.columns - 1)
+            val to = rawTo.coerceIn(0, row.columns - 1)
+            val textEnd = TerminalSelection.lastTextCol(row)
+            if (textEnd < from || to < from) continue
             canvas.drawRect(
                 from * cellWidth,
                 r * cellHeight,
-                (to + 1) * cellWidth,
+                (minOf(to, textEnd) + 1) * cellWidth,
                 (r + 1) * cellHeight,
                 selectionPaint,
             )
         }
+        drawSelectionHandles(canvas, buffer)
     }
 
-    /** Long press: select the word under the finger, or the cell if it is blank. */
+    /** Start and end handle centres, followed by the two selection boundaries. */
+    private fun handleGeometry(buffer: TerminalBuffer): FloatArray {
+        val count = buffer.lines.size
+        val first = selStartRow.coerceIn(0, count - 1)
+        val last = selEndRow.coerceIn(0, count - 1)
+        val minX = handleRadius
+        val maxX = (width - handleRadius).coerceAtLeast(minX)
+        val startX = (selStartCol * cellWidth - handleRadius * 0.45f).coerceIn(minX, maxX)
+        val endX = ((selEndCol + 1) * cellWidth + handleRadius * 0.45f).coerceIn(minX, maxX)
+        val startY = first * cellHeight
+        val endY = (last + 1) * cellHeight
+        val startCentreY = if (startY - handleRadius - handleGap >= 0f) {
+            startY - handleRadius - handleGap
+        } else {
+            startY + handleRadius + handleGap
+        }
+        val endCentreY = if (endY + handleRadius + handleGap <= height) {
+            endY + handleRadius + handleGap
+        } else {
+            endY - handleRadius - handleGap
+        }
+        return floatArrayOf(startX, startCentreY, endX, endCentreY, startY, endY)
+    }
+
+    private fun drawSelectionHandles(canvas: Canvas, buffer: TerminalBuffer) {
+        if (buffer.lines.isEmpty()) return
+        val g = handleGeometry(buffer)
+        // A short stem joins each round grip to the exact start or end cell.
+        canvas.drawLine(g[0], g[4], g[0], g[1], handleStrokePaint)
+        canvas.drawLine(g[2], g[5], g[2], g[3], handleStrokePaint)
+        canvas.drawCircle(g[0], g[1], handleRadius, handleFillPaint)
+        canvas.drawCircle(g[0], g[1], handleRadius, handleStrokePaint)
+        canvas.drawCircle(g[2], g[3], handleRadius, handleFillPaint)
+        canvas.drawCircle(g[2], g[3], handleRadius, handleStrokePaint)
+    }
+
+    /** Which selection handle, if any, is under the finger. */
+    private fun selectionHandleAt(x: Float, y: Float): Int {
+        val em = emulator ?: return HANDLE_NONE
+        if (em.buffer.lines.isEmpty()) return HANDLE_NONE
+        val g = handleGeometry(em.buffer)
+        val dsx = x - g[0]
+        val dsy = y - g[1]
+        val dex = x - g[2]
+        val dey = y - g[3]
+        val startDistance = dsx * dsx + dsy * dsy
+        val endDistance = dex * dex + dey * dey
+        val reach = handleTouchRadius * handleTouchRadius
+        // A one-cell selection puts the grips close together. Pick the nearer
+        // one instead of always preferring the start handle.
+        return when {
+            startDistance <= reach && endDistance <= reach ->
+                if (startDistance <= endDistance) HANDLE_START else HANDLE_END
+            startDistance <= reach -> HANDLE_START
+            endDistance <= reach -> HANDLE_END
+            else -> HANDLE_NONE
+        }
+    }
+
+    /**
+     * Long press: select the word under the finger. A press on the blank part
+     * of a line snaps to the nearest word on that line instead of selecting a
+     * lone blank cell; a blank line has nothing to select.
+     */
     private fun beginSelection(x: Float, y: Float) {
         val em = emulator ?: return
         val buffer = em.buffer
@@ -558,23 +634,38 @@ class TerminalView @JvmOverloads constructor(
         val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
         val line = buffer.lines[row]
         if (line.columns == 0) return
-        val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
+        var col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
+        if (!line.hasGlyph(col)) {
+            col = nearestGlyphCol(line, col)
+            if (col < 0) return
+        }
 
         var from = col
         var to = col
-        if (line.hasGlyph(col)) {
-            while (from > 0 && isWordCell(line, from - 1)) from--
-            while (to < line.columns - 1 && isWordCell(line, to + 1)) to++
-        }
-        selAnchorRow = row
-        selAnchorCol = from
-        selCursorRow = row
-        selCursorCol = to
+        while (from > 0 && isWordCell(line, from - 1)) from--
+        while (to < line.columns - 1 && isWordCell(line, to + 1)) to++
+        selStartRow = row
+        selStartCol = from
+        selEndRow = row
+        selEndCol = to
+        selectingHandle = HANDLE_NONE
         setSelecting(true)
         selectingDrag = false
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         startSelectionMode()
         invalidate()
+    }
+
+    private fun nearestGlyphCol(row: TerminalRow, col: Int): Int {
+        var left = col
+        while (left >= 0 && !row.hasGlyph(left)) left--
+        var right = col
+        while (right < row.columns && !row.hasGlyph(right)) right++
+        return when {
+            left >= 0 && (right >= row.columns || col - left <= right - col) -> left
+            right < row.columns -> right
+            else -> -1
+        }
     }
 
     private fun setSelecting(value: Boolean) {
@@ -589,7 +680,11 @@ class TerminalView @JvmOverloads constructor(
         return !Character.isWhitespace(cp)
     }
 
-    /** Drag: the cursor follows the finger; the anchor stays where the press began. */
+    /**
+     * Dragging after a long press only grows the word it started on. Moving
+     * back into the word must not shrink it: the handles exist for fine
+     * adjustments in both directions.
+     */
     private fun extendSelection(x: Float, y: Float) {
         val em = emulator ?: return
         val buffer = em.buffer
@@ -598,77 +693,125 @@ class TerminalView @JvmOverloads constructor(
         val line = buffer.lines[row]
         if (line.columns == 0) return
         val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
-        if (row == selCursorRow && col == selCursorCol) return
-        val rowChanged = row != selCursorRow
-        selCursorRow = row
-        selCursorCol = col
-        if (rowChanged) selectionMode?.invalidate()
+        var changed = false
+        if (comparePositions(row, col, selStartRow, selStartCol) < 0) {
+            selStartRow = row
+            selStartCol = col
+            changed = true
+        }
+        if (comparePositions(row, col, selEndRow, selEndCol) > 0) {
+            selEndRow = row
+            selEndCol = col
+            changed = true
+        }
+        if (changed) {
+            invalidate()
+            selectionMode?.invalidateContentRect()
+        }
+    }
+
+    /** Move one end of the selection; crossing the other end swaps the grips. */
+    private fun moveSelectionHandle(x: Float, y: Float) {
+        val em = emulator ?: return
+        val buffer = em.buffer
+        if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
+        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
+        val line = buffer.lines[row]
+        if (line.columns == 0) return
+        val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
+        when (selectingHandle) {
+            HANDLE_START -> {
+                if (comparePositions(row, col, selEndRow, selEndCol) > 0) {
+                    selStartRow = selEndRow
+                    selStartCol = selEndCol
+                    selEndRow = row
+                    selEndCol = col
+                    selectingHandle = HANDLE_END
+                } else {
+                    selStartRow = row
+                    selStartCol = col
+                }
+            }
+            HANDLE_END -> {
+                if (comparePositions(row, col, selStartRow, selStartCol) < 0) {
+                    selEndRow = selStartRow
+                    selEndCol = selStartCol
+                    selStartRow = row
+                    selStartCol = col
+                    selectingHandle = HANDLE_START
+                } else {
+                    selEndRow = row
+                    selEndCol = col
+                }
+            }
+            else -> return
+        }
         invalidate()
+        selectionMode?.invalidateContentRect()
     }
 
     private fun selectAll() {
         val em = emulator ?: return
         val buffer = em.buffer
-        if (buffer.lines.isEmpty()) return
+        val first = firstTextPosition(buffer) ?: return
+        val last = lastTextPosition(buffer) ?: return
         setSelecting(true)
         selectingDrag = false
-        selAnchorRow = 0
-        selAnchorCol = 0
-        selCursorRow = buffer.lines.size - 1
-        selCursorCol = buffer.lines.last().columns - 1
+        selectingHandle = HANDLE_NONE
+        selStartRow = first[0]
+        selStartCol = first[1]
+        selEndRow = last[0]
+        selEndCol = last[1]
         invalidate()
         startSelectionMode()
-        selectionMode?.invalidate()
+        selectionMode?.invalidateContentRect()
+    }
+
+    private fun firstTextPosition(buffer: TerminalBuffer): IntArray? {
+        for (r in buffer.lines.indices) {
+            val col = TerminalSelection.firstTextCol(buffer.lines[r])
+            if (col >= 0) return intArrayOf(r, col)
+        }
+        return null
+    }
+
+    private fun lastTextPosition(buffer: TerminalBuffer): IntArray? {
+        for (r in buffer.lines.indices.reversed()) {
+            val col = TerminalSelection.lastTextCol(buffer.lines[r])
+            if (col >= 0) return intArrayOf(r, col)
+        }
+        return null
     }
 
     private fun clearSelection() {
         if (!selecting) return
         setSelecting(false)
+        selectingHandle = HANDLE_NONE
+        selectingDrag = false
         invalidate()
         selectionMode?.finish()
         selectionMode = null
     }
 
-    /** Everything between the anchor and the cursor, as the terminal would copy it. */
     private fun selectedText(): String {
         val em = emulator ?: return ""
-        val buffer = em.buffer
-        if (buffer.lines.isEmpty()) return ""
-        val s = orderedSelection()
-        val firstRow = s[0].coerceIn(0, buffer.lines.size - 1)
-        val lastRow = s[2].coerceIn(0, buffer.lines.size - 1)
-        val sb = StringBuilder()
-        for (r in firstRow..lastRow) {
-            val row = buffer.lines[r]
-            if (row.columns == 0) continue
-            val from = (if (r == firstRow) s[1] else 0).coerceIn(0, row.columns - 1)
-            val to = (if (r == lastRow) s[3] else row.columns - 1).coerceIn(0, row.columns - 1)
-            val line = StringBuilder()
-            var col = from
-            while (col <= to) {
-                val cp = row.chars[col]
-                when {
-                    cp == 0 -> Unit // a wide glyph's continuation cell
-                    cp == TerminalRow.SPACE -> line.append(' ')
-                    else -> {
-                        line.appendCodePoint(cp)
-                        row.combiningAt(col)?.let { line.append(it) }
-                    }
-                }
-                col += maxOf(1, row.width[col].toInt())
-            }
-            sb.append(line.toString().trimEnd(' '))
-            // A wrapped row is one logical line: join it without a break.
-            if (r < lastRow && !row.wrapped) sb.append('\n')
-        }
-        return sb.toString()
+        return TerminalSelection.text(
+            em.buffer,
+            selStartRow,
+            selStartCol,
+            selEndRow,
+            selEndCol,
+        )
     }
 
     private fun copySelection() {
         val text = selectedText()
         if (text.isNotEmpty()) {
-            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            cm?.setPrimaryClip(ClipData.newPlainText("terminal", text))
+            val cm = context.getSystemService(ClipboardManager::class.java)
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.app_name), text))
+                Toast.makeText(context, R.string.copied, Toast.LENGTH_SHORT).show()
+            }
         }
         clearSelection()
     }
@@ -704,9 +847,11 @@ class TerminalView @JvmOverloads constructor(
             }
 
             override fun onDestroyActionMode(mode: ActionMode) {
+                selectionMode = null
+                selectingHandle = HANDLE_NONE
+                selectingDrag = false
                 if (!selecting) return
                 setSelecting(false)
-                selectionMode = null
                 invalidate()
             }
 
@@ -715,12 +860,11 @@ class TerminalView @JvmOverloads constructor(
                     outRect.set(0, 0, view.width, view.height)
                     return
                 }
-                val s = orderedSelection()
-                val first = s[0]
-                val last = s[2]
-                val left = if (first == last) minOf(s[1], s[3]) * cellWidth else 0f
+                val first = selStartRow
+                val last = selEndRow
+                val left = if (first == last) minOf(selStartCol, selEndCol) * cellWidth else 0f
                 val right = if (first == last) {
-                    (maxOf(s[1], s[3]) + 1) * cellWidth
+                    (maxOf(selStartCol, selEndCol) + 1) * cellWidth
                 } else {
                     view.width.toFloat()
                 }
@@ -746,7 +890,16 @@ class TerminalView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 removeCallbacks(longPress)
-                if (selecting) clearSelection()
+                selectingHandle = HANDLE_NONE
+                if (selecting) {
+                    val handle = selectionHandleAt(event.x, event.y)
+                    if (handle != HANDLE_NONE) {
+                        selectingHandle = handle
+                        selectingDrag = false
+                        return true
+                    }
+                    clearSelection()
+                }
                 requestFocus()
                 onUserInteraction?.invoke()
                 scroller.forceFinished(true)
@@ -777,6 +930,10 @@ class TerminalView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_MOVE -> {
                 if (selecting) {
+                    if (selectingHandle != HANDLE_NONE) {
+                        moveSelectionHandle(event.x, event.y)
+                        return true
+                    }
                     if (!selectingDrag &&
                         (kotlin.math.abs(event.y - downY) > touchSlop ||
                             kotlin.math.abs(event.x - downX) > touchSlop)
@@ -820,9 +977,13 @@ class TerminalView @JvmOverloads constructor(
                 velocityTracker.addMovement(event)
                 if (selecting) {
                     // The finger has left the screen; the selection stays put
-                    // until Copy, Select all, or a tap elsewhere. A long press
-                    // that never moved keeps the whole word it selected.
+                    // until Copy, Select all, a handle drag, or a tap elsewhere.
+                    if (selectingHandle != HANDLE_NONE) {
+                        selectingHandle = HANDLE_NONE
+                        return true
+                    }
                     if (selectingDrag) extendSelection(event.x, event.y)
+                    selectingDrag = false
                     return true
                 }
                 val quick = event.eventTime - downTime < 200
@@ -849,6 +1010,11 @@ class TerminalView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
+                if (selecting) {
+                    selectingHandle = HANDLE_NONE
+                    selectingDrag = false
+                    return true
+                }
                 dragging = false
                 endDragAxis()
                 return true
