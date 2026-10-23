@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.os.Build
 import android.text.InputType
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -810,7 +811,13 @@ class TerminalView @JvmOverloads constructor(
             val cm = context.getSystemService(ClipboardManager::class.java)
             if (cm != null) {
                 cm.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.app_name), text))
-                Toast.makeText(context, R.string.copied, Toast.LENGTH_SHORT).show()
+                // Android 13 and later show the system clipboard preview by
+                // themselves. A second Toast covers that preview and makes the
+                // copy look like it never reached the clipboard, so keep our
+                // own confirmation only on releases that have no system UI.
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                    Toast.makeText(context, R.string.copied, Toast.LENGTH_SHORT).show()
+                }
             }
         }
         clearSelection()
