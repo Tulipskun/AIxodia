@@ -1096,9 +1096,9 @@ private fun UpdateRow(settings: SettingsStore) {
                             msg = "Up to date (v" + BuildConfig.VERSION_NAME + ")"
                             return@launch
                         }
-                        msg = "Found ${up.tag}, downloading…"
-                        val apk = UpdateManager.download(ctx, up) { p -> msg = "Loading $p% (${up.tag})" }
-                        msg = "Ready to install ${up.tag}"
+                        msg = "Found ${up.label}, downloading…"
+                        val apk = UpdateManager.download(ctx, up) { p -> msg = "Loading $p% (${up.label})" }
+                        msg = "Ready to install ${up.label}"
                         UpdateManager.install(ctx, apk)
                     } catch (e: Exception) {
                         msg = "Update failed: ${e.message}"

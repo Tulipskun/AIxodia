@@ -126,12 +126,13 @@ a warm one seconds — and publishes the APK it just signed and verified:
     scripts/release.sh
 
 It refuses a dirty tree, pushes the current branch (the release is created
-against that commit), numbers the build one past the latest release, signs with
-the stable key (`app/aixodia-debug.keystore`), checks the signature really is
-that key, and creates the `v0.1.<n>` GitHub Release. It then deletes every
-older release, so exactly one download is ever current. The shared key plus a
-rising versionCode means an install updates over the previous APK — no
-uninstall, cache kept.
+against that commit), signs with the stable key (`app/aixodia-debug.keystore`),
+checks the signature really is that key, and updates the single rolling
+`latest` GitHub Release. The tag never changes; the APK and
+`AIxodia-version.json` are replaced in place. That metadata carries the exact
+versionCode burned into the APK, which is what the in-app checker compares —
+the tag itself has no version to parse. The shared key plus a rising versionCode
+means an install updates over the previous APK — no uninstall, cache kept.
 
 The key is not in this repository: it lives in the private
 `Tulipskun/aixodia-keys` repo, whose `fetch.sh` installs `app/aixodia-debug.keystore`

@@ -77,6 +77,15 @@ tag="latest"
 VERSION_CODE="$(date +%s)"
 VERSION_NAME="1.0.$(date +%Y%m%d%H%M)"
 
+# The rolling tag cannot carry a version, so publish the exact versionCode the
+# APK was built with. The in-app checker compares this file against its own
+# BuildConfig instead of trying to parse the tag.
+VERSION_ASSET=AIxodia-version.json
+trap 'rm -f "$VERSION_ASSET"' EXIT
+cat > "$VERSION_ASSET" <<EOF
+{"versionCode":$VERSION_CODE,"versionName":"$VERSION_NAME","builtAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","commit":"$(git rev-parse HEAD)"}
+EOF
+
 echo "building $tag (versionCode=$VERSION_CODE)"
 gradle assembleDebug --console=plain \
   -PaixodiaVersionCode="$VERSION_CODE" -PaixodiaVersionName="$VERSION_NAME"
@@ -95,9 +104,9 @@ esac
 cp "$APK" AIxodia.apk
 if gh release view "$tag" >/dev/null 2>&1; then
   gh release edit "$tag" --title "AIxodia $tag" --target "$(git rev-parse HEAD)"
-  gh release upload "$tag" AIxodia.apk --clobber
+  gh release upload "$tag" AIxodia.apk "$VERSION_ASSET" --clobber
 else
-  gh release create "$tag" AIxodia.apk \
+  gh release create "$tag" AIxodia.apk "$VERSION_ASSET" \
     --title "AIxodia $tag" \
     --target "$(git rev-parse HEAD)" \
     --generate-notes
