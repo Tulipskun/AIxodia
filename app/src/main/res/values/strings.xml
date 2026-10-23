@@ -72,7 +72,17 @@
     <string name="login_continue">Continue</string>
     <string name="login_advanced">Advanced settings</string>
     <string name="terminal">Terminal</string>
+    <string name="terminal_sessions">Sessions</string>
+    <string name="terminal_new">New</string>
+    <string name="terminal_no_sessions">No live shells</string>
+    <string name="terminal_session_pid">pid %1$d</string>
+    <string name="terminal_session_starting">starting…</string>
+    <string name="terminal_active">Active</string>
     <string name="terminal_close">Close terminal</string>
+    <string name="terminal_close_session">Close session</string>
+    <string name="terminal_close_session_title">Close this shell?</string>
+    <string name="terminal_close_session_body">The shell and every process running in it will stop. This cannot be undone.</string>
+    <string name="terminal_cancel">Cancel</string>
     <string name="terminal_open_new">Open new shell</string>
     <string name="terminal_connecting">Connecting…</string>
     <string name="terminal_no_address">No daemon address — waiting for the app to find the machine</string>

@@ -9,13 +9,12 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,14 +28,21 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -44,6 +50,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -92,9 +99,13 @@ import kotlinx.coroutines.withContext
 
 /** The panel's own colours: a terminal reads as a terminal, not as a chat bubble. */
 private val Ink = Color(0xFF0B0F14)
+private val InkRaised = Color(0xFF111821)
 private val InkLine = Color(0xFF1A222C)
+private val InkActive = Color(0xFF1E2A38)
 private val InkText = Color(0xFFD7E0EA)
 private val InkDim = Color(0xFF8CA0B3)
+private val Signal = Color(0xFF6FE3B0)
+private val Danger = Color(0xFFFF8A8A)
 
 /**
  * A terminal on the machine the engine runs on, sliding in over the chat.
@@ -322,7 +333,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                 TerminalSidebar(
                     socket = socket,
                     status = status,
-                    canRestart = state == TermState.CLOSED || state == TermState.ENDED,
+                    state = state,
                     onRestart = {
                         drawerScope.launch { drawerState.close() }
                         restart()
@@ -493,59 +504,187 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
 private fun TerminalSidebar(
     socket: TerminalSocket,
     status: String,
-    canRestart: Boolean,
+    state: TermState,
     onRestart: () -> Unit,
     onCloseSession: () -> Unit,
     onClose: () -> Unit,
     onPicked: () -> Unit,
 ) {
+    var confirmCloseSession by remember { mutableStateOf(false) }
+
     Column(
         Modifier
             .fillMaxHeight()
-            .padding(16.dp),
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
     ) {
-        Text(
-            stringResource(R.string.terminal),
-            style = MaterialTheme.typography.titleLarge,
-            color = InkText,
-        )
-        if (status.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                color = InkRaised,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, InkLine),
+                modifier = Modifier.size(46.dp),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Terminal,
+                        contentDescription = null,
+                        tint = Signal,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.terminal),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = InkText,
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(statusColor(state)),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        statusLabel(state),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = InkDim,
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        Surface(
+            color = InkRaised,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, InkLine),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Text(
+                    "CONNECTION",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = InkDim,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    status.ifBlank { "—" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkText,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.terminal_sessions),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = InkDim,
+                )
+                NewSessionButton(onClick = onRestart)
+            }
+            Spacer(Modifier.height(10.dp))
+            TerminalSessionBar(socket = socket, onPicked = onPicked)
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider(color = InkLine)
+            Spacer(Modifier.height(12.dp))
             Text(
-                status,
+                "ACTIONS",
                 style = MaterialTheme.typography.labelSmall,
                 color = InkDim,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
             )
-        }
-        Spacer(Modifier.height(20.dp))
-        Text(
-            "Sessions",
-            style = MaterialTheme.typography.labelSmall,
-            color = InkDim,
-        )
-        Spacer(Modifier.height(6.dp))
-        TerminalSessionBar(socket = socket, onPicked = onPicked)
-        Spacer(Modifier.height(16.dp))
-        if (canRestart) {
+            Spacer(Modifier.height(4.dp))
             SidebarAction(
-                label = stringResource(R.string.terminal_open_new),
-                icon = Icons.Default.Refresh,
-                onClick = onRestart,
+                label = stringResource(R.string.terminal_close_session),
+                icon = Icons.Default.Delete,
+                danger = true,
+                onClick = { confirmCloseSession = true },
             )
         }
-        SidebarAction(
-            label = "Close session",
-            icon = Icons.Default.Delete,
-            onClick = onCloseSession,
-        )
-        Spacer(Modifier.weight(1f))
+
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(color = InkLine)
+        Spacer(Modifier.height(4.dp))
         SidebarAction(
             label = stringResource(R.string.terminal_close),
             icon = Icons.Default.Close,
             onClick = onClose,
         )
+    }
+
+    if (confirmCloseSession) {
+        AlertDialog(
+            onDismissRequest = { confirmCloseSession = false },
+            containerColor = InkRaised,
+            titleContentColor = InkText,
+            textContentColor = InkDim,
+            title = { Text(stringResource(R.string.terminal_close_session_title)) },
+            text = { Text(stringResource(R.string.terminal_close_session_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmCloseSession = false
+                        onCloseSession()
+                    },
+                ) {
+                    Text(stringResource(R.string.terminal_close_session), color = Danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmCloseSession = false }) {
+                    Text(stringResource(R.string.terminal_cancel), color = InkDim)
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun NewSessionButton(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(50)
+    Surface(
+        color = InkActive,
+        shape = shape,
+        border = BorderStroke(1.dp, InkLine),
+        modifier = Modifier
+            .clip(shape)
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = null,
+                tint = Signal,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                stringResource(R.string.terminal_new),
+                style = MaterialTheme.typography.labelMedium,
+                color = Signal,
+            )
+        }
     }
 }
 
@@ -553,6 +692,7 @@ private fun TerminalSidebar(
 private fun SidebarAction(
     label: String,
     icon: ImageVector,
+    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -563,10 +703,32 @@ private fun SidebarAction(
             .padding(horizontal = 10.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = InkDim, modifier = Modifier.size(20.dp))
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (danger) Danger else InkDim,
+            modifier = Modifier.size(20.dp),
+        )
         Spacer(Modifier.width(12.dp))
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = InkText)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (danger) Danger else InkText,
+        )
     }
+}
+
+private fun statusColor(state: TermState): Color = when (state) {
+    TermState.OPEN -> Signal
+    TermState.CONNECTING -> Color(0xFFFFC66D)
+    TermState.ENDED, TermState.CLOSED -> Danger
+}
+
+@Composable
+private fun statusLabel(state: TermState): String = when (state) {
+    TermState.OPEN -> stringResource(R.string.online)
+    TermState.CONNECTING -> stringResource(R.string.connecting)
+    TermState.ENDED, TermState.CLOSED -> stringResource(R.string.offline)
 }
 
 /**
@@ -576,7 +738,6 @@ private fun SidebarAction(
  * Ctrl and Alt latch for one keystroke: tap Ctrl, then type C, and the view
  * turns it into 0x03 (the same as the ^C key, but for any letter or symbol).
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TerminalKeys(
     ctrlOn: Boolean,
@@ -736,60 +897,94 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TerminalSessionBar(socket: TerminalSocket, onPicked: () -> Unit = {}) {
     val sessions by socket.sessions.collectAsStateWithLifecycle()
     val pids by socket.sessionPids.collectAsStateWithLifecycle()
     val active by socket.activeSessionId.collectAsStateWithLifecycle()
-    FlowRow(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+
+    if (sessions.isEmpty()) {
+        Surface(
+            color = InkRaised,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, InkLine),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                stringResource(R.string.terminal_no_sessions),
+                style = MaterialTheme.typography.bodySmall,
+                color = InkDim,
+                modifier = Modifier.padding(14.dp),
+            )
+        }
+        return
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         sessions.forEachIndexed { i, id ->
             // The pid is what makes a tab a shell and not a position: closing
             // Shell 2 used to renumber Shell 3, so "Shell 1" no longer told
-            // you which process a reconnect would land on. Both are shown —
-            // the number for quick tapping, the pid for identity.
+            // you which process a reconnect would land on. The number is for
+            // quick tapping; the pid identifies the process behind it.
             val pid = pids[id]
-            val label = if (pid != null && pid > 0) "Shell ${i + 1} · pid $pid" else "Shell ${i + 1}"
             // Only the session that is actually attached is selected. Falling
             // back to "the last tab" when nothing is attached marked a closed
             // tab as the live one.
             val selected = active.isNotBlank() && id == active
+            val shape = RoundedCornerShape(14.dp)
             Surface(
-                color = if (selected) Color(0xFF2A3A4A) else InkLine,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.clickable {
-                    socket.switchSession(id)
-                    onPicked()
-                },
+                color = if (selected) InkActive else InkRaised,
+                shape = shape,
+                border = BorderStroke(
+                    1.dp,
+                    if (selected) Color(0xFF31516B) else InkLine,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .clickable {
+                        socket.switchSession(id)
+                        onPicked()
+                    },
             ) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (selected) Color(0xFFE8F0F8) else InkText,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (selected) Signal else InkDim.copy(alpha = 0.35f)),
+                    )
+                    Spacer(Modifier.width(11.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Shell ${i + 1}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = InkText,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            if (pid != null && pid > 0) {
+                                stringResource(R.string.terminal_session_pid, pid)
+                            } else {
+                                stringResource(R.string.terminal_session_starting)
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = InkDim,
+                        )
+                    }
+                    if (selected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = stringResource(R.string.terminal_active),
+                            tint = Signal,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
-        }
-        Surface(
-            color = InkLine,
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.clickable {
-                socket.newSession()
-                onPicked()
-            },
-        ) {
-            Text(
-                "+",
-                style = MaterialTheme.typography.labelMedium,
-                color = InkText,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-            )
         }
     }
 }
