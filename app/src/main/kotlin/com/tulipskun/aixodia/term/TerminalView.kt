@@ -1094,20 +1094,13 @@ class TerminalView @JvmOverloads constructor(
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        // A terminal must not be treated as a password field. The visible-
-        // password variation used to suppress suggestions, but some OEM
-        // keyboards/screenshot services (vivo/iQOO among them) then refuse a
-        // screenshot of the whole screen while the keyboard is up. A normal
-        // text field with suggestions disabled keeps the IME quiet without
-        // claiming the content is a secret.
-        //
-        // Deliberately do not set IME_FLAG_NO_PERSONALIZED_LEARNING: Gboard
-        // treats that flag as its incognito mode, and incognito disables the
-        // clipboard history, so text copied from the terminal never appeared
-        // in Gboard's clipboard list. NO_SUGGESTIONS already keeps the command
-        // line from offering completions.
-        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
-            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        // Keep the terminal an ordinary text editor. The visible-password
+        // variation made some OEM keyboards/screenshot services (vivo/iQOO
+        // among them) refuse a screenshot while the keyboard was up, and
+        // private/incognito keyboard modes disable Gboard's clipboard history.
+        // Normal suggestions are fine here: the terminal still sends each
+        // committed character through its input connection.
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT
         outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
             EditorInfo.IME_FLAG_NO_FULLSCREEN
         return TerminalInputConnection(this, false)
