@@ -50,6 +50,7 @@ if [ -z "${JAVA_HOME:-}" ]; then
   done
 fi
 export JAVA_HOME="${JAVA_HOME:-}"
+export PATH="${JAVA_HOME:+$JAVA_HOME/bin:}$PATH"
 command -v gh >/dev/null 2>&1 || { echo "error: gh is not on PATH" >&2; exit 1; }
 
 KEYSTORE="app/aixodia-debug.keystore"
