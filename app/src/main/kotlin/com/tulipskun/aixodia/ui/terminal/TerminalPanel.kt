@@ -206,9 +206,9 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
             if (id.isNotBlank()) {
                 emulators[id]?.let { socket.rememberModes(id, it.snapshotModes()) }
             }
-            TerminalConnections.detach(socket)
-            socket.close()
-            TerminalLiveService.stop(context)
+            // Keep the socket and foreground service alive across navigation
+            // (Terminal -> Chat -> Terminal) so tabs do not have to reconnect.
+            // Teardown happens on explicit tab close / app removal instead.
         }
     }
 
