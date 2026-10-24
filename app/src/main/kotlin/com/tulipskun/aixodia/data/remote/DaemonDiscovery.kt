@@ -2,14 +2,11 @@ package com.tulipskun.aixodia.data.remote
 
 import android.util.Log
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.model.AiOutput
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.min
-import kotlin.random.Random
 
 private const val TAG = "DaemonDiscovery"
 
@@ -36,11 +33,11 @@ sealed interface Discovery {
  * Keeps the daemon address pointing at whatever kernel is currently serving.
  *
  * The daemon announces a random quick-tunnel URL every 30 seconds, so the
- * address changes on every redeploy and after every 6-hour kernel cap. Reading
- * it by hand is what this removes: the app already holds the one credential
- * needed to read the `tunnel` row, and the socket already re-reads the stored
- * address on every reconnect, so learning the address and using it is the same
- * step.
+ * address changes on every redeploy and after every 6-hour kernel cap. It used
+ * to be read by hand off the D1 row on a timer; now the daemon pushes the
+ * announcement itself over the frame channel, so this listens instead of
+ * polling, and the socket already re-reads the stored address on every
+ * reconnect, so learning the address and using it is the same step.
  *
  * Deliberately not a background service: it runs for as long as the app does,
  * which is the only time a phone can be talked to anyway.
@@ -56,9 +53,6 @@ class DaemonDiscovery(
     /** What discovery last saw, for the settings screen to show. */
     val state: StateFlow<DiscoveryState> = _state
 
-    /** How often to read the row. The daemon beats every 30s, so faster is waste. */
-    private val pollMs = 30_000L
-
     /**
      * The engine instance whose address was last read. A different started
      * time means the daemon was replaced: every terminal stream the phone had
@@ -68,115 +62,109 @@ class DaemonDiscovery(
     private var lastStartedAt = 0L
 
     fun start() {
-        scope.launch { loop() }
+        // Push, not pull: the daemon announces itself over the frame channel,
+        // so discovery listens and never reads the D1 row on a timer.
+        scope.launch {
+            socket.frames.collect { frame ->
+                if (frame.kind == "daemon") handleFrame(frame)
+            }
+        }
     }
 
-    private suspend fun loop() {
-        var backoff = pollMs
-        while (scope.isActive) {
-            val current = try {
-                settings.current()
-            } catch (e: Exception) {
-                // DataStore can fail a read while the file is being rewritten.
-                // Letting that escape would kill this loop for the rest of the
-                // process, leaving discovery stuck on the last address it saw.
-                Log.w(TAG, "settings read failed: ${e.message}")
-                _state.value = DiscoveryState(
-                    phase = DiscoveryPhase.UNREACHABLE,
-                    error = e.message?.take(120).orEmpty(),
-                )
-                delay(pollMs)
-                continue
-            }
+    // One daemon announcement. A live one may adopt a new tunnel and move the
+    // socket; an unusable one leaves the address we hold as it is, because a
+    // dead address is worse than the one already in hand.
+    private suspend fun handleFrame(frame: AiOutput) {
+        val current = try {
+            settings.current()
+        } catch (e: Exception) {
+            // DataStore can fail a read while the file is being rewritten. Letting
+            // that escape would kill this frame, leaving discovery stuck on the
+            // last address it saw.
+            Log.w(TAG, "settings read failed: ${e.message}")
+            _state.value = DiscoveryState(
+                phase = DiscoveryPhase.UNREACHABLE,
+                error = e.message?.take(120).orEmpty(),
+            )
+            return
+        }
+        if (frame.daemonOnline) {
             if (current.token.isBlank()) {
-                // No credential, so the row cannot be read at all. Not an error
-                // worth retrying quickly; the token arrives in settings.
+                // No credential, so no announcement can name a daemon at all.
                 _state.value = DiscoveryState(phase = DiscoveryPhase.NO_TOKEN)
-                delay(pollMs)
-                continue
+                return
             }
-            try {
-                val node = history.node()
-                // Only a live daemon counts. The row may be rewritten by a
-                // process whose first heartbeat has not landed yet; recording
-                // that started early would hide the replacement when it comes
-                // online a poll later.
-                val started = if (node?.online == true) node.startedAt else 0L
-                val replaced = started > 0L && lastStartedAt > 0L && started != lastStartedAt
-                if (started > 0L) lastStartedAt = started
-                when (val action = decide(current.daemonUrl, node)) {
-                    is Discovery.Adopt -> {
-                        Log.i(TAG, "daemon moved: adopting ${action.url}")
-                        settings.saveDaemon(action.url)
-                        // The socket is pointed at the old address and would sit
-                        // there until its own retry; a redeploy is exactly when
-                        // it should move now. The terminal is told too, so an
-                        // open window follows the daemon without waiting for its
-                        // old link to fail first.
-                        socket.reconnect()
-                        _state.value = DiscoveryState(
-                            phase = DiscoveryPhase.CONNECTED,
-                            tunnelUrl = action.url,
-                            version = node?.version.orEmpty(),
-                            ageS = node?.ageS ?: -1,
-                            online = node?.online == true,
-                        )
-                        backoff = pollMs
-                    }
-
-                    Discovery.Keep -> {
-                        // Same address, new process: every stream the phone had
-                        // died with the old process. The socket is redialed as
-                        // well as the terminal, because a turn streamed on that
-                        // socket stops arriving the moment the engine is
-                        // replaced, and waiting for the ping to notice costs up
-                        // to a ping interval of watching a dead thread. Without
-                        // the terminal half the panel sits on a stream the old
-                        // process took with it, and tapping that tab does
-                        // nothing because it still looks open.
-                        if (replaced) {
-                            Log.i(TAG, "daemon restarted at $started; redialing the socket and terminal")
-                            socket.reconnect()
-                        }
-                        _state.value = DiscoveryState(
-                            phase = DiscoveryPhase.CONNECTED,
-                            tunnelUrl = node?.tunnelUrl.orEmpty().ifBlank { current.daemonUrl },
-                            version = node?.version.orEmpty(),
-                            ageS = node?.ageS ?: -1,
-                            online = node?.online == true,
-                        )
-                        backoff = pollMs
-                    }
-
-                    Discovery.Wait -> {
-                        _state.value = DiscoveryState(
-                            phase = DiscoveryPhase.IDLE,
-                            tunnelUrl = current.daemonUrl,
-                            online = false,
-                        )
-                        backoff = pollMs
-                    }
+            // Only a live daemon counts. The announcement may have been written
+            // by a process whose first heartbeat has not landed yet, which would
+            // hide the replacement when it comes online, so compare started times.
+            val node = NodeInfo(
+                tunnelUrl = frame.daemonUrl,
+                version = frame.daemonVersion,
+                online = true,
+                ageS = if (frame.daemonHeartbeat > 0L) System.currentTimeMillis() / 1000L - frame.daemonHeartbeat else -1L,
+            )
+            val started = frame.daemonStarted
+            val replaced = started > 0L && lastStartedAt > 0L && started != lastStartedAt
+            if (started > 0L) lastStartedAt = started
+            when (val action = decide(current.daemonUrl, node)) {
+                is Discovery.Adopt -> {
+                    Log.i(TAG, "daemon moved: adopting ${action.url}")
+                    settings.saveDaemon(action.url)
+                    // The socket is pointed at the old address and would sit there
+                    // until its own retry; a redeploy is exactly when it should move
+                    // now. The terminal is told too, so an open window follows the
+                    // daemon without waiting for its old link to fail first.
+                    socket.reconnect()
+                    _state.value = DiscoveryState(
+                        phase = DiscoveryPhase.CONNECTED,
+                        tunnelUrl = action.url,
+                        version = node.version,
+                        ageS = node.ageS,
+                        online = true,
+                    )
                 }
-            } catch (e: Exception) {
-                // A D1 hiccup must not stop the loop, and must not throw away the
-                // address we already have.
-                Log.w(TAG, "discovery read failed: ${e.message}")
-                _state.value = DiscoveryState(
-                    phase = DiscoveryPhase.UNREACHABLE,
-                    tunnelUrl = current.daemonUrl,
-                    error = e.message?.take(120).orEmpty(),
-                )
-                // Only a failed read backs off. Letting the doubling run on
-                // success stretched the poll from 30 seconds to five minutes,
-                // so a replaced engine went unnoticed long after it was back.
-                backoff = min(backoff * 2, 5 * 60_000L)
+
+                Discovery.Keep -> {
+                    // Same address, new process: every stream the phone had died
+                    // with the old process. Redial as well as the terminal, because
+                    // a turn streamed on that socket stops arriving the moment the
+                    // engine is replaced, and waiting for the ping to notice costs up
+                    // to a ping interval of watching a dead thread. Without the
+                    // terminal half the panel sits on a stream the old process took
+                    // with it, and tapping that tab does nothing because it still
+                    // looks open.
+                    if (replaced) {
+                        Log.i(TAG, "daemon restarted at $started; redialing the socket and terminal")
+                        socket.reconnect()
+                    }
+                    _state.value = DiscoveryState(
+                        phase = DiscoveryPhase.CONNECTED,
+                        tunnelUrl = node.tunnelUrl,
+                        version = node.version,
+                        ageS = node.ageS,
+                        online = true,
+                    )
+                }
+
+                Discovery.Wait -> {
+                    _state.value = DiscoveryState(
+                        phase = DiscoveryPhase.IDLE,
+                        tunnelUrl = current.daemonUrl,
+                        online = false,
+                    )
+                }
             }
-            delay(backoff + Random.nextLong(0, 2_000))
+        } else {
+            _state.value = DiscoveryState(
+                phase = DiscoveryPhase.IDLE,
+                tunnelUrl = current.daemonUrl,
+                online = false,
+            )
         }
     }
 
     companion object {
-        /** Reads a row into a decision. Separate from the loop so it can be tested. */
+        /** Reads a push into a decision. Separate from the frame handling so it can be tested. */
         fun decide(currentUrl: String, node: NodeInfo?): Discovery {
             val url = node?.tunnelUrl?.trim().orEmpty()
             // Nothing announced yet, or the row is empty.

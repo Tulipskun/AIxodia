@@ -226,7 +226,7 @@ data class AiOutput(
     @Json(name = "content") val content: List<ContentPart> = emptyList(),
     @Json(name = "text") val text: String = "",
     @Json(name = "stage") val stage: String = "",
-    @Json(name = "kind") val kind: String = "message", // ack | delta | message | trace | done | error
+    @Json(name = "kind") val kind: String = "message", // ack | delta | message | trace | done | error | daemon
     @Json(name = "seq") val seq: Long = 0,
     @Json(name = "role") val role: String = "model",
     @Json(name = "agent") val agent: String = "", // main | worker | system
@@ -260,6 +260,15 @@ data class AiOutput(
     @Json(name = "block") val block: Block? = null,
     @Json(name = "turns") val turns: List<TurnRow> = emptyList(),
     @Json(name = "turns_synced") val turnsSynced: Boolean = false,
+    // Daemon is the control frame that carries this daemon's own state: the
+    // tunnel it published, its version, and the heartbeat that says it is
+    // alive. A kind="daemon" frame is connection state, not chat output, so the
+    // chat reducer ignores it and the discovery layer reads it.
+    @Json(name = "daemon_url") val daemonUrl: String = "",
+    @Json(name = "daemon_version") val daemonVersion: String = "",
+    @Json(name = "daemon_heartbeat") val daemonHeartbeat: Long = 0L,
+    @Json(name = "daemon_started") val daemonStarted: Long = 0L,
+    @Json(name = "daemon_online") val daemonOnline: Boolean = false,
 )
 
 // Canonical outbound frame (ai Input).
