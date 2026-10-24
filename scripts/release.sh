@@ -11,9 +11,10 @@
 # applicationId + same signature + a higher versionCode is what lets an update
 # install straight over the old app with the Room cache and settings kept.
 #
-# Needs: gh (authenticated), an Android SDK + Gradle, and the stable signing
-# key. The SDK and Gradle are looked for in the usual local locations; override
-# with ANDROID_HOME and PATH if they live somewhere else.
+# Needs: gh (authenticated), an Android SDK + Gradle. The stable signing key is
+# fetched from the private Tulipskun/aixodia-keys repo when app/aixodia-debug.keystore
+# is not already there; the SDK and Gradle are looked for in the usual local
+# locations; override with ANDROID_HOME and PATH if they live somewhere else.
 #
 #   scripts/release.sh
 #
@@ -23,25 +24,49 @@ cd "$(dirname "$0")/.."
 
 # A toolchain that is already configured wins; otherwise fall back to the local
 # unpacked copies this repo is developed against.
-export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}"
+export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
+if [ -z "$ANDROID_HOME" ]; then
+  for a in /opt/android-sdk /data/home/opt/android-sdk; do
+    if [ -x "$a/platform-tools/adb" ]; then export ANDROID_HOME="$a"; break; fi
+  done
+fi
 if ! command -v gradle >/dev/null 2>&1; then
   for g in /opt/gradle-*/bin; do
     if [ -x "$g/gradle" ]; then export PATH="$g:$PATH"; break; fi
   done
 fi
-command -v gradle >/dev/null 2>&1 || { echo "error: gradle is not on PATH" >&2; exit 1; }
+if command -v gradle >/dev/null 2>&1; then
+  GRADLE=gradle
+elif [ -x ./gradlew ]; then
+  GRADLE=./gradlew
+else
+  echo "error: gradle is not on PATH and no ./gradlew wrapper was found" >&2
+  exit 1
+fi
+if [ -z "${JAVA_HOME:-}" ]; then
+  for j in /opt/jdk17 /data/home/opt/jdk17 /opt/jdk /usr/lib/jvm/java-17-openjdk-amd64; do
+    if [ -x "$j/bin/java" ]; then export JAVA_HOME="$j"; break; fi
+  done
+fi
+export JAVA_HOME="${JAVA_HOME:-}"
 command -v gh >/dev/null 2>&1 || { echo "error: gh is not on PATH" >&2; exit 1; }
 
 KEYSTORE="app/aixodia-debug.keystore"
 if [ ! -f "$KEYSTORE" ]; then
-  cat >&2 <<EOF
-error: $KEYSTORE is missing.
-
-Without it the APK is signed with a throwaway debug key and cannot install
-over any release already on a phone. Put the stable key there before releasing.
-EOF
-  exit 1
+  # The stable key is not in this repo (it is gitignored here); it lives in the
+  # private Tulipskun/aixodia-keys repo. Fetch it there so a release machine can
+  # go straight from clone to build instead of someone copying the file by hand.
+  echo "no $KEYSTORE found; fetching the stable key from Tulipskun/aixodia-keys"
+  gh api "repos/Tulipskun/aixodia-keys/contents/aixodia-debug.keystore" --jq .content \
+    | base64 -d > "$KEYSTORE"
+  got=$(md5sum "$KEYSTORE" | cut -d' ' -f1)
+  if [ "$got" != "30b3cd5702f8bac4139efeb414cd20c8" ]; then
+    rm -f "$KEYSTORE"
+    echo "error: keystore md5 mismatch (got $got, want 30b3cd5702f8bac4139efeb414cd20c8); refusing to sign" >&2
+    exit 1
+  fi
+  chmod 600 "$KEYSTORE"
 fi
 
 # The build tools live under the SDK; apksigner is what proves the signature.
@@ -87,7 +112,7 @@ cat > "$VERSION_ASSET" <<EOF
 EOF
 
 echo "building $tag (versionCode=$VERSION_CODE)"
-gradle assembleDebug --console=plain \
+"$GRADLE" assembleDebug --console=plain \
   -PaixodiaVersionCode="$VERSION_CODE" -PaixodiaVersionName="$VERSION_NAME"
 
 APK=app/build/outputs/apk/debug/app-debug.apk
