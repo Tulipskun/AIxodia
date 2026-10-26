@@ -26,6 +26,8 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 /**
  * How long the layout has to hold still before the grid and the shell are
@@ -1178,6 +1180,19 @@ class TerminalView @JvmOverloads constructor(
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
         if (!isFocused) requestFocus()
         imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    /**
+     * Keep the keyboard up after a tap on the chrome (Ctrl, Alt, a key chip),
+     * but only when it was already up. A key chip is a terminal key, not a text
+     * field: tapping Esc or an arrow must not pull the IME over the grid. When
+     * the keyboard is open, focus has to come back to the grid or the system
+     * hides it as soon as the chip takes focus.
+     */
+    fun keepSoftKeyboardIfShown() {
+        val insets = ViewCompat.getRootWindowInsets(this) ?: return
+        if (!insets.isVisible(WindowInsetsCompat.Type.ime())) return
+        keepSoftKeyboard()
     }
 
     /**

@@ -34,10 +34,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
@@ -328,14 +330,14 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
         ended = null
         ready = null
         terminalView.value?.scrollToBottom()
-        terminalView.value?.keepSoftKeyboard()
+        terminalView.value?.keepSoftKeyboardIfShown()
         socket.newSession()
     }
     val closeSession = {
         ended = null
         ready = null
         terminalView.value?.scrollToBottom()
-        terminalView.value?.keepSoftKeyboard()
+        terminalView.value?.keepSoftKeyboardIfShown()
         socket.closeSession()
     }
     val status = statusLine(state, errorRes, ready, ended) +
@@ -441,7 +443,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                             shape = RoundedCornerShape(50),
                                             modifier = Modifier.clickable {
                                                 view.scrollToBottom()
-                                                view.keepSoftKeyboard()
+                                                view.keepSoftKeyboardIfShown()
                                             },
                                         ) {
                                             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
@@ -490,18 +492,18 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                                             val v = !ctrlOn.value
                                             ctrlOn.value = v
                                             view.setLatchedMods(v, altOn.value)
-                                            view.keepSoftKeyboard()
+                                            view.keepSoftKeyboardIfShown()
                                         },
                                         onAlt = {
                                             val v = !altOn.value
                                             altOn.value = v
                                             view.setLatchedMods(ctrlOn.value, v)
-                                            view.keepSoftKeyboard()
+                                            view.keepSoftKeyboardIfShown()
                                         },
                                         onKey = { bytes ->
                                             socket.send(bytes)
                                             // Tapping a key must not take the keyboard with it.
-                                            view.keepSoftKeyboard()
+                                            view.keepSoftKeyboardIfShown()
                                         },
                                     )
                                     TerminalComposer(
@@ -820,20 +822,17 @@ private fun TerminalKeys(
     onKey: (ByteArray) -> Unit,
 ) {
     // Exactly two rows, six keys each. The order is deliberate: the arrows
-    // sit where the thumb expects them, and DelAll is the whole-line erase
-    // (Ctrl-U/Ctrl-K) rather than a burst of backspaces. CMD is the same byte
-    // the old "^P" sent; only its label changed. SHELL replaces the running
-    // shell with a fresh login shell in place, which is how a wedged or
-    // half-configured session gets a clean one without a new tab.
+    // sit where the thumb expects them, and the whole-line erase (Ctrl-U then
+    // Ctrl-K, so it works from the middle too) sits at the end of the top row
+    // as an icon. CMD is the same byte the old "^P" sent; only its label
+    // changed. The refresh key replaces the running shell with a fresh login
+    // shell in place — exec $SHELL — which is how a wedged or half-configured
+    // session gets a clean one without a new tab.
     val top = listOf(
         "Esc" to byteArrayOf(27),
         "Tab" to byteArrayOf(9),
         "CMD" to byteArrayOf(16),
         "\u2191" to "\u001b[A".toByteArray(),
-        // Ctrl-U then Ctrl-K: kill back to the start and forward to the end,
-        // so the whole line goes even when the cursor was left in the middle.
-        "DelAll" to byteArrayOf(21, 11),
-        "SHELL" to "exec \$SHELL\r".toByteArray(),
     )
     val bottom = listOf(
         "\u2190" to "\u001b[D".toByteArray(),
@@ -858,6 +857,20 @@ private fun TerminalKeys(
                     Box(Modifier.weight(1f)) {
                         KeyChip(label, wide = true, onClick = { onKey(bytes) })
                     }
+                }
+                Box(Modifier.weight(1f)) {
+                    IconKey(
+                        icon = Icons.Default.Refresh,
+                        contentDescription = "New login shell",
+                        onClick = { onKey("exec \$SHELL\r".toByteArray()) },
+                    )
+                }
+                Box(Modifier.weight(1f)) {
+                    IconKey(
+                        icon = Icons.Default.ClearAll,
+                        contentDescription = "Delete line",
+                        onClick = { onKey(byteArrayOf(21, 11)) },
+                    )
                 }
             }
             Row(
@@ -886,9 +899,17 @@ private fun TerminalKeys(
     }
 }
 
-/** The drawer key, drawn to the same size as a [KeyChip] so the bar stays even. */
+/**
+ * An icon-only key, drawn to the same size as a [KeyChip] so the bar stays
+ * even: the menu, the fresh-shell key and the whole-line erase are symbols
+ * rather than words, and a word would not fit beside the arrows.
+ */
 @Composable
-private fun MenuKey(onClick: () -> Unit) {
+private fun IconKey(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
     Surface(
         color = InkLine,
         shape = RoundedCornerShape(8.dp),
@@ -904,13 +925,22 @@ private fun MenuKey(onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                Icons.Default.Menu,
-                contentDescription = "Menu",
+                icon,
+                contentDescription = contentDescription,
                 tint = InkText,
                 modifier = Modifier.size(18.dp),
             )
         }
     }
+}
+
+@Composable
+private fun MenuKey(onClick: () -> Unit) {
+    IconKey(
+        icon = Icons.Default.Menu,
+        contentDescription = "Menu",
+        onClick = onClick,
+    )
 }
 
 /** One tappable key; [active] fills it in while a modifier is latched. */
