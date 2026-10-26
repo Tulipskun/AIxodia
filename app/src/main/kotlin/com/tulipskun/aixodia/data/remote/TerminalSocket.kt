@@ -378,6 +378,42 @@ class TerminalSocket(
     }
 
     /**
+     * The window was closed on purpose: end the shells, not just the streams.
+     *
+     * Leaving the window used to keep every socket attached so a trip to the
+     * chat and back would not redial, and that also left the shells running on
+     * the engine: closing the terminal and opening it again showed the tabs the
+     * user thought they had closed. A close is a close — every tab is ended, the
+     * saved list is cleared, and the next open starts on a fresh shell.
+     */
+    @Synchronized
+    fun endAllTabs() {
+        wanted = false
+        dialJob?.cancel()
+        dialJob = null
+        refreshJob?.cancel()
+        refreshJob = null
+        // dropLink issues the engine-side close for every id (the control frame
+        // may have no socket behind it if the tab had already ended).
+        links.values.toList().forEach { dropLink(it, kill = true) }
+        links.clear()
+        activeLink = null
+        _sessions.value = emptyList()
+        _sessionPids.value = emptyMap()
+        _activeSessionId.value = ""
+        _state.value = TermState.CLOSED
+        _error.value = 0
+        _detail.value = ""
+        scope.launch {
+            // dropLink already removes each id; these make sure nothing is left
+            // behind if a tab had no id yet.
+            settings.saveTerminalSessionIds(emptyList())
+            settings.saveTerminalSessionPids(emptyMap())
+            settings.clearTerminalSessionId()
+        }
+    }
+
+    /**
      * True while any tab is dialing or up — the terminal is doing something and
      * does not need to be poked.
      */
@@ -467,6 +503,14 @@ class TerminalSocket(
                 val pid = o.optInt("pid", 0)
                 if (pid > 0) pids[id] = pid
             }
+
+            // A closed shell can still be listed by the engine for a moment
+            // (the control frame and the DELETE are in flight). Keeping it out
+            // of the tab list is what stops a closed tab from reattaching; the
+            // tombstone is dropped as soon as the engine agrees it is gone.
+            closingIds.retainAll(ids.toSet())
+            ids.removeAll(closingIds)
+            pids.keys.retainAll(ids.toSet())
 
             // The engine's answer is the whole truth: persist it in one edit so
             // a crash between the list and the map cannot leave them
@@ -602,6 +646,10 @@ class TerminalSocket(
         links.remove(id)
         if (activeLink === link) activeLink = null
         if (id.isNotBlank()) {
+            // Remember that this id is on its way out, so the next list poll
+            // cannot attach it again while the engine is still tearing the
+            // shell down.
+            if (kill) closingIds.add(id)
             _sessions.value = _sessions.value - id
             _sessionPids.value = _sessionPids.value - id
             sessionModes.remove(id)
@@ -1004,6 +1052,17 @@ class TerminalSocket(
     }
 
     companion object {
+        /**
+         * Ids the user closed on purpose, until the engine's list stops naming
+         * them. A close is a control frame and a DELETE, not an instant: the
+         * next list poll can still report the shell, and without this the tab
+         * came back right after it was closed. It is shared by every socket in
+         * the process because the window is rebuilt on reopen, and an id is
+         * only forgotten once the engine agrees it is gone.
+         */
+        private val closingIds: MutableSet<String> =
+            java.util.concurrent.ConcurrentHashMap.newKeySet()
+
         /**
          * Maps an HTTP(S) daemon address to the dedicated terminal WebSocket.
          * The old `/ws` room URL is accepted too, so starting points that still

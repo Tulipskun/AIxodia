@@ -208,9 +208,14 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
             if (id.isNotBlank()) {
                 emulators[id]?.let { socket.rememberModes(id, it.snapshotModes()) }
             }
-            // Keep the socket and foreground service alive across navigation
-            // (Terminal -> Chat -> Terminal) so tabs do not have to reconnect.
-            // Teardown happens on explicit tab close / app removal instead.
+            // Leaving the window hangs up its sockets and drops the foreground
+            // service: nothing of a closed terminal should keep the process
+            // alive or a notification on screen. The shells themselves are
+            // ended only when the window was closed on purpose (closeWindow);
+            // a configuration change just reattaches on the next composition.
+            TerminalConnections.detach(socket)
+            socket.close()
+            TerminalLiveService.stop(context)
         }
     }
 
@@ -317,13 +322,26 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
 
+    // Closing the window closes the terminal: the shells are ended on the
+    // engine and the saved tab list is cleared, so reopening the terminal
+    // starts fresh instead of handing back the tabs that were closed.
+    val closeWindow = {
+        socket.endAllTabs()
+        TerminalConnections.detach(socket)
+        TerminalLiveService.stop(context)
+        currentOnClose()
+    }
+
     // Back closes the drawer before it closes the terminal window. Compose's
     // BackHandler callbacks run newest-first, so this one is layered above the
-    // chat screen's "leave terminal" handler.
-    BackHandler(
-        enabled = drawerState.isOpen || drawerState.targetValue != DrawerValue.Closed,
-    ) {
-        drawerScope.launch { drawerState.close() }
+    // chat screen's "leave terminal" handler; that one only fires if this one
+    // is not composed.
+    BackHandler {
+        if (drawerState.isOpen || drawerState.targetValue != DrawerValue.Closed) {
+            drawerScope.launch { drawerState.close() }
+        } else {
+            closeWindow()
+        }
     }
 
     val restart = {
@@ -376,7 +394,7 @@ fun TerminalWindow(socket: TerminalSocket, onClose: () -> Unit) {
                     },
                     onClose = {
                         drawerScope.launch { drawerState.close() }
-                        currentOnClose()
+                        closeWindow()
                     },
                     onPicked = { drawerScope.launch { drawerState.close() } },
                 )

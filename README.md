@@ -102,9 +102,13 @@ without approval; the daemon owns no credential of its own.
   ticket.
 - **Terminal** — a dropped socket asks for a new ticket and redraws from the
   engine's ring. While the terminal is open a foreground service keeps every
-  tab's WebSocket attached across app switches; closing the screen detaches
-  them, and removing the app from recents closes them explicitly. Closing a tab
-  sends `close`, so the shell and its tmux slot are freed.
+  tab's WebSocket attached across app switches; closing the screen ends its
+  tabs — every shell is closed on the engine and the saved tab list is cleared,
+  so reopening the terminal starts on a fresh shell instead of handing back
+  tabs that were already closed. Removing the app from recents closes the
+  sockets explicitly. Closing a single tab sends `close`, so that shell and its
+  tmux slot are freed, and the tab is not reattached if a list poll still
+  reports it for a moment.
 
 ## Production DB (runtime config, nothing hardcoded)
 
