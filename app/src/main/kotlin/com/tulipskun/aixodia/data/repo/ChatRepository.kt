@@ -209,16 +209,23 @@ class ChatRepository(
     }
 
     /**
-     * The daemon answered that this session does not exist (it stores the
-     * history, so a session can be gone while the phone still lists it). Keep
-     * the transcript on screen but stop retrying it: a pending message is
-     * flushed on every reconnect and can never land, and a session with a
-     * pending message is never pruned by [syncSessions] either, so the chat
-     * would stay stuck forever.
+     * The daemon answered that this session does not exist. D1 is the only
+     * copy of the history; the rows on this phone are a cache of it, not an
+     * archive. A cached chat the daemon no longer has is therefore gone, and
+     * every resend into it can only be refused again. Drop the row and its
+     * messages together, so the drawer and the thread agree with the daemon
+     * instead of keeping a transcript that can never accept another turn.
      */
     suspend fun forgetDeadSession(sid: String) {
         if (sid.isEmpty()) return
-        try { db.messages().clearPending(sid) } catch (_: Exception) { }
+        try {
+            // Pending flags first: a queued row is flushed on reconnect, and
+            // deleting the messages under a flush would leave the sender
+            // writing into a chat that no longer exists on either side.
+            db.messages().clearPending(sid)
+            db.messages().deleteSession(sid)
+            db.sessions().delete(sid)
+        } catch (_: Exception) { }
     }
 
     suspend fun openSession(sid: String) {

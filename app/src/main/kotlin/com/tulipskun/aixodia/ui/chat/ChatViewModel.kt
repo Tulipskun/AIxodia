@@ -466,17 +466,19 @@ class ChatViewModel(
                         turnBaseSeq = -1L
                         busy.value = false
                         liveUsage.value = null
-                        // Raw daemon text is logged by the daemon; the user sees Thai.
-                        // The error becomes a retryable card, not just a notice line.
+                        // Raw daemon text is logged by the daemon; the user sees
+                        // this app's wording. A failure the daemon can retry gets
+                        // a card with a Retry button; a chat it does not have gets
+                        // a fresh chat instead, because Retry there is refused
+                        // every single time.
                         val msg = friendlyError(f.text)
-                        errorCard.value = msg
-                        notice.value = msg
-                        // A session the daemon has never heard of is not worth
-                        // retrying: clearing its pending flags lets the next
-                        // sync prune the dead chat instead of resending into it.
                         if (isMissingSession(f.text)) {
-                            val dead = sessionId
-                            viewModelScope.launch { repo.forgetDeadSession(dead) }
+                            errorCard.value = ""
+                            notice.value = msg
+                            dropDeadChat(sid.ifBlank { sessionId })
+                        } else {
+                            errorCard.value = msg
+                            notice.value = msg
                         }
                         finishStats()
                         if (baseSeq >= 0L) {
@@ -1316,6 +1318,36 @@ class ChatViewModel(
                 notice.value = "Could not ask the daemon to retry"
                 clearLiveTurn()
             }
+        }
+    }
+
+    /**
+     * The daemon does not have this chat. D1 holds the only copy of the
+     * history and the phone's rows are just its cache, so the transcript
+     * cannot be continued or restored from here: drop the cached chat and open
+     * a New chat in its place. Doing it on the error itself means the screen
+     * never stays on a chat whose every message would fail the same way, and
+     * the notice says plainly where the history went.
+     */
+    private fun dropDeadChat(dead: String) {
+        viewModelScope.launch {
+            repo.forgetDeadSession(dead)
+            if (sessionId != dead) return@launch
+            recoveryJob?.cancel()
+            recoveryJob = null
+            val next = runCatching { repo.createDraftSession() }.getOrNull()
+            if (next == null) {
+                notice.value = "This chat no longer exists on the daemon. Its history was lost there."
+                return@launch
+            }
+            sessionId = next
+            startWindow(next)
+            selectedProvider.value = ""
+            selectedModel.value = ""
+            hasStoredRoute.value = false
+            draftRoute = null
+            settings.saveSession(next)
+            notice.value = "This chat no longer exists on the daemon — its history was lost there. A new chat is open."
         }
     }
 
