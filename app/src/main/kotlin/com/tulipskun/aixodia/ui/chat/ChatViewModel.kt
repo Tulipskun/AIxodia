@@ -90,6 +90,14 @@ data class TurnStats(
     }
 }
 
+/**
+ * How long a sent turn may go without a single frame from the daemon — not even
+ * an ack — before the screen says so and lets the next message through. A live
+ * turn can legitimately think for longer than this, but it has been heard from
+ * by then; this is only the dead-of-silence case.
+ */
+private const val TURN_SILENCE_MS = 45_000L
+
 class ChatViewModel(
     private val repo: ChatRepository,
     private val settings: SettingsStore,
@@ -321,6 +329,16 @@ class ChatViewModel(
      */
     private var switchJob: Job? = null
     private var lastRecoveryRetry = 0L
+    /**
+     * When the daemon last said anything about the turn in flight, and whether
+     * it has said anything at all. A turn whose message never reaches the
+     * daemon leaves [busy] set, and every later send is refused with a one-line
+     * notice — which reads as the assistant having stopped answering. The
+     * watcher in `init` uses these two to tell that apart from a turn that is
+     * simply thinking.
+     */
+    private var lastFrameAt = 0L
+    private var turnHeard = false
     val selectedProvider = MutableStateFlow("")
     val selectedModel = MutableStateFlow("")
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
@@ -409,6 +427,9 @@ class ChatViewModel(
         viewModelScope.launch {
             repo.liveFrames.collect { f ->
                 if (f.sessionId.isNotEmpty() && f.sessionId != sessionId) return@collect
+                // Any frame, an ack included, means the daemon has the turn.
+                lastFrameAt = SystemClock.elapsedRealtime()
+                turnHeard = true
                 when (f.kind) {
                     // One streamed chunk: append to the bubble the phone is
                     // already showing.
@@ -471,6 +492,21 @@ class ChatViewModel(
                     // button must stay on screen.
                     "ack" -> { notice.value = "" }
                 }
+            }
+        }
+        // A turn the daemon never acknowledged is the one case where the screen
+        // would otherwise stay busy forever: the question is on disk, the
+        // composer refuses the next one, and nothing on screen says why. Say it,
+        // and hand the next attempt back to the person.
+        viewModelScope.launch {
+            while (true) {
+                delay(5_000)
+                if (!busy.value || lastFrameAt == 0L || turnHeard) continue
+                if (SystemClock.elapsedRealtime() - lastFrameAt < TURN_SILENCE_MS) continue
+                clearLiveTurn()
+                val msg = "The daemon did not answer. The question is kept — tap Retry when it is back."
+                errorCard.value = msg
+                notice.value = msg
             }
         }
     }
@@ -960,6 +996,9 @@ class ChatViewModel(
         finishStats()
         turnBaseSeq = -1L
         liveText.value = ""
+        // Nothing is in flight, so the silence watcher has nothing to judge.
+        lastFrameAt = 0L
+        turnHeard = false
     }
 
     /** Freezes the footer's numbers when the turn ends. */
@@ -1168,6 +1207,10 @@ class ChatViewModel(
         answerSettled = false
         errorCard.value = ""
         busy.value = true
+        // The daemon has not been heard from yet for this turn. The watcher
+        // starts counting from here.
+        lastFrameAt = SystemClock.elapsedRealtime()
+        turnHeard = false
         liveChars = 0
         liveBlocks.value = emptyList()
         liveUsage.value = null

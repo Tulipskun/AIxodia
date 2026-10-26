@@ -544,38 +544,45 @@ class ChatRepository(
     ): Boolean {
         val clean = text.trim()
         if (clean.isEmpty() && attachments.isEmpty()) return true
-        // A New chat gets its server row on the first real send, not when the
-        // button was pressed. If the daemon cannot take it, throw instead of
-        // queueing a message into a session that does not exist there.
-        if (socket.state.value == ConnState.ONLINE && isDraft(sid) && !ensureRemoteSession(sid, clean.take(60))) {
-            throw IllegalStateException("Could not start this chat on the daemon")
-        }
+        // A repeat tap on the last, already-answered question retries that row
+        // instead of stacking a twin bubble. It is also the one path where the
+        // chat has to exist already, so the server session is ensured before the
+        // row is marked pending again.
+        var last: MessageEntity? = null
         try {
             val lastSeq = db.messages().maxSeq(sid)
-            if (lastSeq > 0) {
-                val last = db.messages().get(sid, lastSeq)
-                if (last != null && last.role == "user" && last.text.trim() == clean) {
-                    if (last.pending) return false
-                    val clientMsgId = "$sid:${System.currentTimeMillis()}"
-                    db.messages().upsert(last.copy(
-                        pending = true,
-                        clientMsgId = clientMsgId,
-                        createdAt = System.currentTimeMillis(),
-                    ))
-                    // The frame reaching OkHttp's queue is not the daemon
-                    // accepting it. Keep the row pending until the ack frame
-                    // arrives; if the socket dies now, the reconnect flushes it.
-                    socket.send(sid, clean, clientMsgId, attachments)
-                    return true
-                }
+            if (lastSeq > 0) last = db.messages().get(sid, lastSeq)
+        } catch (_: Exception) {
+        }
+        if (last != null && last.role == "user" && last.text.trim() == clean) {
+            if (last.pending) return false
+            if (socket.state.value == ConnState.ONLINE && isDraft(sid) &&
+                !ensureRemoteSession(sid, clean.take(60))
+            ) {
+                throw IllegalStateException("Could not start this chat on the daemon")
             }
-        } catch (_: Exception) { }
+            val clientMsgId = "$sid:${System.currentTimeMillis()}"
+            db.messages().upsert(last.copy(
+                pending = true,
+                clientMsgId = clientMsgId,
+                createdAt = System.currentTimeMillis(),
+            ))
+            // The frame reaching OkHttp's queue is not the daemon accepting it.
+            // Keep the row pending until the ack frame arrives; if the socket
+            // dies now, the reconnect flushes it.
+            socket.send(sid, clean, clientMsgId, attachments)
+            return true
+        }
         val dup = try {
             db.messages().allPending().any { it.sessionId == sid && it.role == "user" && it.text.trim() == clean }
         } catch (_: Exception) { false }
         if (dup) return false
         val clientMsgId = "$sid:${System.currentTimeMillis()}"
         val seq = db.messages().maxSeq(sid) + 1
+        // The question lands in Room before the daemon is asked anything. A New
+        // chat used to create its server session first, so on a cold tunnel the
+        // bubble appeared seconds after the tap; now the row is on screen at
+        // once and only the turn behind it waits for the round trip.
         db.messages().upsert(
             MessageEntity(
                 sessionId = sid,
@@ -587,6 +594,16 @@ class ChatRepository(
                 clientMsgId = clientMsgId,
             )
         )
+        // A New chat gets its server row on the first real send, not when the
+        // button was pressed. If the daemon cannot take it, the optimistic row
+        // is withdrawn rather than left waiting forever behind a chat that does
+        // not exist on the server.
+        if (socket.state.value == ConnState.ONLINE && isDraft(sid) &&
+            !ensureRemoteSession(sid, clean.take(60))
+        ) {
+            runCatching { db.messages().deleteOne(sid, seq) }
+            throw IllegalStateException("Could not start this chat on the daemon")
+        }
         // queued == false → stays pending. queued == true also stays pending
         // until the daemon's ack: a close between send and ack must not lose
         // the question. The state collector flushes unacked rows on reconnect.
