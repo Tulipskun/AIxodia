@@ -101,14 +101,16 @@ without approval; the daemon owns no credential of its own.
   calls `RunSocket.reconnect()`; the terminal socket reconnects with a fresh
   ticket.
 - **Terminal** — a dropped socket asks for a new ticket and redraws from the
-  engine's ring. While the terminal is open a foreground service keeps every
-  tab's WebSocket attached across app switches; closing the screen ends its
+  engine's ring. While the terminal has tabs open a foreground service keeps
+  every tab's WebSocket attached across app switches and across a trip back to
+  the chat: Back only hides the window, so returning lands on the same tab with
+  the same screen instead of redialing. The terminal's own Close action ends its
   tabs — every shell is closed on the engine and the saved tab list is cleared,
-  so reopening the terminal starts on a fresh shell instead of handing back
-  tabs that were already closed. Removing the app from recents closes the
-  sockets explicitly. Closing a single tab sends `close`, so that shell and its
-  tmux slot are freed, and the tab is not reattached if a list poll still
-  reports it for a moment.
+  so reopening the terminal starts on a fresh shell instead of handing back tabs
+  that were already closed. Removing the app from recents closes the sockets
+  explicitly. Closing a single tab sends `close`, so that shell and its tmux slot
+  are freed, and the tab is not reattached if a list poll still reports it for a
+  moment.
 
 ## Production DB (runtime config, nothing hardcoded)
 

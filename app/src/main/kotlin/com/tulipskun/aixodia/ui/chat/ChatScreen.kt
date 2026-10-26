@@ -75,6 +75,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -141,7 +142,10 @@ import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
 import com.tulipskun.aixodia.ui.sessions.sessionTitle
 import com.tulipskun.aixodia.ui.providers.ProvidersScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
+import com.tulipskun.aixodia.ui.terminal.TerminalUiState
 import com.tulipskun.aixodia.ui.terminal.TerminalWindow
+import com.tulipskun.aixodia.term.TerminalConnections
+import com.tulipskun.aixodia.term.TerminalLiveService
 import com.tulipskun.aixodia.update.UpdateManager
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -189,6 +193,37 @@ fun ChatScreen(
     var showProviders by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
 
+    // The terminal's sockets, tabs and grids belong to this screen, not to the
+    // visible window. Back only hides the window: every WebSocket stays
+    // attached and every emulator keeps its screen, so returning to the
+    // terminal lands on the same tab with the same scrollback instead of
+    // redialing or starting a new shell. Only the terminal's own Close action
+    // ends the tabs (see TerminalWindow.closeWindow).
+    val terminalSocket = remember(settings, history) { TerminalSocket(settings, history) }
+    val terminalUi = remember(terminalSocket) { TerminalUiState(terminalSocket) }
+    val terminalSessions by terminalSocket.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val terminalContext = LocalContext.current
+    DisposableEffect(terminalSocket) {
+        TerminalConnections.attach(terminalSocket)
+        onDispose {
+            // The whole chat screen is going away (activity finish, process
+            // teardown): now the sockets really do hang up. Navigator changes
+            // above never reach this block because ChatScreen stays composed.
+            terminalSocket.close()
+            TerminalConnections.detach(terminalSocket)
+            TerminalLiveService.stop(terminalContext)
+        }
+    }
+    // Keep every open tab's grid current even while the terminal window is
+    // hidden. The shells keep printing behind the chat; draining here means
+    // returning to the window shows the live screen without replaying a backlog
+    // through the socket's channel.
+    LaunchedEffect(terminalSocket, terminalSessions) {
+        if (terminalSessions.isNotEmpty()) {
+            terminalUi.pump(terminalSessions)
+        }
+    }
+
     // Settings is a screen branch of the chat, not a separate Android route: the
     // system back button has to return here, not leave the app.
     BackHandler(enabled = showSettings) { showSettings = false }
@@ -220,12 +255,12 @@ fun ChatScreen(
     // shell in a letterbox. It needs no session and no view model: it talks to
     // the machine, not to the chat.
     if (showTerminal) {
-        // The native terminal owns one socket per open tab for the life of
-        // this branch. Leaving the window only detaches; the shells stay on
-        // the engine for a later reattach, exactly as their tmux sessions are.
-        val terminal = remember(settings, history) { TerminalSocket(settings, history) }
+        // The socket and the per-tab emulators were created above and outlive
+        // this branch. Leaving the window only hides it; the shells stay on the
+        // engine and every tab's WebSocket stays attached for the trip back.
         TerminalWindow(
-            socket = terminal,
+            socket = terminalSocket,
+            ui = terminalUi,
             onClose = { showTerminal = false },
         )
         return

@@ -85,16 +85,18 @@ data class TabEvent(val sessionId: String, val event: TermEvent)
  * `/terminal` endpoint.
  *
  * A tab is a shell on the engine, keyed by the persisted session id. All live
- * tabs stay attached for as long as this window is open: switching a tab only
- * changes which emulator is on screen, it never hangs up and redials. The app
- * itself still draws every cell with its own [TerminalEmulator]; there is no
- * WebView and no JavaScript terminal.
+ * tabs stay attached for as long as this socket is owned by the chat screen:
+ * switching a tab only changes which emulator is on screen, it never hangs up
+ * and redials. Leaving the terminal for the chat only hides the window, so the
+ * same tabs and streams are still there when it is shown again. The app itself
+ * still draws every cell with its own [TerminalEmulator]; there is no WebView
+ * and no JavaScript terminal.
  *
  * The socket is authenticated with a single-use, short-lived ticket fetched
  * over the normal authenticated HTTP path, so the long-lived API token never
- * appears in a URL. When the window goes away — or the app goes to the
- * background — the streams hang up; the shells themselves stay on the engine
- * (in tmux when available), ready for a replay on the next attach.
+ * appears in a URL. Closing the terminal's tabs (or the process going away)
+ * hangs up the streams; the shells themselves stay on the engine (in tmux when
+ * available), ready for a replay on the next attach.
  */
 class TerminalSocket(
     private val settings: SettingsStore,
@@ -380,11 +382,10 @@ class TerminalSocket(
     /**
      * The window was closed on purpose: end the shells, not just the streams.
      *
-     * Leaving the window used to keep every socket attached so a trip to the
-     * chat and back would not redial, and that also left the shells running on
-     * the engine: closing the terminal and opening it again showed the tabs the
-     * user thought they had closed. A close is a close — every tab is ended, the
-     * saved list is cleared, and the next open starts on a fresh shell.
+     * Going back to the chat only hides the window, so a trip back keeps every
+     * socket attached. This is the explicit Close action: every tab is ended,
+     * the saved list is cleared, and the next open starts on a fresh shell
+     * instead of handing back tabs the user thought they had closed.
      */
     @Synchronized
     fun endAllTabs() {
