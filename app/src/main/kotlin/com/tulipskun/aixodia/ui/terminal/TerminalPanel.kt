@@ -819,17 +819,21 @@ private fun TerminalKeys(
     onAlt: () -> Unit,
     onKey: (ByteArray) -> Unit,
 ) {
-    // Exactly two rows, five keys each. The order is deliberate: the arrows
+    // Exactly two rows, six keys each. The order is deliberate: the arrows
     // sit where the thumb expects them, and DelAll is the whole-line erase
-    // (Ctrl-U/Ctrl-K) rather than a burst of backspaces.
+    // (Ctrl-U/Ctrl-K) rather than a burst of backspaces. CMD is the same byte
+    // the old "^P" sent; only its label changed. SHELL replaces the running
+    // shell with a fresh login shell in place, which is how a wedged or
+    // half-configured session gets a clean one without a new tab.
     val top = listOf(
         "Esc" to byteArrayOf(27),
         "Tab" to byteArrayOf(9),
-        "^P" to byteArrayOf(16),
+        "CMD" to byteArrayOf(16),
         "\u2191" to "\u001b[A".toByteArray(),
         // Ctrl-U then Ctrl-K: kill back to the start and forward to the end,
         // so the whole line goes even when the cursor was left in the middle.
         "DelAll" to byteArrayOf(21, 11),
+        "SHELL" to "exec \$SHELL\r".toByteArray(),
     )
     val bottom = listOf(
         "\u2190" to "\u001b[D".toByteArray(),
@@ -871,27 +875,40 @@ private fun TerminalKeys(
                         KeyChip(label, wide = true, onClick = { onKey(bytes) })
                     }
                 }
+                // No longer a full-height slab: the menu is one key among the
+                // others, at the far right of the bottom row where the thumb
+                // already is.
+                Box(Modifier.weight(1f)) {
+                    MenuKey(onClick = onMenu)
+                }
             }
         }
-        // Two rows tall, so it is a full-height target instead of another
-        // narrow chip squeezed between the keys. It sits on the far right,
-        // past the arrows, where the thumb reaches it without covering a key.
-        Surface(
-            color = InkLine,
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier
-                .width(48.dp)
-                .height(70.dp)
-                .clickable(onClick = onMenu),
+    }
+}
+
+/** The drawer key, drawn to the same size as a [KeyChip] so the bar stays even. */
+@Composable
+private fun MenuKey(onClick: () -> Unit) {
+    Surface(
+        color = InkLine,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp)
+                .padding(horizontal = 4.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "Menu",
-                    tint = InkText,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
+            Icon(
+                Icons.Default.Menu,
+                contentDescription = "Menu",
+                tint = InkText,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
