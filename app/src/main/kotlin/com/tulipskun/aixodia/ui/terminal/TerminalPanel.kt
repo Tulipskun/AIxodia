@@ -842,25 +842,6 @@ private fun TerminalKeys(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // Two rows tall, so it is a full-height target instead of another
-        // narrow chip squeezed between the keys.
-        Surface(
-            color = InkLine,
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier
-                .width(48.dp)
-                .height(70.dp)
-                .clickable(onClick = onMenu),
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "Menu",
-                    tint = InkText,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
-        }
         Column(
             Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -890,6 +871,26 @@ private fun TerminalKeys(
                         KeyChip(label, wide = true, onClick = { onKey(bytes) })
                     }
                 }
+            }
+        }
+        // Two rows tall, so it is a full-height target instead of another
+        // narrow chip squeezed between the keys. It sits on the far right,
+        // past the arrows, where the thumb reaches it without covering a key.
+        Surface(
+            color = InkLine,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .width(48.dp)
+                .height(70.dp)
+                .clickable(onClick = onMenu),
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Menu,
+                    contentDescription = "Menu",
+                    tint = InkText,
+                    modifier = Modifier.size(24.dp),
+                )
             }
         }
     }
