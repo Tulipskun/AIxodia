@@ -41,12 +41,14 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
   the add-provider key field stops claiming a key is mandatory for every adapter
 [COMPLETED] ErrorText: name OpenCode's client-gated refusal and the keyless
   provider's own rate limit, instead of a bare "HTTP 402"
-[IN_PROCESS] build, test, commit, push, release via scripts/release.sh
+[IN_PROCESS] cut the app release for 3c34719 via scripts/release.sh, verify
+`latest` carries the new APK
 
 NOTE:
-- ErrorText now separates the two free-tier refusals: OpenCode's client-gated
-  403/429 (points at the keyless built-in) and the keyless provider's own
-  "Free limit reached" 402 (names the ~30 s window).
+- App commit 3c34719 pushed; unit tests green (:app:testDebugUnitTest, 1m17s).
+- Existing chats pinned to Opencode keep their pin, so after the engine deploys
+  the sessions that name Opencode are repointed at AIxodia Free/openai-fast with
+  PATCH /api/sessions/:id — a new default does not retro-fix an old chat.
 - Engine fix 5d9415d pushed: AIxodia Free (keyless openai adapter) + Opencode,
   and the engine no longer refuses a provider for carrying no keys. CI + Release
   engine rebuild engine-latest; the app side is the label/error wording below.
