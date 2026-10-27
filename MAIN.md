@@ -41,3 +41,4 @@ NOTE:
 - Kotlin compiles clean with the Shift chip (compileDebugKotlin green).
 - Menu chip removed; Kotlin compiles green (compileDebugKotlin).
 - Unit tests green after the menu-chip removal.
+- Commit 847f77b (menu opens by swipe only) pushed to main.
