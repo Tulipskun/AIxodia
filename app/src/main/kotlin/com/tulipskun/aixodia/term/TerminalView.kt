@@ -94,10 +94,13 @@ class TerminalView @JvmOverloads constructor(
     /** Called after a latched modifier is spent, so the key row can un-light. */
     var onModsConsumed: (() -> Unit)? = null
 
-    // Latched by the Ctrl/Alt chips: they apply to the next thing typed, then
-    // clear themselves, exactly as a one-shot modifier should.
+    // Latched by the Ctrl/Alt/Shift chips: they apply to the next thing
+    // typed, then clear themselves, exactly as a one-shot modifier should.
+    // Shift matters to one key only — Tab — because the soft keyboard
+    // supplies letter case itself; a latched Shift plus Tab is the backtab.
     private var latchedCtrl = false
     private var latchedAlt = false
+    private var latchedShift = false
 
     private var emulator: TerminalEmulator? = null
 
@@ -284,19 +287,22 @@ class TerminalView @JvmOverloads constructor(
         }
     }
 
-    /** Set the one-shot Ctrl/Alt chips; they are spent by the next keystroke. */
-    fun setLatchedMods(ctrl: Boolean, alt: Boolean) {
+    /** Set the one-shot Ctrl/Alt/Shift chips; they are spent by the next keystroke. */
+    fun setLatchedMods(ctrl: Boolean, alt: Boolean, shift: Boolean) {
         latchedCtrl = ctrl
         latchedAlt = alt
+        latchedShift = shift
     }
 
     /**
      * Text produced by the keyboard. A latched Ctrl or Alt is applied to the
      * first character and then released, so Ctrl then c really does send 0x03.
+     * Shift changes no letter — the keyboard already supplied the case — but a
+     * latched Shift is spent all the same, so the chip does not outlive its key.
      */
     fun sendTyped(text: String) {
         if (text.isEmpty()) return
-        if (!latchedCtrl && !latchedAlt) {
+        if (!latchedCtrl && !latchedAlt && !latchedShift) {
             sendText(text)
             return
         }
@@ -304,6 +310,7 @@ class TerminalView @JvmOverloads constructor(
         val alt = latchedAlt
         latchedCtrl = false
         latchedAlt = false
+        latchedShift = false
         onModsConsumed?.invoke()
         val cp = text.codePointAt(0)
         val rest = text.substring(Character.charCount(cp))
@@ -1124,13 +1131,14 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator
         val ctrl = event.isCtrlPressed || latchedCtrl
         val alt = event.isAltPressed || latchedAlt
+        val shift = event.isShiftPressed || latchedShift
         var handled = true
         when (event.keyCode) {
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> sendText("\r")
             KeyEvent.KEYCODE_DEL -> sendText("\u007f")
             KeyEvent.KEYCODE_FORWARD_DEL -> sendText("\u001b[3~")
             KeyEvent.KEYCODE_TAB ->
-                if (event.isShiftPressed) sendText("\u001b[Z") else sendText("\t")
+                if (shift) sendText("\u001b[Z") else sendText("\t")
             KeyEvent.KEYCODE_ESCAPE -> sendText("\u001b")
             KeyEvent.KEYCODE_DPAD_UP -> sendBytes(em?.cursorKey('A') ?: "\u001b[A".toByteArray())
             KeyEvent.KEYCODE_DPAD_DOWN -> sendBytes(em?.cursorKey('B') ?: "\u001b[B".toByteArray())
@@ -1163,9 +1171,10 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun consumeLatch() {
-        if (latchedCtrl || latchedAlt) {
+        if (latchedCtrl || latchedAlt || latchedShift) {
             latchedCtrl = false
             latchedAlt = false
+            latchedShift = false
             onModsConsumed?.invoke()
         }
     }

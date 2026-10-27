@@ -244,6 +244,7 @@ fun TerminalWindow(
     val terminalView = remember { mutableStateOf<TerminalView?>(null) }
     val ctrlOn = remember { mutableStateOf(false) }
     val altOn = remember { mutableStateOf(false) }
+    val shiftOn = remember { mutableStateOf(false) }
     val atBottom = remember { mutableStateOf(true) }
     val selecting = remember { mutableStateOf(false) }
     val verticalDrag = remember { mutableStateOf(false) }
@@ -472,6 +473,7 @@ fun TerminalWindow(
                             // The view has spent its latch; keep the chips in step.
                             ctrlOn.value = false
                             altOn.value = false
+                            shiftOn.value = false
                         }
                         requestFocus()
                         terminalView.value = this
@@ -542,18 +544,30 @@ fun TerminalWindow(
                                     TerminalKeys(
                                         ctrlOn = ctrlOn.value,
                                         altOn = altOn.value,
+                                        shiftOn = shiftOn.value,
                                         onMenu = { drawerScope.launch { drawerState.open() } },
                                         onCtrl = {
                                             val v = !ctrlOn.value
                                             ctrlOn.value = v
-                                            view.setLatchedMods(v, altOn.value)
+                                            view.setLatchedMods(v, altOn.value, shiftOn.value)
                                             view.keepSoftKeyboardIfShown()
                                         },
                                         onAlt = {
                                             val v = !altOn.value
                                             altOn.value = v
-                                            view.setLatchedMods(ctrlOn.value, v)
+                                            view.setLatchedMods(ctrlOn.value, v, shiftOn.value)
                                             view.keepSoftKeyboardIfShown()
+                                        },
+                                        onShift = {
+                                            val v = !shiftOn.value
+                                            shiftOn.value = v
+                                            view.setLatchedMods(ctrlOn.value, altOn.value, v)
+                                            view.keepSoftKeyboardIfShown()
+                                        },
+                                        onShiftSpent = {
+                                            // The backtab went out; the latch has no key left.
+                                            shiftOn.value = false
+                                            view.setLatchedMods(ctrlOn.value, altOn.value, false)
                                         },
                                         onKey = { bytes ->
                                             socket.send(bytes)
@@ -564,10 +578,11 @@ fun TerminalWindow(
                                     TerminalComposer(
                                         socket = socket,
                                         onSend = {
-                                            if (ctrlOn.value || altOn.value) {
+                                            if (ctrlOn.value || altOn.value || shiftOn.value) {
                                                 ctrlOn.value = false
                                                 altOn.value = false
-                                                view.setLatchedMods(false, false)
+                                                shiftOn.value = false
+                                                view.setLatchedMods(false, false, false)
                                             }
                                         },
                                     )
@@ -866,14 +881,19 @@ private fun statusLabel(state: TermState): String = when (state) {
  *
  * Ctrl and Alt latch for one keystroke: tap Ctrl, then type C, and the view
  * turns it into 0x03 (the same as the ^C key, but for any letter or symbol).
+ * Shift latches the same way, and its one key is Tab: Shift then Tab sends
+ * the backtab (ESC[Z) that reverses an edit's completion or a TUI's strip.
  */
 @Composable
 private fun TerminalKeys(
     ctrlOn: Boolean,
     altOn: Boolean,
+    shiftOn: Boolean,
     onMenu: () -> Unit,
     onCtrl: () -> Unit,
     onAlt: () -> Unit,
+    onShift: () -> Unit,
+    onShiftSpent: () -> Unit,
     onKey: (ByteArray) -> Unit,
 ) {
     // Exactly two rows, six keys each. The order is deliberate: the arrows
@@ -883,9 +903,10 @@ private fun TerminalKeys(
     // changed. The refresh key replaces the running shell with a fresh login
     // shell in place — exec $SHELL — which is how a wedged or half-configured
     // session gets a clean one without a new tab.
+    val tab = if (shiftOn) "\u001b[Z".toByteArray() else byteArrayOf(9)
     val top = listOf(
         "Esc" to byteArrayOf(27),
-        "Tab" to byteArrayOf(9),
+        "Tab" to tab,
         "CMD" to byteArrayOf(16),
         "\u2191" to "\u001b[A".toByteArray(),
     )
@@ -910,7 +931,12 @@ private fun TerminalKeys(
             ) {
                 top.forEach { (label, bytes) ->
                     Box(Modifier.weight(1f)) {
-                        KeyChip(label, wide = true, onClick = { onKey(bytes) })
+                        KeyChip(label, wide = true, onClick = {
+                            onKey(bytes)
+                            // Only Tab answers to Shift: once the backtab has
+                            // gone out, the latch has nothing left to colour.
+                            if (shiftOn && label == "Tab") onShiftSpent()
+                        })
                     }
                 }
                 Box(Modifier.weight(1f)) {
@@ -937,6 +963,9 @@ private fun TerminalKeys(
                 }
                 Box(Modifier.weight(1f)) {
                     KeyChip("Alt", active = altOn, wide = true, onClick = onAlt)
+                }
+                Box(Modifier.weight(1f)) {
+                    KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
                 }
                 bottom.forEach { (label, bytes) ->
                     Box(Modifier.weight(1f)) {
