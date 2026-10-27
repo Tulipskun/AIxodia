@@ -32,7 +32,8 @@ HoldableKeyChip — pointerInput + awaitEachGesture, one send on tap, then
 one send per KEY_REPEAT_MS (100ms) after a 400ms grace, deadline windows
 on the wall clock so pointer noise cannot starve the repeat, ended by lift
 [COMPLETED] build, test, commit, push, release
-  57718bd pushed to main
+  57718bd pushed to main; latest re-cut 2026-10-27 20:57 UTC (versionName
+  1.0.202610272057, versionCode 1793134669, signature OK)
 
 NOTE:
 - AGENTS.md rule: every non-reading tool call must be accompanied by a MAIN.md update.
