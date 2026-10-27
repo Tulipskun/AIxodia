@@ -45,6 +45,9 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
 `latest` carries the new APK
 
 NOTE:
+- First `scripts/release.sh` attempt died inside `:app:kspDebugKotlin` with no
+  error text and exit 1: the box has 13 GB and no swap, so the JVM was killed,
+  not the build failing. Retrying once the engine CI poll is idle.
 - App commit 3c34719 pushed; unit tests green (:app:testDebugUnitTest, 1m17s).
 - Existing chats pinned to Opencode keep their pin, so after the engine deploys
   the sessions that name Opencode are repointed at AIxodia Free/openai-fast with
