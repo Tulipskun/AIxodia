@@ -41,13 +41,15 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
   the add-provider key field stops claiming a key is mandatory for every adapter
 [COMPLETED] ErrorText: name OpenCode's client-gated refusal and the keyless
   provider's own rate limit, instead of a bare "HTTP 402"
-[IN_PROCESS] cut the app release for 3c34719 via scripts/release.sh, verify
-`latest` carries the new APK
+[COMPLETED] cut the app release via scripts/release.sh; `latest` now targets
+3fdc242, which carries the provider wording and error mapping
 
 NOTE:
-- First `scripts/release.sh` attempt died inside `:app:kspDebugKotlin` with no
-  error text and exit 1: the box has 13 GB and no swap, so the JVM was killed,
-  not the build failing. Retrying once the engine CI poll is idle.
+- App release cut and published: `latest` → commit 3fdc242, APK signed
+  CN=AIxodia, versionCode from the build. The in-app checker reads
+  AIxodia-version.json, so phones on the old build are offered this one.
+  (An earlier tail of the build log looked like a kspDebugKotlin death; it was
+  only a mid-flight log — the build and the publish both succeeded.)
 - App commit 3c34719 pushed; unit tests green (:app:testDebugUnitTest, 1m17s).
 - Existing chats pinned to Opencode keep their pin, so after the engine deploys
   the sessions that name Opencode are repointed at AIxodia Free/openai-fast with
