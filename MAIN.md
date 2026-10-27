@@ -27,4 +27,7 @@ NOTE:
 - JDK 17 (apt openjdk-17) is what AGP needs; 21 breaks JdkImageTransform.
 - Unit tests green again (testDebugUnitTest) with the Shift chip.
 - SDK on PATH for release.sh; release uses scripts/release.sh, then verify and push.
+- Push needs the gh credential helper — configure git credential.helper before pushing.
+- Commit cdddcbf pushed to Tulipskun/AIxodia main.
+- release.sh refused a dirty tree on itself; MAIN.md notes committed before it runs.
 - Kotlin compiles clean with the Shift chip (compileDebugKotlin green).
