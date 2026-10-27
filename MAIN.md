@@ -2,7 +2,7 @@ GOAL:
 [COMPLETED] chat AI works: message appears fast, AI answer arrives
 [COMPLETED] app shows chats that live in D1 even without the tunnel
 [COMPLETED] switching chat session does not reconnect the websocket
-[IN_PROCESS] terminal: Shift+Tab usable from the key chips
+[COMPLETED] terminal: Shift+Tab usable from the key chips
 
 PLAN:
 [COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
@@ -12,10 +12,12 @@ PLAN:
 [COMPLETED] build, test (206 green), commit, push
 [COMPLETED] release via scripts/release.sh: keystore from aixodia-keys, sign, verify, publish latest
 [COMPLETED] bootstrap local toolchain: Android SDK 35 + JDK 17 for builds
-[IN_PROCESS] TerminalKeys gets a Shift chip that latches like Ctrl/Alt; Tab
+[COMPLETED] TerminalKeys gets a Shift chip that latches like Ctrl/Alt; Tab
 with Shift latched sends the backtab ESC[Z; TerminalView spends the Shift
 latch on Tab (chips, hardware keys, typed text) the same one-shot way
-[IN_PROCESS] build, test, commit, push, release via scripts/release.sh
+[COMPLETED] build, test, commit, push, release via scripts/release.sh
+  cdddcbf pushed; latest re-cut 2026-10-27 20:21 UTC (versionName
+  1.0.202610272010, versionCode 1793131859, signature OK)
 
 NOTE:
 - AGENTS.md rule: every non-reading tool call must be accompanied by a MAIN.md update.
@@ -30,4 +32,5 @@ NOTE:
 - Push needs the gh credential helper — configure git credential.helper before pushing.
 - Commit cdddcbf pushed to Tulipskun/AIxodia main.
 - release.sh refused a dirty tree on itself; MAIN.md notes committed before it runs.
+- Release published: https://github.com/Tulipskun/AIxodia/releases/tag/latest (signature OK).
 - Kotlin compiles clean with the Shift chip (compileDebugKotlin green).
