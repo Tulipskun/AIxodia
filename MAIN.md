@@ -3,6 +3,7 @@ GOAL:
 [COMPLETED] app shows chats that live in D1 even without the tunnel
 [COMPLETED] switching chat session does not reconnect the websocket
 [COMPLETED] terminal: Shift+Tab usable from the key chips
+[IN_PROCESS] terminal: the menu opens by swipe only — drop the menu key chip
 
 PLAN:
 [COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
@@ -18,6 +19,10 @@ latch on Tab (chips, hardware keys, typed text) the same one-shot way
 [COMPLETED] build, test, commit, push, release via scripts/release.sh
   cdddcbf pushed; latest re-cut 2026-10-27 20:21 UTC (versionName
   1.0.202610272010, versionCode 1793131859, signature OK)
+[IN_PROCESS] Remove the MenuKey chip and composable (and the Menu icon import),
+drop TerminalKeys' onMenu param; the drawer still opens by a left-to-right
+swipe in the grid, which was already wired via ModalNavigationDrawer
+[IN_PROCESS] build, test, commit, push, release
 
 NOTE:
 - AGENTS.md rule: every non-reading tool call must be accompanied by a MAIN.md update.
@@ -34,3 +39,5 @@ NOTE:
 - release.sh refused a dirty tree on itself; MAIN.md notes committed before it runs.
 - Release published: https://github.com/Tulipskun/AIxodia/releases/tag/latest (signature OK).
 - Kotlin compiles clean with the Shift chip (compileDebugKotlin green).
+- Menu chip removed; Kotlin compiles green (compileDebugKotlin).
+- Unit tests green after the menu-chip removal.

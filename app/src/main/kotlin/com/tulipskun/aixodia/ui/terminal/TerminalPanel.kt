@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
@@ -400,8 +399,7 @@ fun TerminalWindow(
 
     // The terminal itself is still one platform ViewGroup, but the chrome no
     // longer sits above it: the session controls live in a drawer so the shell
-    // gets the whole page. A menu key or a left-to-right swipe in the grid
-    // opens it.
+    // gets the whole page. A left-to-right swipe in the grid opens it.
     ModalNavigationDrawer(
         drawerState = drawerState,
         // The drawer itself owns the horizontal drag, exactly as it does on the
@@ -545,7 +543,6 @@ fun TerminalWindow(
                                         ctrlOn = ctrlOn.value,
                                         altOn = altOn.value,
                                         shiftOn = shiftOn.value,
-                                        onMenu = { drawerScope.launch { drawerState.open() } },
                                         onCtrl = {
                                             val v = !ctrlOn.value
                                             ctrlOn.value = v
@@ -889,7 +886,6 @@ private fun TerminalKeys(
     ctrlOn: Boolean,
     altOn: Boolean,
     shiftOn: Boolean,
-    onMenu: () -> Unit,
     onCtrl: () -> Unit,
     onAlt: () -> Unit,
     onShift: () -> Unit,
@@ -972,12 +968,6 @@ private fun TerminalKeys(
                         KeyChip(label, wide = true, onClick = { onKey(bytes) })
                     }
                 }
-                // No longer a full-height slab: the menu is one key among the
-                // others, at the far right of the bottom row where the thumb
-                // already is.
-                Box(Modifier.weight(1f)) {
-                    MenuKey(onClick = onMenu)
-                }
             }
         }
     }
@@ -985,8 +975,8 @@ private fun TerminalKeys(
 
 /**
  * An icon-only key, drawn to the same size as a [KeyChip] so the bar stays
- * even: the menu, the fresh-shell key and the whole-line erase are symbols
- * rather than words, and a word would not fit beside the arrows.
+ * even: the fresh-shell key and the whole-line erase are symbols rather than
+ * words, and a word would not fit beside the arrows.
  */
 @Composable
 private fun IconKey(
@@ -1016,15 +1006,6 @@ private fun IconKey(
             )
         }
     }
-}
-
-@Composable
-private fun MenuKey(onClick: () -> Unit) {
-    IconKey(
-        icon = Icons.Default.Menu,
-        contentDescription = "Menu",
-        onClick = onClick,
-    )
 }
 
 /** One tappable key; [active] fills it in while a modifier is latched. */
