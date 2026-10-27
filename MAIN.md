@@ -9,7 +9,7 @@ PLAN:
 [COMPLETED] unit tests: D1 row -> SessionRow/TurnRow mapping (D1ChatReadTest)
 [COMPLETED] docs: README/db README say history lives in D1, phone reads it fallback
 [COMPLETED] build, test (206 green), commit, push
-[IN_PROCESS] release via scripts/release.sh: keystore from aixodia-keys, sign, verify, publish latest
+[COMPLETED] release via scripts/release.sh: keystore from aixodia-keys, sign, verify, publish latest
 [COMPLETED] bootstrap local toolchain: Android SDK 35 + JDK 17 for builds
 
 NOTE:
