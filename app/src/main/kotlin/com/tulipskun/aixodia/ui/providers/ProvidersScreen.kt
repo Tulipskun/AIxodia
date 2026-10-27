@@ -326,7 +326,13 @@ private fun ProviderDetailSheet(
 
             if (provider.builtin) {
                 Text(
-                    "provider นี้ติดมากับ engine — โหมดไม่ต้อง login ใช้ฟรีโดยไม่ต้องใส่ key และแก้ไข/ลบไม่ได้",
+                    if (provider.id == "Opencode") {
+                        "provider นี้ติดมากับ engine — แก้ไข/ลบไม่ได้\n" +
+                            "OpenCode เปิดโมเดลฟรีให้แอปของตัวเองเท่านั้น ผ่าน app นี้จึงมักถูกปฏิเสธ ต้องใส่ key ของคุณเพื่อใช้โมเดลที่คิดเงิน"
+                    } else {
+                        "provider นี้ติดมากับ engine — โหมดไม่ต้อง login: ใช้ได้ทันทีโดยไม่ต้องใส่ key และแก้ไข/ลบไม่ได้\n" +
+                            "โมเดลฟรีตอบได้ประมาณ 1 ข้อความต่อ 30 วินาที ถ้าติดจำกัด ให้รอแล้วส่งอีกครั้ง"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -431,9 +437,9 @@ private fun AddProviderSheet(
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
-    // Non-login mode: an opencode provider needs no API key (free tier).
-    val valid = id.isNotBlank() && endpoint.isNotBlank() &&
-        (key.isNotBlank() || adapter == "opencode")
+    // Non-login mode: a provider with no key is asked unauthenticated, so a free
+    // tier or a local server can be added without ever pasting a key.
+    val valid = id.isNotBlank() && endpoint.isNotBlank()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -452,7 +458,7 @@ private fun AddProviderSheet(
             OutlinedTextField(value = endpoint, onValueChange = { endpoint = it }, singleLine = true,
                 label = { Text("Endpoint (https://…)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = key, onValueChange = { key = it }, singleLine = true,
-                label = { Text(if (adapter == "opencode") "Key (ไม่บังคับ — โหมดไม่ต้อง login)" else "Key") },
+                label = { Text("Key (ไม่บังคับ — ว่างได้ถ้าผู้ให้บริการไม่ต้องใช้ key)") },
                 modifier = Modifier.fillMaxWidth())
             if (error.isNotBlank()) {
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

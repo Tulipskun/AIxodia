@@ -22,9 +22,14 @@ fun friendlyError(raw: String): String {
         // otherwise identical request from 200 into 403 FreeTierError, which is
         // why this section sits in front of the key section. For the month this
         // was misread as a rejected key, the user went to check a key that was
-        // never the problem.
-        "free tier" in s || "can only be used from within" in s ->
-            "The free-tier provider rejected the request; this is not a key issue. Try again or switch models."
+        // never the problem. The refusal is now a 429 FreeUsageLimitError.
+        "free tier" in s || "can only be used from within" in s || "freeusagelimit" in s ->
+            "OpenCode serves its free models to the OpenCode app only, so the engine is refused here. Pick AIxodia Free, which needs no key, or add an OpenCode key to that provider."
+
+        // The keyless provider throttles an unauthenticated network to roughly
+        // one reply per 30 seconds and says so in its own 402 body.
+        "free limit reached" in s || "free_limit" in s ->
+            "The free provider answers about one reply every 30 seconds. Wait a moment and send it again."
 
         "no api keys" in s ->
             "No key set for this provider. Add a key in Settings."

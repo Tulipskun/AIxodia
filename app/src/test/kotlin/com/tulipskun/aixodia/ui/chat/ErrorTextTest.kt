@@ -25,12 +25,34 @@ class ErrorTextTest {
             friendlyError("provider Zen has no API keys"),
         )
 
-    @Test fun freeTierRefusalIsNotAKeyProblem() =
+    @Test fun freeTierRefusalPointsAtTheKeylessProvider() =
         assertEquals(
-            "The free-tier provider rejected the request; this is not a key issue. Try again or switch models.",
+            "OpenCode serves its free models to the OpenCode app only, so the engine is refused here. " +
+                "Pick AIxodia Free, which needs no key, or add an OpenCode key to that provider.",
             friendlyError(
                 "upstream_error: OpenCode's free tier can only be used from within OpenCode. " +
                     "Download it at https://opencode.ai and keep building.",
+            ),
+        )
+
+    @Test fun freeUsageQuotaIsNotAKeyProblem() =
+        assertEquals(
+            "OpenCode serves its free models to the OpenCode app only, so the engine is refused here. " +
+                "Pick AIxodia Free, which needs no key, or add an OpenCode key to that provider.",
+            friendlyError(
+                "upstream HTTP 429: {\"code\":\"FreeUsageLimitError\",\"title\":\"Free models " +
+                    "usage limited\"}: try again later",
+            ),
+        )
+
+    // The keyless built-in is throttled per network, and its own body names the
+    // window. Saying "one reply every 30 seconds" is actionable; "HTTP 402" is not.
+    @Test fun keylessThrottleNamesTheWait() =
+        assertEquals(
+            "The free provider answers about one reply every 30 seconds. Wait a moment and send it again.",
+            friendlyError(
+                "upstream HTTP 402: Free limit reached: 1 reply every 30 seconds per IP. " +
+                    "Retry after 28s, or get unlimited replies with a pollen key.",
             ),
         )
 

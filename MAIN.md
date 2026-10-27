@@ -5,6 +5,8 @@ GOAL:
 [COMPLETED] terminal: Shift+Tab usable from the key chips
 [COMPLETED] terminal: the menu opens by swipe only — drop the menu key chip
 [COMPLETED] terminal: arrows aligned (up above down, D-pad style) and holdable
+[IN_PROCESS] non-login mode: the app must work with no API key at all, without
+routing through the opencode CLI
 
 PLAN:
 [COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
@@ -34,8 +36,22 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
 [COMPLETED] build, test, commit, push, release
   57718bd pushed to main; latest re-cut 2026-10-27 20:57 UTC (versionName
   1.0.202610272057, versionCode 1793134669, signature OK)
+[COMPLETED] ProvidersScreen: the built-in sheet tells AIxodia Free (keyless,
+  throttled) apart from Opencode (free models served to the OpenCode app only);
+  the add-provider key field stops claiming a key is mandatory for every adapter
+[COMPLETED] ErrorText: name OpenCode's client-gated refusal and the keyless
+  provider's own rate limit, instead of a bare "HTTP 402"
+[IN_PROCESS] build, test, commit, push, release via scripts/release.sh
 
 NOTE:
+- ErrorText now separates the two free-tier refusals: OpenCode's client-gated
+  403/429 (points at the keyless built-in) and the keyless provider's own
+  "Free limit reached" 402 (names the ~30 s window).
+- Engine fix 5d9415d pushed: AIxodia Free (keyless openai adapter) + Opencode,
+  and the engine no longer refuses a provider for carrying no keys. CI + Release
+  engine rebuild engine-latest; the app side is the label/error wording below.
+- Unit tests: run with JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 and
+  ANDROID_HOME=/opt/android-sdk, ./gradlew :app:testDebugUnitTest.
 - AGENTS.md rule: every non-reading tool call must be accompanied by a MAIN.md update.
 - Token hygiene: the PAT lives only in the gh keyring; never commit or echo it.
 - Release is rolling: push to main rebuilds and clobbers the `latest` GitHub release.
