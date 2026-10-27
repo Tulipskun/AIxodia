@@ -35,11 +35,15 @@ import java.net.URLEncoder
 /**
  * The app's two back ends in one place.
  *
- *  - **Cloudflare D1** through `D1Api` for history — the chat list, paging and
- *    session-level writes — so a stopped daemon does not hide the history;
- *  - **the daemon over its tunnel** for the provider catalogue, provider
- *    health, per-chat model pins and the agent settings, because validating
- *    those needs the running router rather than the database.
+ *  - **the daemon over its tunnel** first, for everything it serves: the
+ *    provider catalogue, provider health, per-chat model pins, session
+ *    writes and the agent settings, because validating and writing those
+ *    needs the running router rather than the database;
+ *  - **Cloudflare D1** through `D1Api` for the history reads whenever the
+ *    tunnel has nothing to dial: the chat list and the pages of a thread are
+ *    read straight out of `chat_sessions`/`chat_turns` — the same tables the
+ *    engine serves over the tunnel — so a stopped daemon does not hide the
+ *    history. Reads only: writes still travel to the engine.
  */
 @JsonClass(generateAdapter = true)
 data class TurnRow(
@@ -111,6 +115,65 @@ private fun sessionUsageRow(o: JSONObject?): SessionUsageRow? {
         lastTurnMs = o.optLong("last_turn_ms"),
     )
 }
+
+/**
+ * D1 answers every cell through JSON: numbers arrive as numbers, but a number
+ * the database went through a text column reads back as a string. These three
+ * readers accept both, and read SQL NULL as the column's default instead of
+ * optString's literal "null".
+ */
+internal fun d1Text(o: JSONObject, key: String): String {
+    val v = o.opt(key)
+    if (v == null || v === JSONObject.NULL) return ""
+    return v.toString()
+}
+
+internal fun d1Long(o: JSONObject, key: String): Long = when (val v = o.opt(key)) {
+    null, JSONObject.NULL -> 0L
+    is Number -> v.toLong()
+    else -> v.toString().toLongOrNull() ?: 0L
+}
+
+internal fun d1Int(o: JSONObject, key: String): Int = d1Long(o, key).toInt()
+
+/** A D1 `chat_sessions` row — usage columns included — as the merge uses it. */
+internal fun d1SessionRow(o: JSONObject): SessionRow = SessionRow(
+    id = d1Text(o, "id"),
+    title = d1Text(o, "title"),
+    model = d1Text(o, "model"),
+    provider = d1Text(o, "provider"),
+    updatedAt = d1Long(o, "updated_at"),
+    usage = SessionUsageRow(
+        promptTokens = d1Int(o, "usage_prompt_tokens"),
+        cacheRead = d1Int(o, "usage_cache_read"),
+        freshInput = d1Int(o, "usage_fresh_input"),
+        outTokens = d1Int(o, "usage_output_tokens"),
+        totalMs = d1Long(o, "usage_total_ms"),
+        lastTurnMs = d1Long(o, "usage_last_turn_ms"),
+    ),
+)
+
+/** A D1 `chat_turns` row as the thread maps it. */
+internal fun d1TurnRow(o: JSONObject): TurnRow = TurnRow(
+    messageId = d1Long(o, "id"),
+    seq = d1Long(o, "seq"),
+    role = d1Text(o, "role"),
+    agent = d1Text(o, "agent"),
+    jobId = d1Text(o, "job_id"),
+    text = d1Text(o, "text"),
+    createdAt = d1Long(o, "created_at"),
+    model = d1Text(o, "model"),
+    inputTokens = d1Int(o, "input_tokens"),
+    outputTokens = d1Int(o, "output_tokens"),
+    cacheRead = d1Int(o, "cache_read_tokens"),
+    cacheWrite = d1Int(o, "cache_write_tokens"),
+    reasoningTokens = d1Int(o, "reasoning_tokens"),
+    reasoningContent = d1Text(o, "reasoning_content"),
+    inputIncludesCache = d1Int(o, "input_includes_cache") != 0,
+    durationMs = d1Long(o, "duration_ms"),
+    generationMs = d1Long(o, "generation_ms"),
+    block = d1Text(o, "block"),
+)
 
 /** The engine's session metadata in the shape the room cache and strip use. */
 fun SessionUsageRow.toStoredTotals(): StoredTotals = StoredTotals(
@@ -211,42 +274,26 @@ class HistoryApi(private val settings: SettingsStore) {
     }
 
     /**
-     * Every chat the engine knows, newest first. History lives on the engine
-     * machine now (SQLite), so the phone reads it through the daemon.
+     * Every chat the engine knows, newest first. The list is read over the
+     * tunnel first and straight out of D1 when the tunnel has nothing to
+     * dial, so a stopped daemon decays into a history viewer instead of an
+     * empty drawer.
      */
-    suspend fun sessions(): List<SessionRow> = withContext(Dispatchers.IO) {
-        val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
-        runCatching {
-            val req = Request.Builder().url("$base/v1/sessions")
-                .header("Authorization", "Bearer ${c.token}")
-                .header("Accept", "application/json")
-                .get().build()
-            client.newCall(req).execute().use { r ->
-                val text = r.body?.string().orEmpty()
-                val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use emptyList()
-                val arr = env.optJSONArray("sessions") ?: return@use emptyList()
-                val out = ArrayList<SessionRow>()
-                for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
-                    out.add(SessionRow(
-                        id = o.optString("id"),
-                        title = o.optString("title"),
-                        provider = o.optString("provider"),
-                        model = o.optString("model"),
-                        updatedAt = o.optLong("updated_at"),
-                        usage = sessionUsageRow(o.optJSONObject("usage")),
-                    ))
-                }
-                out
-            }
-        }.getOrDefault(emptyList())
-    }
+    suspend fun sessions(): List<SessionRow> = sessionsOrNull().orEmpty()
 
     /**
-     * Null when the daemon cannot be reached (or is not configured); an empty
-     * list only when it truly has no chats.
+     * Null when neither the tunnel nor D1 could be read; an empty list only
+     * when the store that answered truly has no chats. The daemon read and
+     * the D1 read are separate functions instead of one swallowed catch
+     * because the difference feeds syncSessions: a half-read must prune
+     * nothing, a truthful empty list is the authority to prune with.
      */
     suspend fun sessionsOrNull(): List<SessionRow>? = withContext(Dispatchers.IO) {
+        daemonSessions() ?: d1Sessions()
+    }
+
+    /** The tunnel read of the chat list. Null when it cannot be dialled. */
+    private suspend fun daemonSessions(): List<SessionRow>? = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
@@ -257,7 +304,7 @@ class HistoryApi(private val settings: SettingsStore) {
             client.newCall(req).execute().use { r ->
                 val text = r.body?.string().orEmpty()
                 val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use null
-                // A reply without the field is not "the daemon has no chats".
+                // A reply without the field is not "the engine has no chats".
                 // Treat it as unreachable so syncSessions never prunes the
                 // phone's history over a half-read response.
                 val arr = env.optJSONArray("sessions") ?: return@use null
@@ -275,6 +322,11 @@ class HistoryApi(private val settings: SettingsStore) {
                 out
             }
         }.getOrNull()
+    }
+
+    /** The direct D1 read of the chat list. Null when D1 cannot be read. */
+    private suspend fun d1Sessions(): List<SessionRow>? = withContext(Dispatchers.IO) {
+        runCatching { d1.chatSessions().map(::d1SessionRow) }.getOrNull()
     }
 
     /**
@@ -341,15 +393,32 @@ class HistoryApi(private val settings: SettingsStore) {
         return if (afterSeq <= 0L) rows else rows.filter { it.seq > afterSeq }
     }
 
-    /** One page of history, oldest-first, read from the daemon. */
+    /**
+     * One page of history, oldest-first — the daemon over the tunnel, or
+     * straight out of D1's `chat_turns` when the tunnel cannot be dialled (a
+     * moved trycloudflare URL, an engine that is down, a fresh install before
+     * the first announcement). Both paths yield the same TurnRow shape, so
+     * the merge logic never learns which one answered.
+     */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {
+            val rows = daemonTurns(sessionId, beforeSeq, limit)
+                ?: runCatching { d1.chatTurns(sessionId, beforeSeq, limit).map(::d1TurnRow) }
+                    .getOrDefault(emptyList())
+            pageTurns(rows, beforeSeq, limit)
+        }
+
+    /**
+     * The tunnel read of one page. Null when the daemon is not configured or
+     * the request failed for any reason — that is exactly the case that then
+     * reads D1 instead. An older engine that ignores the page parameters
+     * still sends everything; pageTurns cuts that down, so the phone keeps
+     * working against it unchanged.
+     */
+    private suspend fun daemonTurns(sessionId: String, beforeSeq: Long, limit: Int): List<TurnRow>? =
+        withContext(Dispatchers.IO) {
             val c = settings.current()
-            val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
-            // Ask the daemon for one page, not the transcript. A daemon that
-            // predates these parameters ignores them and still sends
-            // everything; pageTurns below cuts that down, so the phone keeps
-            // working against an older engine.
+            val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
             val query = buildString {
                 if (limit > 0) append("limit=").append(limit)
                 if (beforeSeq > 0L) {
@@ -365,8 +434,8 @@ class HistoryApi(private val settings: SettingsStore) {
                     .get().build()
                 client.newCall(req).execute().use { r ->
                     val text = r.body?.string().orEmpty()
-                    val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use emptyList()
-                    val arr = env.optJSONArray("turns") ?: return@use emptyList()
+                    val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use null
+                    val arr = env.optJSONArray("turns") ?: return@use null
                     val out = ArrayList<TurnRow>()
                     for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
                         out.add(TurnRow(
@@ -393,9 +462,7 @@ class HistoryApi(private val settings: SettingsStore) {
                     // oldest-first ordering
                     out.sortedBy { it.seq }
                 }
-            }.getOrDefault(emptyList()).let { list ->
-                pageTurns(list, beforeSeq, limit)
-            }
+            }.getOrNull()
         }
 
     /**

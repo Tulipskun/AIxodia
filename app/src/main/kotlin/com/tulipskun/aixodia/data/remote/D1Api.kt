@@ -12,20 +12,23 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Cloudflare D1 over its REST API. In this build the phone uses it for one
- * thing: reading the daemon's own row out of `system_state` so it knows where
- * the quick tunnel is (`node()`). Chat history is the daemon's local store and
- * is read through `/v1/...` over the tunnel; no Worker sits in front of D1.
+ * Cloudflare D1 over its REST API. D1 is the chat store (the engine has no
+ * local database), so the phone reads two things from it straight:
+ * the daemon's own row out of `system_state` so it knows where the quick
+ * tunnel is (`node()`), and — when the tunnel cannot be dialled — the chat
+ * list and the pages of a thread out of `chat_sessions`/`chat_turns`
+ * (`chatSessions()`, `chatTurns()`), the same tables the engine serves on
+ * `/v1/...`. The tables carry the columns the engine's schema ensures
+ * (`generation_ms`, `reasoning_content`, `block`), so one SELECT shape covers
+ * every database the engine could be talking to.
  *
  * One credential is enough: the account and the database are resolved from the
- * token with the same three calls the daemon makes (`/user/tokens/verify`, then
- * `/accounts`, then `/accounts/{id}/d1/database`) and cached in settings, so an
- * operator never types a Cloudflare id.
+ * token with the same three calls the engine makes (`/user/tokens/verify`,
+ * then `/accounts`, then `/accounts/{id}/d1/database`) and cached in settings,
+ * so an operator never types a Cloudflare id.
  *
- * This class owns what has to be shared off the machine: the daemon's own row,
- * i.e. the tunnel URL the phone dials. Provider keys and settings live on the
- * daemon too, because validating them needs the running router rather than the
- * database.
+ * Chat writes stay on the engine: a phone-side insert would race the engine's
+ * seq counter, and only the engine can hand a turn to the model.
  */
 class D1Api(private val settings: SettingsStore) {
 
@@ -56,9 +59,9 @@ class D1Api(private val settings: SettingsStore) {
     // ------------------------------------------------------------ D1 transport
 
     /** Runs one statement: reads and writes share all of their failure handling. */
-    private suspend fun exec(token: String, target: Target, sql: String, params: List<String>): Rows =
+    private suspend fun exec(token: String, target: Target, sql: String, params: JSONArray): Rows =
         withContext(Dispatchers.IO) {
-            val payload = JSONObject().put("sql", sql).put("params", JSONArray(params)).toString()
+            val payload = JSONObject().put("sql", sql).put("params", params).toString()
             val reqBuilder = Request.Builder()
                 .url("$API_BASE/accounts/${target.accountId}/d1/database/${target.databaseId}/query")
                 .header("Content-Type", "application/json")
@@ -199,8 +202,20 @@ class D1Api(private val settings: SettingsStore) {
         return known
     }
 
-    /** One statement against the current token and database. */
-    private suspend fun query(sql: String, params: List<String> = emptyList()): Rows {
+    /**
+     * One statement against the current token and database. Params bind on
+     * their own JSON type: D1 hands a quoted "301" to SQLite as text, and
+     * integers sort before text, so a page cursor sent as a string would make
+     * every numeric seq count as "less than" it and the page would start at
+     * the chat's first rows. Numbers and booleans leave here as numbers.
+     */
+    private suspend fun query(sql: String, vararg params: Any?): Rows {
+        val bound = JSONArray()
+        for (p in params) bound.put(p ?: JSONObject.NULL)
+        return query(sql, bound)
+    }
+
+    private suspend fun query(sql: String, params: JSONArray): Rows {
         val token = settings.current().token
         if (token.isBlank()) throw IllegalStateException("Cloudflare API token not set")
         return try {
@@ -229,14 +244,14 @@ class D1Api(private val settings: SettingsStore) {
         // New schema: daemon keys live in system_state. Fall back to the old
         // tunnel row when the database predates the rename (or the keys are absent).
         val triple = try {
-            val url = query("SELECT value FROM system_state WHERE key = ?", listOf("daemon/url"))
+            val url = query("SELECT value FROM system_state WHERE key = ?", "daemon/url")
                 .rows.firstOrNull()?.optString("value")?.trim().orEmpty()
             if (url.isBlank()) null
             else Triple(
                 url,
-                query("SELECT value FROM system_state WHERE key = ?", listOf("daemon/version"))
+                query("SELECT value FROM system_state WHERE key = ?", "daemon/version")
                     .rows.firstOrNull()?.optString("value").orEmpty(),
-                query("SELECT value FROM system_state WHERE key = ?", listOf("daemon/heartbeat"))
+                query("SELECT value FROM system_state WHERE key = ?", "daemon/heartbeat")
                     .rows.firstOrNull()?.optString("value").orEmpty(),
             )
         } catch (e: Exception) {
@@ -267,11 +282,91 @@ class D1Api(private val settings: SettingsStore) {
 
     private fun nowSeconds(): Long = System.currentTimeMillis() / 1000
 
+    // ------------------------------------------------------ chat store reads
+
+    /**
+     * Every chat, newest first — a straight read of the tables the engine
+     * writes. It is the same SELECT the engine serves on `/v1/sessions`: the
+     * usage is summed by the database over every stored turn, so the strip
+     * shows the engine's own numbers even when the phone reads around it.
+     */
+    suspend fun chatSessions(): List<JSONObject> = query(SESSION_SELECT).rows
+
+    /**
+     * One chat's turns: the newest page ending just before [beforeSeq]
+     * (`<= 0` means the newest page), oldest-first — the same shape the
+     * engine's `/v1/sessions/{id}/turns` answers with. [limit] `<= 0` reads
+     * the whole transcript, which the incremental reconnect catch-up needs.
+     */
+    suspend fun chatTurns(id: String, beforeSeq: Long, limit: Int): List<JSONObject> {
+        if (limit <= 0) {
+            return query(
+                "SELECT $TURN_COLUMNS FROM chat_turns WHERE session_id = ? ORDER BY seq ASC",
+                id,
+            ).rows
+        }
+        val page = if (beforeSeq > 0) {
+            query(
+                "SELECT $TURN_COLUMNS FROM chat_turns WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
+                id, beforeSeq, limit,
+            ).rows
+        } else {
+            query(
+                "SELECT $TURN_COLUMNS FROM chat_turns WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+                id, limit,
+            ).rows
+        }
+        // SQL walked backwards so LIMIT could take the page nearest the
+        // cursor; a transcript is read oldest-first.
+        return page.reversed()
+    }
+
     companion object {
         /** The one Cloudflare endpoint every call is addressed with. */
         const val API_BASE = "https://api.cloudflare.com/client/v4"
 
         /** The database `discover` prefers when the token can see several. */
         private const val DEFAULT_DATABASE = "aixodia"
+
+        /** A chat_turns row's columns, in the order the reader maps them. */
+        internal const val TURN_COLUMNS =
+            "id,session_id,seq,role,agent,job_id,text,created_at,model,input_tokens," +
+                "output_tokens,duration_ms,cache_read_tokens,cache_write_tokens," +
+                "reasoning_tokens,input_includes_cache,generation_ms,reasoning_content,block"
+
+        /**
+         * The engine's session list SELECT, verbatim (`session/d1.rs`): D1's own
+         * SQL adds the usage the strip draws instead of the phone summing
+         * whichever rows happen to be loaded.
+         */
+        private const val SESSION_SELECT = """
+            SELECT s.id,s.title,s.provider,s.model,s.reasoning,s.temperature,s.top_p,s.max_tokens,s.created_at,s.updated_at,
+                   COALESCE(u.prompt_tokens,0) AS usage_prompt_tokens,
+                   COALESCE(u.cache_read,0) AS usage_cache_read,
+                   COALESCE(u.fresh_input,0) AS usage_fresh_input,
+                   COALESCE(u.output_tokens,0) AS usage_output_tokens,
+                   COALESCE(u.total_ms,0) AS usage_total_ms,
+                   COALESCE((
+                       SELECT t.duration_ms FROM chat_turns t
+                       WHERE t.session_id=s.id AND t.role != 'user' AND t.role NOT LIKE 'tool%'
+                             AND t.duration_ms > 0
+                       ORDER BY t.seq DESC LIMIT 1
+                   ),0) AS usage_last_turn_ms
+            FROM chat_sessions s
+            LEFT JOIN (
+                SELECT session_id,
+                       SUM(CASE WHEN input_includes_cache = 1 THEN input_tokens
+                                ELSE input_tokens + cache_read_tokens + cache_write_tokens END) AS prompt_tokens,
+                       SUM(cache_read_tokens) AS cache_read,
+                       SUM(CASE WHEN input_includes_cache = 1
+                                THEN MAX(input_tokens - cache_read_tokens, 0)
+                                ELSE input_tokens + cache_write_tokens END) AS fresh_input,
+                       SUM(output_tokens) AS output_tokens,
+                       SUM(duration_ms) AS total_ms
+                FROM chat_turns
+                WHERE role != 'user' AND role NOT LIKE 'tool%'
+                GROUP BY session_id
+            ) u ON u.session_id = s.id
+            ORDER BY s.updated_at DESC, s.id DESC LIMIT 200"""
     }
 }

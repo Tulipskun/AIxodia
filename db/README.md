@@ -4,11 +4,15 @@ The daemon and the app both talk to Cloudflare D1 through the **Cloudflare API
 directly** (D-011), so this directory holds only the schema. It is applied with
 wrangler, which speaks the same API — nothing is deployed.
 
-What each side uses it for: the daemon keeps provider config here and writes its
-own `system_state` rows (`daemon/url`, `daemon/version`, `daemon/heartbeat`);
-the app only reads `system_state` (`D1Api.node()`) to discover the current
-tunnel URL and whether the daemon is alive. Chat history is the daemon's own
-store and is never a D1 table.
+What each side uses it for: the engine keeps provider config, the chat history
+(`chat_sessions`/`chat_turns`) and its own `system_state` rows (`daemon/url`,
+`daemon/version`, `daemon/heartbeat`) in this database; the engine's
+`ensure_turns` adds the newer turn columns itself. The app reads
+`system_state` (`D1Api.node()`) to discover the current tunnel URL and whether
+the daemon is alive, and falls back to reading `chat_sessions`/`chat_turns`
+directly (`chatSessions()`/`chatTurns()`) when the tunnel cannot be dialled —
+history stays visible with the engine down. Chat writes always go through the
+engine, never from the phone to D1.
 
 ```bash
 # one-time: create the database, then keep its id where the app does not need it
@@ -32,7 +36,8 @@ fallback). The tables in `schema.sql` are:
 - `system_state` — opaque JSON blobs and daemon keys (daemon/url, daemon/version,
   daemon/heartbeat, kernel/*, sync/*, etc.).
 
-`schema.sql` lists exactly these two. Databases from before the rename may
-still carry a `tunnel` row (and `chat_sessions`/`chat_turns`); the app reads
-`system_state` first and falls back to `tunnel` only when those keys are absent
-(`D1Api.node()`).
+`schema.sql` lists exactly these two. The chat tables predate the rename and
+are not re-created by this file; the engine's `ensure_turns` keeps their
+columns current. Databases from before the rename may still carry a `tunnel`
+row; the app reads `system_state` first and falls back to `tunnel` only when
+those keys are absent (`D1Api.node()`).

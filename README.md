@@ -1,15 +1,17 @@
 # AIxodia
 
 Android chat client (Kotlin + Compose) for the `Tulipskun/aixodia-engine` daemon. History
-lives **on the engine** (its own store) and the phone reads it through the
-daemon's `/v1/...` HTTP API over the quick tunnel; Room keeps the copy the
-screens draw. Cloudflare D1 is read directly by the phone for one thing only:
-the daemon's own row in `system_state`, which says where that tunnel is. There
-is no Cloudflare Worker in this project (D-011).
+lives in **Cloudflare D1** (`chat_sessions`/`chat_turns` — the engine keeps no local
+database) and the phone reads it through the daemon's `/v1/...` HTTP API over the quick
+tunnel; Room keeps the copy the screens draw. When the tunnel has nothing to dial — a
+moved trycloudflare URL, a stopped engine — the phone reads the chat list and turn pages
+straight out of D1 with the same API token: reads only, writes always travel to the
+engine. D1's `system_state` row also says where the tunnel is and whether the engine is
+alive. There is no Cloudflare Worker in this project (D-011).
 
 - **Chat is a run**: `POST /v1/runs` starts a turn and returns immediately; its events arrive over SSE (`/v1/runs/{id}/events?after=seq`), numbered and replayable. Closing the app does not stop the agent, and reopening resumes from the last applied seq. `RunSocket` is the transport.
 - **Terminal is native and its own WebSocket**: the app's own `TerminalEmulator` draws every cell in `TerminalView`, and every open tab keeps its own `/terminal` socket with a single-use 90-second ticket. There is no JavaScript terminal or external terminal library. Chat uses its own transport, so terminal bytes and HTTP rpc calls never share its socket. tmux keeps shells alive across engine restarts.
-- **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers.
+- **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers. When the tunnel cannot be dialled, the same reads fall back to D1 directly (`D1Api.chatSessions()` / `D1Api.chatTurns()`), so the drawer and the thread stay filled with the history D1 already holds.
 - **Daemon discovery from D1**: `data/remote/D1Api.kt` runs one `SELECT` against `system_state` (`daemon/url`, `daemon/version`, `daemon/heartbeat`) with the operator's Cloudflare API token. That is how the phone learns the current quick-tunnel URL and whether the daemon is alive without asking anyone.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
 - **Chunked history**: the thread holds one page of messages (60 rows), not the whole
@@ -34,10 +36,9 @@ db/             Cloudflare D1 schema + migrations (applied with wrangler, no Wor
    `wrangler d1 execute aixodia --file=db/schema.sql` — both go straight to the
    Cloudflare API, nothing is deployed. The schema is provider config plus the
    `system_state` keys the daemon writes and the phone reads. See `db/README.md`.
-2. **Daemon**: run `Tulipskun/aixodia-engine` (`main.go`) — it serves the run
-   API, the terminal WebSocket and `/v1/...`, opens the quick tunnel, writes
-   its URL and heartbeat into the D1 `system_state` rows and stores the chat
-   history itself.
+2. **Daemon**: run `Tulipskun/aixodia-engine` — it serves the run API, the terminal
+   WebSocket and `/v1/...`, opens the quick tunnel, writes its URL and heartbeat into
+   the D1 `system_state` rows and keeps the chat history in the same D1 database.
 3. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
    **Cloudflare API token** — the account and database ids are resolved from it
    and cached, so no id is ever typed. Discovery then finds the daemon's tunnel
@@ -66,8 +67,7 @@ One credential, three paths:
 - **Terminal WebSocket** — one dedicated `/terminal` socket per open tab,
   opened by the native terminal and authenticated with a short-lived ticket
   rather than the long-lived API token.
-- **D1 REST** — only discovery: the daemon's tunnel URL, version and heartbeat
-  (`D1Api.node()`). Nothing the phone edits lives in D1.
+- **D1 REST** — discovery (`D1Api.node()`: the daemon's tunnel URL, version and heartbeat) and the history fallback: `D1Api.chatSessions()` / `D1Api.chatTurns()` read `chat_sessions`/`chat_turns` when the tunnel is down. Nothing the phone edits lives in D1; the app's chat writes always go to the engine.
 
 ## Authentication — one token, two steps
 
@@ -114,9 +114,10 @@ without approval; the daemon owns no credential of its own.
 
 ## Production DB (runtime config, nothing hardcoded)
 
-- Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds provider config and the
-  daemon's `system_state` keys. Chat history is the engine's own store, not a
-  D1 table.
+- Cloudflare D1 `aixodia` (id `e8e746ea-…f29a1`) holds provider config, the daemon's
+  `system_state` keys and the chat history (`chat_sessions`/`chat_turns`) — the engine
+  keeps no local database, so the phone reading D1 directly reads the same history the
+  engine serves on `/v1/...`.
 - One credential does the work: the Cloudflare API token typed in Settings reads
   the daemon row out of D1, and the same token authenticates the `/v1/...`
   calls (the terminal WebSocket uses a short-lived ticket derived from it).

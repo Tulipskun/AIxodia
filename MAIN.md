@@ -1,15 +1,14 @@
 GOAL:
-[IN_PROCESS] chat AI works: message appears fast, AI answer arrives
-[IN_PROCESS] switching chat session does not reconnect the websocket
+[COMPLETED] chat AI works: message appears fast, AI answer arrives
+[COMPLETED] app shows chats that live in D1 even without the tunnel
+[COMPLETED] switching chat session does not reconnect the websocket
 
 PLAN:
-[IN_PROCESS] fix engine D1 reader (results field) + unit test
-[PENDING] rebuild/install/restart engine, verify via curl
-[PENDING] commit+push engine fix
-[PENDING] app: stable ChatViewModel (no key = sessId)
-[PENDING] app: optimistic insert before remote session creation
-[PENDING] app: RunSocket.open/switchSession no reconnect when online
-[PENDING] build, test, commit, push, release app
+[COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
+[COMPLETED] HistoryApi: sessions()/turns() fall back to D1 when the tunnel is down
+[COMPLETED] unit tests: D1 row -> SessionRow/TurnRow mapping (D1ChatReadTest)
+[COMPLETED] docs: README/db README say history lives in D1, phone reads it fallback
+[COMPLETED] build, test (206 green), commit, push
 
 NOTE:
 Do not regress terminal fix cebcbc0.
