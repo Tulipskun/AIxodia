@@ -11,6 +11,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -98,6 +101,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The panel's own colours: a terminal reads as a terminal, not as a chat bubble. */
 private val Ink = Color(0xFF0B0F14)
@@ -108,6 +112,14 @@ private val InkText = Color(0xFFD7E0EA)
 private val InkDim = Color(0xFF8CA0B3)
 private val Signal = Color(0xFF6FE3B0)
 private val Danger = Color(0xFFFF8A8A)
+
+/**
+ * A held arrow starts repeating after the first pause, then fires once per
+ * repeat window. The first pause is the keyboard's: long enough that a quick
+ * tap never doubles, short enough that a held arrow feels live.
+ */
+private const val KEY_REPEAT_FIRST_MS = 400L
+private const val KEY_REPEAT_MS = 100L
 
 /**
  * The parts of the terminal that must outlive the window.
@@ -880,6 +892,7 @@ private fun statusLabel(state: TermState): String = when (state) {
  * turns it into 0x03 (the same as the ^C key, but for any letter or symbol).
  * Shift latches the same way, and its one key is Tab: Shift then Tab sends
  * the backtab (ESC[Z) that reverses an edit's completion or a TUI's strip.
+ * Every arrow is holdable: keep a thumb on it and it repeats.
  */
 @Composable
 private fun TerminalKeys(
@@ -892,25 +905,16 @@ private fun TerminalKeys(
     onShiftSpent: () -> Unit,
     onKey: (ByteArray) -> Unit,
 ) {
-    // Exactly two rows, six keys each. The order is deliberate: the arrows
-    // sit where the thumb expects them, and the whole-line erase (Ctrl-U then
-    // Ctrl-K, so it works from the middle too) sits at the end of the top row
-    // as an icon. CMD is the same byte the old "^P" sent; only its label
-    // changed. The refresh key replaces the running shell with a fresh login
-    // shell in place — exec $SHELL — which is how a wedged or half-configured
-    // session gets a clean one without a new tab.
+    // Exactly two rows, six keys each. The modifier chips take the left of
+    // the lower row and the arrows fill the right, and the up arrow sits in
+    // the upper row directly above the down arrow, the way a D-pad reads: the
+    // thumb never has to hunt for it. The refresh key replaces the running
+    // shell with a fresh login shell in place — exec $SHELL — which is how a
+    // wedged or half-configured session gets a clean one without a new tab,
+    // and the whole-line erase (Ctrl-U then Ctrl-K, so it works from the
+    // middle too) stays an icon on the upper row. Every arrow holds and
+    // repeats; page-walking through output one tap at a time is no option.
     val tab = if (shiftOn) "\u001b[Z".toByteArray() else byteArrayOf(9)
-    val top = listOf(
-        "Esc" to byteArrayOf(27),
-        "Tab" to tab,
-        "CMD" to byteArrayOf(16),
-        "\u2191" to "\u001b[A".toByteArray(),
-    )
-    val bottom = listOf(
-        "\u2190" to "\u001b[D".toByteArray(),
-        "\u2193" to "\u001b[B".toByteArray(),
-        "\u2192" to "\u001b[C".toByteArray(),
-    )
     Row(
         Modifier
             .fillMaxWidth()
@@ -925,15 +929,19 @@ private fun TerminalKeys(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                top.forEach { (label, bytes) ->
-                    Box(Modifier.weight(1f)) {
-                        KeyChip(label, wide = true, onClick = {
-                            onKey(bytes)
-                            // Only Tab answers to Shift: once the backtab has
-                            // gone out, the latch has nothing left to colour.
-                            if (shiftOn && label == "Tab") onShiftSpent()
-                        })
-                    }
+                Box(Modifier.weight(1f)) {
+                    KeyChip("Esc", wide = true, onClick = { onKey(byteArrayOf(27)) })
+                }
+                Box(Modifier.weight(1f)) {
+                    KeyChip("Tab", wide = true, onClick = {
+                        onKey(tab)
+                        // Only Tab answers to Shift: once the backtab has gone
+                        // out, the latch has nothing left to colour.
+                        if (shiftOn) onShiftSpent()
+                    })
+                }
+                Box(Modifier.weight(1f)) {
+                    KeyChip("CMD", wide = true, onClick = { onKey(byteArrayOf(16)) })
                 }
                 Box(Modifier.weight(1f)) {
                     IconKey(
@@ -941,6 +949,9 @@ private fun TerminalKeys(
                         contentDescription = "New login shell",
                         onClick = { onKey("exec \$SHELL\r".toByteArray()) },
                     )
+                }
+                Box(Modifier.weight(1f)) {
+                    HoldableKeyChip("\u2191", onClick = { onKey("\u001b[A".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
                     IconKey(
@@ -963,10 +974,14 @@ private fun TerminalKeys(
                 Box(Modifier.weight(1f)) {
                     KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
                 }
-                bottom.forEach { (label, bytes) ->
-                    Box(Modifier.weight(1f)) {
-                        KeyChip(label, wide = true, onClick = { onKey(bytes) })
-                    }
+                Box(Modifier.weight(1f)) {
+                    HoldableKeyChip("\u2190", onClick = { onKey("\u001b[D".toByteArray()) })
+                }
+                Box(Modifier.weight(1f)) {
+                    HoldableKeyChip("\u2193", onClick = { onKey("\u001b[B".toByteArray()) })
+                }
+                Box(Modifier.weight(1f)) {
+                    HoldableKeyChip("\u2192", onClick = { onKey("\u001b[C".toByteArray()) })
                 }
             }
         }
@@ -1033,6 +1048,61 @@ private fun KeyChip(
                 label,
                 style = MaterialTheme.typography.labelMedium,
                 color = if (active) Color(0xFFE8F0F8) else InkText,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+/**
+ * An arrow: a tap sends it once, and a held thumb repeats it until the finger
+ * lifts — nobody walks through a long file one tap at a time. The events wrap
+ * the repeat, so a lifted finger (or a canceled gesture, a drag away) ends it
+ * between windows without a last stray key; jitter only fills a window sooner.
+ * It is drawn to the same size as a [KeyChip] so both rows stay even.
+ */
+@Composable
+private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
+    val currentClick by rememberUpdatedState(onClick)
+    Surface(
+        color = InkLine,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    currentClick()
+                    // The first grace is what tells a tap from a hold: after
+                    // it the chip fires once per repeat window, and the
+                    // windows are wall-clock marks rather than silences, so
+                    // pointer noise (drift, a start of a drag) cannot starve
+                    // the repeat out. A lift is the only way to end it.
+                    var nextMark = System.currentTimeMillis() + KEY_REPEAT_FIRST_MS
+                    while (true) {
+                        val wait = (nextMark - System.currentTimeMillis()).coerceAtLeast(0L)
+                        val event = withTimeoutOrNull(wait) { awaitPointerEvent() }
+                        if (event == null) {
+                            currentClick()
+                            nextMark = System.currentTimeMillis() + KEY_REPEAT_MS
+                            continue
+                        }
+                        if (event.changes.none { it.pressed }) break
+                    }
+                }
+            },
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = InkText,
                 maxLines = 1,
                 softWrap = false,
             )

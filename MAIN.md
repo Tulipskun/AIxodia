@@ -4,6 +4,7 @@ GOAL:
 [COMPLETED] switching chat session does not reconnect the websocket
 [COMPLETED] terminal: Shift+Tab usable from the key chips
 [COMPLETED] terminal: the menu opens by swipe only — drop the menu key chip
+[IN_PROCESS] terminal: arrows aligned (up above down, D-pad style) and holdable
 
 PLAN:
 [COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
@@ -25,6 +26,12 @@ swipe in the grid, which was already wired via ModalNavigationDrawer
 [COMPLETED] build, test, commit, push, release
   847f77b pushed; latest re-cut 2026-10-27 20:42 UTC (versionName
   1.0.202610272042, versionCode 1793133753, signature OK)
+[IN_PROCESS] Arrows: move ↑ into the upper row's 5th slot so it sits directly
+above ↓ (it used to float over ←); replace the four arrow KeyChips with a
+HoldableKeyChip — pointerInput + detectTapGestures onPress, one send on tap,
+then one send per KEY_REPEAT_MS (100ms) after a 400ms grace, only while
+isPressed, tryAwaitRelease at the end
+[IN_PROCESS] build, test, commit, push, release
 
 NOTE:
 - AGENTS.md rule: every non-reading tool call must be accompanied by a MAIN.md update.
@@ -34,6 +41,11 @@ NOTE:
 - Keystore fetched from Tulipskun/aixodia-keys (md5-verified), gitignored here.
 - Fresh environment: no Android SDK — bootstrapped to /opt/android-sdk again.
 - JDK 17 (apt openjdk-17) is what AGP needs; 21 breaks JdkImageTransform.
+- HoldableKeyChip: PressGestureScope has no isPressed here — repeater driven
+  by awaitEachGesture + withTimeoutOrNull deadlines (tap = one send, hold =
+  400ms grace then one send per 100ms until lift).
+- Kotlin compiles green with holdable arrows and the D-pad alignment.
+- Unit tests green after the arrow alignment + hold-to-repeat change.
 - Unit tests green again (testDebugUnitTest) with the Shift chip.
 - SDK on PATH for release.sh; release uses scripts/release.sh, then verify and push.
 - Push needs the gh credential helper — configure git credential.helper before pushing.
