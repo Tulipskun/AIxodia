@@ -176,7 +176,11 @@ routing through the opencode CLI
             out. TerminalSelectionTest gained aLinkBrokenAcrossLinesIsNotSpaced
             and aCardCopiesAsItsContent (a full ╭─╮ box from a helper).
             :app:testDebugUnitTest BUILD SUCCESSFUL, 227 tests, Paparazzi
-            included.
+            included. Shipped f99ba8f, scripts/release.sh cut the rolling
+            `latest` at 17:53:53Z (versionName 1.0.202610281753, versionCode
+            1793210033, APK 20,802,668 bytes, md5
+            09307558116fa92ef702db61832696f8, signature CN=AIxodia,
+            AIxodia-version.json commit == HEAD).
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
