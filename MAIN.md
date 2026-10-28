@@ -28,6 +28,8 @@ routing through the opencode CLI
             button, and reopening the terminal lands on the shells that are
             really there — the same pid, never a shell that was closed, and one
             fresh tab only when nothing is left
+[IN_PROCESS] terminal: a drag scrolls the page in a plain shell, not only
+            inside a TUI like vim
 
 PLAN:
 [IN_PROCESS] TerminalSocket.open() waits for the engine's /v1/terminals answer
@@ -37,8 +39,15 @@ PLAN:
             Unreachable apart so silence cannot be read as "no shells"
 [IN_PROCESS] closeSession(id) takes the tab from the row that was held, drops
             that tab's emulator, and opens one fresh shell when nothing is left
+[IN_PROCESS] TerminalView painted only the emulator's screen and pinned
+            scrollTopPx to 0, so a vertical drag did nothing unless the program
+            asked for the mouse; the page now pans over the normal buffer's
+            scrollback (drag, fling, scroll-to-bottom button, selection
+            following what is drawn)
 [COMPLETED] build toolchain re-bootstrapped on this host: Android SDK 35 +
-            build-tools 35 at /root/android-sdk (JDK 21, Gradle 8.10.2)
+            build-tools 35 at /root/android-sdk. Gradle needs JDK 17
+            (/usr/lib/jvm/java-17-openjdk-amd64): under JDK 21 the build dies
+            in :app:compileDebugJavaWithJavac on JdkImageTransform/jmod
 
 [COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
 [COMPLETED] HistoryApi: sessions()/turns() fall back to D1 when the tunnel is down

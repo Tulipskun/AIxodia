@@ -137,8 +137,11 @@ class TerminalView @JvmOverloads constructor(
     private var cellHeight = 1f
     private var baseline = 0f
 
+    // How far the page is pulled down over the live screen, in px: 0 shows the
+    // prompt, more shows the scrollback the normal buffer keeps above it.
     private var scrollTopPx = 0f
     private var pinnedToBottom = true
+    private var lastHistoryRows = 0
     private val scroller = OverScroller(context)
     private val velocityTracker = VelocityTracker.obtain()
     private var lastTouchY = 0f
@@ -153,6 +156,7 @@ class TerminalView @JvmOverloads constructor(
     private var verticalDrag = false
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    private val minFlingVelocity = android.view.ViewConfiguration.get(context).scaledMinimumFlingVelocity
 
     // Text selection: a long press selects a word and raises a floating action
     // bar with Copy. Both ends stay where the word starts and ends; the two
@@ -225,6 +229,7 @@ class TerminalView @JvmOverloads constructor(
     fun setEmulator(emulator: TerminalEmulator) {
         if (this.emulator !== emulator) clearSelection()
         this.emulator = emulator
+        resetScroll()
         resizeToView()
         invalidate()
     }
@@ -273,17 +278,28 @@ class TerminalView @JvmOverloads constructor(
         if (cols == em.columns && rows == em.rows) return
         em.resize(cols, rows)
         onResize?.invoke(cols, rows)
-        scrollTopPx = 0f
+        resetScroll()
     }
 
 
+    /**
+     * Rows of history the page may be pulled down over the live screen.
+     * The alternate screen has none of its own, and a program that asked for
+     * the mouse takes a drag as a wheel instead, so in both cases the page
+     * stays exactly where the program put it.
+     */
+    private fun maxScrollPx(): Float {
+        val em = emulator ?: return 0f
+        if (em.mouseReporting() || em.alternateScreen || em.fullScreenDetected) return 0f
+        return em.buffer.scrollback.size * cellHeight
+    }
+
     private fun clampScroll() {
-        scrollTopPx = 0f
-        if (!pinnedToBottom) {
-            pinnedToBottom = true
-            onScrollChanged?.invoke(true)
-        } else {
-            pinnedToBottom = true
+        scrollTopPx = scrollTopPx.coerceIn(0f, maxScrollPx())
+        val atBottom = scrollTopPx <= 0f
+        if (atBottom != pinnedToBottom) {
+            pinnedToBottom = atBottom
+            onScrollChanged?.invoke(atBottom)
         }
     }
 
@@ -339,8 +355,17 @@ class TerminalView @JvmOverloads constructor(
 
     /** Called by the panel whenever the emulator produced output. */
     fun onContentChanged() {
-        // The view is a fixed page: the emulator's screen is the page, and
-        // anything that scrolled off it is not drawn. Repaint only.
+        // New output pushes rows off the live screen into the history above it.
+        // Measuring the page from the bottom, each of those rows would slide the
+        // text the reader is looking at down one line; adding the same height
+        // back holds the history still, the way a terminal does when you read it
+        // while something keeps printing.
+        val rows = emulator?.buffer?.scrollback?.size ?: 0
+        if (rows > lastHistoryRows && scrollTopPx > 0f) {
+            scrollTopPx += (rows - lastHistoryRows) * cellHeight
+        }
+        lastHistoryRows = rows
+        clampScroll()
         invalidate()
     }
 
@@ -355,13 +380,22 @@ class TerminalView @JvmOverloads constructor(
     }
 
     fun scrollToBottom() {
-        clampScroll()
+        resetScroll()
         invalidate()
     }
 
+    /** Back onto the live screen, with the history count re-anchored to it. */
+    private fun resetScroll() {
+        scroller.forceFinished(true)
+        scrollTopPx = 0f
+        lastHistoryRows = emulator?.buffer?.scrollback?.size ?: 0
+        clampScroll()
+    }
+
     fun pageUp() {
-        // Local scrollback is deliberately gone: a real terminal page never
-        // pans behind the program's back. PgUp reaches the program as a key.
+        // PgUp stays a key rather than a page of local history: a program that
+        // owns the screen (less, vim, opencode) pages with exactly this byte,
+        // and reading a plain prompt's scrollback is what dragging is for.
         inputSink?.invoke("\u001b[5~".toByteArray())
     }
 
@@ -377,19 +411,30 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator ?: return
         canvas.drawColor(TerminalColors.DEFAULT_BG)
         val buffer = em.buffer
-        // One fixed page: the emulator's current screen, top row at the top of
-        // the view. The scrollback the buffer keeps is for reading history
-        // elsewhere (and for correct reflow); it is never painted, so a
-        // reconnect's replay cannot leave an old frame above the live one.
+        val pan = scrollTopPx
+        // The page is the history the normal buffer keeps, with the live screen
+        // under it. At rest the screen starts at the top of the view; pulling the
+        // page down slides the newest history rows in above it.
+        if (pan > 0f) {
+            val history = buffer.scrollback
+            var i = history.size - 1
+            while (i >= 0) {
+                val top = (i - history.size) * cellHeight + pan
+                if (top + cellHeight <= 0f) break
+                if (top < height.toFloat()) drawRow(canvas, history[i], top, i)
+                i--
+            }
+        }
         for (v in 0 until buffer.lines.size) {
-            val row = buffer.lines[v]
-            drawRow(canvas, row, v * cellHeight, v)
+            val top = v * cellHeight + pan
+            if (top >= height) break
+            drawRow(canvas, buffer.lines[v], top, v)
         }
 
         if (selecting) drawSelection(canvas, buffer)
 
         if (em.cursorVisible && hasFocus()) {
-            drawCursor(canvas, em, buffer, buffer.cursorRow * cellHeight)
+            drawCursor(canvas, em, buffer, buffer.cursorRow * cellHeight + pan)
         }
     }
 
@@ -565,9 +610,9 @@ class TerminalView @JvmOverloads constructor(
             if (textEnd < from || to < from) continue
             canvas.drawRect(
                 from * cellWidth,
-                r * cellHeight,
+                r * cellHeight + scrollTopPx,
                 (minOf(to, textEnd) + 1) * cellWidth,
-                (r + 1) * cellHeight,
+                (r + 1) * cellHeight + scrollTopPx,
                 selectionPaint,
             )
         }
@@ -583,8 +628,8 @@ class TerminalView @JvmOverloads constructor(
         val maxX = (width - handleRadius).coerceAtLeast(minX)
         val startX = (selStartCol * cellWidth - handleRadius * 0.45f).coerceIn(minX, maxX)
         val endX = ((selEndCol + 1) * cellWidth + handleRadius * 0.45f).coerceIn(minX, maxX)
-        val startY = first * cellHeight
-        val endY = (last + 1) * cellHeight
+        val startY = first * cellHeight + scrollTopPx
+        val endY = (last + 1) * cellHeight + scrollTopPx
         val startCentreY = if (startY - handleRadius - handleGap >= 0f) {
             startY - handleRadius - handleGap
         } else {
@@ -642,7 +687,7 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator ?: return
         val buffer = em.buffer
         if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
-        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
+        val row = ((y - scrollTopPx) / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
         val line = buffer.lines[row]
         if (line.columns == 0) return
         var col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
@@ -700,7 +745,7 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator ?: return
         val buffer = em.buffer
         if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
-        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
+        val row = ((y - scrollTopPx) / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
         val line = buffer.lines[row]
         if (line.columns == 0) return
         val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
@@ -726,7 +771,7 @@ class TerminalView @JvmOverloads constructor(
         val em = emulator ?: return
         val buffer = em.buffer
         if (buffer.lines.isEmpty() || cellWidth <= 0f || cellHeight <= 0f) return
-        val row = (y / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
+        val row = ((y - scrollTopPx) / cellHeight).toInt().coerceIn(0, buffer.lines.size - 1)
         val line = buffer.lines[row]
         if (line.columns == 0) return
         val col = (x / cellWidth).toInt().coerceIn(0, line.columns - 1)
@@ -887,9 +932,9 @@ class TerminalView @JvmOverloads constructor(
                 }
                 outRect.set(
                     left.toInt(),
-                    (first * cellHeight).toInt(),
+                    (first * cellHeight + scrollTopPx).toInt(),
                     right.toInt(),
-                    ((last + 1) * cellHeight).toInt(),
+                    ((last + 1) * cellHeight + scrollTopPx).toInt(),
                 )
             }
         }, ActionMode.TYPE_FLOATING)
@@ -983,15 +1028,22 @@ class TerminalView @JvmOverloads constructor(
                 if (wheelMode && verticalDrag) {
                     wheelAccum += dy
                     dispatchWheel(em, event)
+                } else if (verticalDrag) {
+                    // Nobody else is holding the screen, so the finger moves the
+                    // page: up reads history, down comes back to the prompt.
+                    scroller.forceFinished(true)
+                    scrollTopPx += dy
+                    clampScroll()
+                    invalidate()
                 }
-                // A horizontal drag belongs to the drawer. A terminal page
-                // does not pan through history; the program owns the screen.
+                // A horizontal drag belongs to the drawer.
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPress)
-                endDragAxis()
                 velocityTracker.addMovement(event)
+                if (verticalDrag && !wheelMode) releaseFling()
+                endDragAxis()
                 if (selecting) {
                     // The finger has left the screen; the selection stays put
                     // until Copy, Select all, a handle drag, or a tap elsewhere.
@@ -1045,6 +1097,19 @@ class TerminalView @JvmOverloads constructor(
         if (verticalDrag) onVerticalDrag?.invoke(false)
         dragAxisLocked = false
         verticalDrag = false
+    }
+
+    /** Carries a flick of the page into a decelerating scroll. */
+    private fun releaseFling() {
+        val max = maxScrollPx()
+        if (max <= 0f) return
+        velocityTracker.computeCurrentVelocity(1000)
+        val vy = velocityTracker.yVelocity
+        if (kotlin.math.abs(vy) < minFlingVelocity) return
+        // A flick upward means "show me more history", which is the page's own
+        // axis running in the opposite direction to the finger.
+        scroller.fling(0, scrollTopPx.toInt(), 0, -vy.toInt(), 0, 0, 0, max.toInt())
+        postInvalidateOnAnimation()
     }
 
     /** Hands accumulated vertical motion to the program as wheel notches. */
@@ -1123,6 +1188,9 @@ class TerminalView @JvmOverloads constructor(
 
     private fun sendText(text: String) {
         if (text.isEmpty()) return
+        // Text lands at the prompt, so the page goes back to look at it rather
+        // than typing blind into history.
+        if (scrollTopPx > 0f) scrollToBottom()
         inputSink?.invoke(text.toByteArray(Charsets.UTF_8))
     }
 
