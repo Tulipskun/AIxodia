@@ -353,6 +353,12 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
 3fdc242, which carries the provider wording and error mapping
 
 NOTE:
+- 2026-10-28T23:46Z: the store-first switch is committed as fc1764b (+ docs
+  46164db), pushed to main, and scripts/release.sh cut the rolling `latest`
+  at it (versionName 1.0.202610282346, versionCode 1793231166, APK
+  20,838,716 bytes, signature CN=AIxodia, AIxodia-version.json commit ==
+  HEAD). Still not seen on a device — no handset and no KVM, so the
+  operator's screen is the first real render.
 - 2026-10-28 (switch fix): unit tests green (:app:testDebugUnitTest, 34 suites
   incl. ThreadRowsTest now 8 tests) and assembleDebug BUILD SUCCESSFUL. Not
   seen on a device: no handset, no KVM; the operator's screen is the first
