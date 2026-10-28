@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.tulipskun.aixodia.ui.terminal
 
 import android.content.ClipData
@@ -11,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -38,7 +41,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
@@ -399,12 +401,14 @@ fun TerminalWindow(
         terminalView.value?.keepSoftKeyboardIfShown()
         socket.newSession()
     }
-    val closeSession = {
+    val closeSession: (String) -> Unit = { id ->
         ended = null
         ready = null
         terminalView.value?.scrollToBottom()
         terminalView.value?.keepSoftKeyboardIfShown()
-        socket.closeSession()
+        // The grid belongs to a shell that is gone, so it goes with it.
+        ui.emulators.remove(id)
+        socket.closeSession(id)
     }
     val status = statusLine(state, errorRes, ready, ended) +
         (if (detail.isNotBlank() && state != TermState.OPEN) "  ·  $detail" else "")
@@ -435,9 +439,9 @@ fun TerminalWindow(
                         drawerScope.launch { drawerState.close() }
                         restart()
                     },
-                    onCloseSession = {
+                    onCloseSession = { id ->
                         drawerScope.launch { drawerState.close() }
-                        closeSession()
+                        closeSession(id)
                     },
                     onClose = {
                         drawerScope.launch { drawerState.close() }
@@ -653,17 +657,28 @@ private suspend fun pumpTabOutput(
     }
 }
 
+/**
+ * The drawer's one screen: which shells there are and how to get another, then
+ * why the link looks the way it does, then the way out.
+ *
+ * The session list is the first thing below the title because it is what the
+ * thumb comes for, and a tab is closed by holding it rather than by a button of
+ * its own: the row already names the shell, so a second control that means
+ * "close the one you were just looking at" only asks to be mis-tapped.
+ */
 @Composable
 private fun TerminalSidebar(
     socket: TerminalSocket,
     status: String,
     state: TermState,
     onRestart: () -> Unit,
-    onCloseSession: () -> Unit,
+    onCloseSession: (String) -> Unit,
     onClose: () -> Unit,
     onPicked: () -> Unit,
 ) {
-    var confirmCloseSession by remember { mutableStateOf(false) }
+    // The tab a hold picked out, kept with the words that name it so the
+    // confirmation can say which shell is about to stop.
+    var pendingClose by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     Column(
         Modifier
@@ -713,30 +728,6 @@ private fun TerminalSidebar(
         }
 
         Spacer(Modifier.height(18.dp))
-        Surface(
-            color = InkRaised,
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, InkLine),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                Text(
-                    "CONNECTION",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = InkDim,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    status.ifBlank { "—" },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = InkText,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
         Column(
             Modifier
                 .weight(1f)
@@ -755,22 +746,35 @@ private fun TerminalSidebar(
                 NewSessionButton(onClick = onRestart)
             }
             Spacer(Modifier.height(10.dp))
-            TerminalSessionBar(socket = socket, onPicked = onPicked)
+            TerminalSessionBar(
+                socket = socket,
+                onPicked = onPicked,
+                onLongPressed = { id, label -> pendingClose = id to label },
+            )
+
             Spacer(Modifier.height(24.dp))
-            HorizontalDivider(color = InkLine)
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "ACTIONS",
-                style = MaterialTheme.typography.labelSmall,
-                color = InkDim,
-            )
-            Spacer(Modifier.height(4.dp))
-            SidebarAction(
-                label = stringResource(R.string.terminal_close_session),
-                icon = Icons.Default.Delete,
-                danger = true,
-                onClick = { confirmCloseSession = true },
-            )
+            Surface(
+                color = InkRaised,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, InkLine),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                    Text(
+                        "CONNECTION",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = InkDim,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        status.ifBlank { "—" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = InkText,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -783,26 +787,33 @@ private fun TerminalSidebar(
         )
     }
 
-    if (confirmCloseSession) {
+    val held = pendingClose
+    if (held != null) {
         AlertDialog(
-            onDismissRequest = { confirmCloseSession = false },
+            onDismissRequest = { pendingClose = null },
             containerColor = InkRaised,
             titleContentColor = InkText,
             textContentColor = InkDim,
             title = { Text(stringResource(R.string.terminal_close_session_title)) },
-            text = { Text(stringResource(R.string.terminal_close_session_body)) },
+            text = {
+                Column {
+                    Text(held.second, style = MaterialTheme.typography.bodyMedium, color = InkText)
+                    Spacer(Modifier.height(6.dp))
+                    Text(stringResource(R.string.terminal_close_session_body))
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        confirmCloseSession = false
-                        onCloseSession()
+                        pendingClose = null
+                        onCloseSession(held.first)
                     },
                 ) {
                     Text(stringResource(R.string.terminal_close_session), color = Danger)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmCloseSession = false }) {
+                TextButton(onClick = { pendingClose = null }) {
                     Text(stringResource(R.string.terminal_cancel), color = InkDim)
                 }
             },
@@ -845,7 +856,6 @@ private fun NewSessionButton(onClick: () -> Unit) {
 private fun SidebarAction(
     label: String,
     icon: ImageVector,
-    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -859,14 +869,14 @@ private fun SidebarAction(
         Icon(
             icon,
             contentDescription = null,
-            tint = if (danger) Danger else InkDim,
+            tint = InkDim,
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(12.dp))
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (danger) Danger else InkText,
+            color = InkText,
         )
     }
 }
@@ -1153,7 +1163,11 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
 }
 
 @Composable
-private fun TerminalSessionBar(socket: TerminalSocket, onPicked: () -> Unit = {}) {
+private fun TerminalSessionBar(
+    socket: TerminalSocket,
+    onPicked: () -> Unit,
+    onLongPressed: (id: String, label: String) -> Unit,
+) {
     val sessions by socket.sessions.collectAsStateWithLifecycle()
     val pids by socket.sessionPids.collectAsStateWithLifecycle()
     val active by socket.activeSessionId.collectAsStateWithLifecycle()
@@ -1176,12 +1190,16 @@ private fun TerminalSessionBar(socket: TerminalSocket, onPicked: () -> Unit = {}
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        sessions.forEachIndexed { i, id ->
-            // The pid is what makes a tab a shell and not a position: closing
+        sessions.forEachIndexed { i, id ->            // The pid is what makes a tab a shell and not a position: closing
             // Shell 2 used to renumber Shell 3, so "Shell 1" no longer told
             // you which process a reconnect would land on. The number is for
             // quick tapping; the pid identifies the process behind it.
             val pid = pids[id]
+            val pidText = if (pid != null && pid > 0) {
+                stringResource(R.string.terminal_session_pid, pid)
+            } else {
+                stringResource(R.string.terminal_session_starting)
+            }
             // Only the session that is actually attached is selected. Falling
             // back to "the last tab" when nothing is attached marked a closed
             // tab as the live one.
@@ -1197,10 +1215,13 @@ private fun TerminalSessionBar(socket: TerminalSocket, onPicked: () -> Unit = {}
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(shape)
-                    .clickable {
-                        socket.switchSession(id)
-                        onPicked()
-                    },
+                    .combinedClickable(
+                        onClick = {
+                            socket.switchSession(id)
+                            onPicked()
+                        },
+                        onLongClick = { onLongPressed(id, "Shell ${i + 1}  ·  $pidText") },
+                    ),
             ) {
                 Row(
                     Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
@@ -1221,11 +1242,7 @@ private fun TerminalSessionBar(socket: TerminalSocket, onPicked: () -> Unit = {}
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            if (pid != null && pid > 0) {
-                                stringResource(R.string.terminal_session_pid, pid)
-                            } else {
-                                stringResource(R.string.terminal_session_starting)
-                            },
+                            pidText,
                             style = MaterialTheme.typography.labelSmall,
                             color = InkDim,
                         )
@@ -1241,6 +1258,11 @@ private fun TerminalSessionBar(socket: TerminalSocket, onPicked: () -> Unit = {}
                 }
             }
         }
+        Text(
+            stringResource(R.string.terminal_sessions_hold),
+            style = MaterialTheme.typography.labelSmall,
+            color = InkDim,
+        )
     }
 }
 

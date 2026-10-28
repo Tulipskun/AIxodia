@@ -238,7 +238,16 @@ class TerminalSocket(
         dialJob = scope.launch {
             loadSavedTabs()
             if (!wanted) return@launch
-            syncSessions()
+            // Nothing is dialed until the engine says what it actually holds. A
+            // stopped or restarting engine answers nothing, and opening the saved
+            // tabs against that silence would start fresh shells under ids that
+            // name shells the user believes are still running.
+            while (!syncSessions()) {
+                if (!wanted) return@launch
+                _detail.value = "engine has not answered /v1/terminals; waiting before opening shells"
+                refreshDaemonAddressIfDue()
+                delay(RETRY_MS)
+            }
             if (!wanted) return@launch
             reconcileLinks()
         }
@@ -266,7 +275,7 @@ class TerminalSocket(
         if (!wanted || !appVisible) return
         if (refreshJob?.isActive == true) return
         refreshJob = scope.launch {
-            syncSessions()
+            if (!syncSessions()) return@launch
             if (!wanted || !appVisible) return@launch
             reconcileLinks()
         }
@@ -336,33 +345,49 @@ class TerminalSocket(
     }
 
     /**
-     * Kills the visible shell and forgets its id. Other tabs stay attached; if
-     * one is left it becomes visible, otherwise the panel shows the finished
-     * state and waits for "open new".
+     * Kills one shell and forgets its tab, whichever tab is on screen. Other tabs
+     * stay attached; the tab left visible is the next live one, and once nothing
+     * is left a single fresh shell opens. A closed tab is never the shell that
+     * comes back, but an empty terminal is not a state the user is left sitting in.
      */
     @Synchronized
-    fun closeSession() {
-        val link = activeLink ?: return
-        val id = link.id
-        // End the shell, not just the stream. The control frame goes out before
-        // the socket is closed below.
-        if (id.isNotBlank()) link.sendClose()
-        dropLink(link, kill = true)
+    fun closeSession(id: String) {
+        if (id.isBlank()) return
+        val link = links[id]
+        val wasActive = if (link != null) {
+            activeLink === link
+        } else {
+            // No link, and this id is the one the screen is showing: the window
+            // listed its tabs before any of them was attached.
+            activeLink == null && _activeSessionId.value == id
+        }
+        if (link != null) {
+            // End the shell, not just the stream. The control frame goes out
+            // before the socket is closed.
+            link.sendClose()
+            dropLink(link, kill = true)
+        } else {
+            // Listed but never attached (the engine has not answered yet): there
+            // is still a shell behind that id and a tab that must go.
+            forgetClosed(id, kill = true)
+        }
+        if (!wasActive) return
 
-        val nextId = _sessions.value.lastOrNull { candidate ->
+        val next = _sessions.value.lastOrNull { candidate ->
             candidate != id && links[candidate]?.state?.value != TermState.ENDED
         }
-        val next = nextId?.let { links[it] }
         if (next != null) {
-            activate(next)
-        } else {
-            autoNew = false
-            _activeSessionId.value = ""
-            _error.value = 0
-            _detail.value = ""
-            _state.value = TermState.ENDED
-            scope.launch { settings.clearTerminalSessionId() }
+            links[next]?.let(::activate) ?: switchSession(next)
+            return
         }
+        autoNew = true
+        activeLink = null
+        _activeSessionId.value = ""
+        _error.value = 0
+        _detail.value = ""
+        _state.value = TermState.CONNECTING
+        scope.launch { settings.clearTerminalSessionId() }
+        reconcileLinks()
     }
 
     /** Hangs up every tab. The engine keeps the shells for a later reattach. */
@@ -479,19 +504,28 @@ class TerminalSocket(
     }
 
     /**
-     * Aligns the tab list and pid labels with the engine's live shells. A null
-     * list (engine unreachable or an old engine without /v1/terminals) leaves
-     * the saved tabs alone.
+     * Aligns the tab list and pid labels with the engine's live shells.
      *
-     * A shell id is not a shell: after the engine restarts, the same saved id
-     * would make acquireSession start a brand-new shell under the tab the user
-     * thought was still running. Dropping ids the engine no longer reports is
-     * what makes a reconnect land on the right shell — or on a new tab when
-     * that shell really is gone.
+     * True when the engine answered; an engine too old to list counts as having
+     * answered, and the saved tabs are left alone either way. False means nothing
+     * was learned, and the caller must not dial on the strength of the saved ids:
+     * a restarted engine holds nothing in memory, so attaching a saved id there
+     * starts a brand-new shell under the tab the user thought was still running,
+     * at a pid the tab does not name.
+     *
+     * A shell id is not a shell: dropping the ids the engine no longer reports is
+     * what makes a reconnect land on the right shell — or on one new tab when
+     * every shell really is gone.
      */
     private suspend fun syncSessions(): Boolean =
         sessionSync.withLock {
-            val rows = withTimeoutOrNull(5_000) { history.terminalList() } ?: return@withLock false
+            val rows = when (val shells = withTimeoutOrNull(5_000) { history.terminalShells() }) {
+                is TerminalShells.Listed -> shells.rows
+                // An engine that cannot list still answered: there is nothing to
+                // learn from it, so the tabs the app already has stay as they are.
+                TerminalShells.Unlisted -> return@withLock true
+                null, TerminalShells.Unreachable -> return@withLock false
+            }
 
             val ids = mutableListOf<String>()
             val pids = mutableMapOf<String, Int>()
@@ -540,7 +574,7 @@ class TerminalSocket(
                     else -> ""
                 }
             }
-            before.isNotBlank() && before !in ids
+            true
         }
 
     /**
@@ -646,21 +680,24 @@ class TerminalSocket(
         link.pause()
         links.remove(id)
         if (activeLink === link) activeLink = null
-        if (id.isNotBlank()) {
-            // Remember that this id is on its way out, so the next list poll
-            // cannot attach it again while the engine is still tearing the
-            // shell down.
-            if (kill) closingIds.add(id)
-            _sessions.value = _sessions.value - id
-            _sessionPids.value = _sessionPids.value - id
-            sessionModes.remove(id)
-        }
+        if (id.isNotBlank()) forgetClosed(id, kill)
+    }
+
+    /**
+     * Forgets one tab and, when [kill] is set, ends its shell on the engine.
+     * `kill = false` is a stream that went away while the shell stays alive —
+     * a shell that exited on its own has nothing left to end.
+     */
+    private fun forgetClosed(id: String, kill: Boolean) {
+        // Remember that this id is on its way out, so the next list poll cannot
+        // attach it again while the engine is still tearing the shell down.
+        if (kill) closingIds.add(id)
+        _sessions.value = _sessions.value - id
+        _sessionPids.value = _sessionPids.value - id
+        sessionModes.remove(id)
         scope.launch {
-            if (id.isNotBlank()) {
-                settings.removeTerminalSessionId(id)
-                // If the socket was already gone the engine never saw close.
-                if (kill) runCatching { history.closeTerminal(id) }
-            }
+            settings.removeTerminalSessionId(id)
+            if (kill) runCatching { history.closeTerminal(id) }
         }
     }
 

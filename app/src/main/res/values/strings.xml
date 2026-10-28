@@ -73,6 +73,7 @@
     <string name="login_advanced">Advanced settings</string>
     <string name="terminal">Terminal</string>
     <string name="terminal_sessions">Sessions</string>
+    <string name="terminal_sessions_hold">Hold a shell to close it</string>
     <string name="terminal_new">New</string>
     <string name="terminal_no_sessions">No live shells</string>
     <string name="terminal_session_pid">pid %1$d</string>

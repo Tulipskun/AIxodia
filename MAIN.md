@@ -23,8 +23,23 @@ GOAL:
 [COMPLETED] terminal: arrows aligned (up above down, D-pad style) and holdable
 [IN_PROCESS] non-login mode: the app must work with no API key at all, without
 routing through the opencode CLI
+[IN_PROCESS] Terminal tabs: the session list moves to the top of the drawer, a
+            tab is closed by holding it instead of by a separate Close-session
+            button, and reopening the terminal lands on the shells that are
+            really there — the same pid, never a shell that was closed, and one
+            fresh tab only when nothing is left
 
 PLAN:
+[IN_PROCESS] TerminalSocket.open() waits for the engine's /v1/terminals answer
+            before dialing anything (an engine mid-restart holds nothing in
+            memory, and attaching a saved id there starts a new shell under the
+            old tab); HistoryApi.terminalShells() tells Listed / Unlisted /
+            Unreachable apart so silence cannot be read as "no shells"
+[IN_PROCESS] closeSession(id) takes the tab from the row that was held, drops
+            that tab's emulator, and opens one fresh shell when nothing is left
+[COMPLETED] build toolchain re-bootstrapped on this host: Android SDK 35 +
+            build-tools 35 at /root/android-sdk (JDK 21, Gradle 8.10.2)
+
 [COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
 [COMPLETED] HistoryApi: sessions()/turns() fall back to D1 when the tunnel is down
 [COMPLETED] unit tests: D1 row -> SessionRow/TurnRow mapping (D1ChatReadTest)

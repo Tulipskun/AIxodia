@@ -186,6 +186,22 @@ fun SessionUsageRow.toStoredTotals(): StoredTotals = StoredTotals(
 )
 
 /**
+ * The result of reading the engine's live shells, keeping the three outcomes the
+ * terminal must not confuse: what it holds, an engine with no list to give, and
+ * an engine that was not there to ask.
+ */
+sealed interface TerminalShells {
+    /** The engine answered. This is every shell it holds, possibly none. */
+    data class Listed(val rows: List<JSONObject>) : TerminalShells
+
+    /** The engine has no `/v1/terminals`: a build too old to list its shells. */
+    data object Unlisted : TerminalShells
+
+    /** Nothing was answered: the daemon, its tunnel, or the network is down. */
+    data object Unreachable : TerminalShells
+}
+
+/**
  * Picks one page out of an oldest-first transcript.
  *
  * beforeSeq <= 0 means "the newest page", which is what opening a long chat
@@ -799,40 +815,38 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /**
      * Sessions the engine still holds, including tmux shells that survived a
-     * restart. Null means the list could not be read, which is different from
-     * an engine that really holds no shells: the caller must not wipe the tabs
-     * it already has just because the tunnel blinked.
+     * restart — and the reason the list is not available when it is not.
+     *
+     * The terminal has to tell [TerminalShells.Unreachable] apart from an empty
+     * list. An engine that is stopped or restarting answers nothing, and opening
+     * the saved tabs against that silence would start brand-new shells under the
+     * ids of shells that are gone.
      */
-    suspend fun terminalList(): List<JSONObject>? = withContext(Dispatchers.IO) {
+    suspend fun terminalShells(): TerminalShells = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext TerminalShells.Unreachable
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) {
-                    null
-                } else {
-                    val text = r.body?.string().orEmpty()
-                    val array = runCatching { JSONObject(text).optJSONArray("terminals") }.getOrNull()
-                    if (array == null) {
-                        null
-                    } else {
-                        val rows = ArrayList<JSONObject>(array.length())
-                        for (i in 0 until array.length()) {
-                            array.optJSONObject(i)?.let(rows::add)
-                        }
-                        rows
-                    }
+                // 404/405 is the engine answering that it has no such route (an
+                // older build), which is information; 502/503 from the tunnel is
+                // the engine not being there.
+                if (r.code == 404 || r.code == 405) return@use TerminalShells.Unlisted
+                if (!r.isSuccessful) return@use TerminalShells.Unreachable
+                val array = runCatching {
+                    JSONObject(r.body?.string().orEmpty()).optJSONArray("terminals")
+                }.getOrNull() ?: return@use TerminalShells.Unlisted
+                val rows = ArrayList<JSONObject>(array.length())
+                for (i in 0 until array.length()) {
+                    array.optJSONObject(i)?.let(rows::add)
                 }
+                TerminalShells.Listed(rows)
             }
-        }.getOrNull()
+        }.getOrDefault(TerminalShells.Unreachable)
     }
-
-    /** Sessions the engine still holds; an unreachable engine reads as empty. */
-    suspend fun terminals(): List<JSONObject> = terminalList().orEmpty()
 
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) {
