@@ -131,6 +131,10 @@ class TerminalSocket(
     private val _sessionPids = MutableStateFlow<Map<String, Int>>(emptyMap())
     val sessionPids: StateFlow<Map<String, Int>> = _sessionPids
 
+    /** What the program in each shell calls itself (OSC 0/2), from the engine. */
+    private val _sessionTitles = MutableStateFlow<Map<String, String>>(emptyMap())
+    val sessionTitles: StateFlow<Map<String, String>> = _sessionTitles
+
     /** The id of the tab on screen (empty while a brand-new shell starts). */
     private val _activeSessionId = MutableStateFlow("")
     val activeSessionId: StateFlow<String> = _activeSessionId
@@ -426,6 +430,7 @@ class TerminalSocket(
         activeLink = null
         _sessions.value = emptyList()
         _sessionPids.value = emptyMap()
+        _sessionTitles.value = emptyMap()
         _activeSessionId.value = ""
         _state.value = TermState.CLOSED
         _error.value = 0
@@ -529,6 +534,7 @@ class TerminalSocket(
 
             val ids = mutableListOf<String>()
             val pids = mutableMapOf<String, Int>()
+            val titles = mutableMapOf<String, String>()
             for (o in rows) {
                 val id = o.optString("id").trim()
                 // The engine already checks the pid; the alive flag keeps an
@@ -537,6 +543,8 @@ class TerminalSocket(
                 ids += id
                 val pid = o.optInt("pid", 0)
                 if (pid > 0) pids[id] = pid
+                val title = o.optString("title").trim()
+                if (title.isNotEmpty()) titles[id] = title
             }
 
             // A closed shell can still be listed by the engine for a moment
@@ -546,6 +554,7 @@ class TerminalSocket(
             closingIds.retainAll(ids.toSet())
             ids.removeAll(closingIds)
             pids.keys.retainAll(ids.toSet())
+            titles.keys.retainAll(ids.toSet())
 
             // The engine's answer is the whole truth: persist it in one edit so
             // a crash between the list and the map cannot leave them
@@ -558,6 +567,7 @@ class TerminalSocket(
             }
             _sessions.value = ids
             _sessionPids.value = pids
+            _sessionTitles.value = titles
 
             val before = _activeSessionId.value
             // A brand-new shell that has not answered ready yet is an explicit
@@ -596,6 +606,7 @@ class TerminalSocket(
                 if (activeLink === link) activeLink = null
                 sessionModes.remove(link.id)
                 _sessionPids.value = _sessionPids.value - link.id
+                _sessionTitles.value = _sessionTitles.value - link.id
             }
         }
         // A pending shell that failed to start cannot be retried by the list.
@@ -694,6 +705,7 @@ class TerminalSocket(
         if (kill) closingIds.add(id)
         _sessions.value = _sessions.value - id
         _sessionPids.value = _sessionPids.value - id
+        _sessionTitles.value = _sessionTitles.value - id
         sessionModes.remove(id)
         scope.launch {
             settings.removeTerminalSessionId(id)

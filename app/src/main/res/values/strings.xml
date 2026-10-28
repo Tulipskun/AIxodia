@@ -79,6 +79,7 @@
     <string name="terminal_session_pid">pid %1$d</string>
     <string name="terminal_session_starting">starting…</string>
     <string name="terminal_active">Active</string>
+    <string name="terminal_window">Window title</string>
     <string name="terminal_close">Close terminal</string>
     <string name="terminal_close_session">Close session</string>
     <string name="terminal_close_session_title">Close this shell?</string>

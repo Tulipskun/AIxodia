@@ -35,6 +35,7 @@
     <string name="login_continue">Continue</string>
     <string name="login_advanced">Advanced settings</string>
     <string name="terminal">Terminal</string>
+    <string name="terminal_window">Window title</string>
     <string name="terminal_close">Close the terminal</string>
     <string name="terminal_open_new">Open a new shell</string>
     <string name="terminal_connecting">Connecting…</string>

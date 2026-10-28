@@ -248,6 +248,7 @@ fun TerminalWindow(
     val errorRes by socket.error.collectAsStateWithLifecycle()
     val detail by socket.detail.collectAsStateWithLifecycle()
     val activeSessionId by socket.activeSessionId.collectAsStateWithLifecycle()
+    val sessionTitles by socket.sessionTitles.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var ready by remember { mutableStateOf<TermEvent.Ready?>(null) }
@@ -436,6 +437,7 @@ fun TerminalWindow(
                     socket = socket,
                     status = status,
                     state = state,
+                    title = sessionTitles[activeSessionId].orEmpty(),
                     onRestart = {
                         drawerScope.launch { drawerState.close() }
                         restart()
@@ -672,6 +674,7 @@ private fun TerminalSidebar(
     socket: TerminalSocket,
     status: String,
     state: TermState,
+    title: String,
     onRestart: () -> Unit,
     onCloseSession: (String) -> Unit,
     onClose: () -> Unit,
@@ -723,6 +726,35 @@ private fun TerminalSidebar(
                         statusLabel(state),
                         style = MaterialTheme.typography.labelMedium,
                         color = InkDim,
+                    )
+                }
+            }
+        }
+
+        // What the running program calls itself (OSC 0/2). tmux answers the
+        // program itself and keeps the title, so it lives here beside the shell
+        // rather than on a bar of its own over the grid.
+        if (title.isNotBlank()) {
+            Spacer(Modifier.height(14.dp))
+            Surface(
+                color = InkRaised,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, InkLine),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Text(
+                        stringResource(R.string.terminal_window),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = InkDim,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = InkText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
