@@ -1,4 +1,38 @@
 GOAL:
+[COMPLETED] Chat switching is store-first, like Discord/Telegram (operator:
+            "ไม่เห็นจะดีขึ้นเลย ข้อมูลทุกอย่างเหมือนรอจาก ws อย่างเดียว ไม่มีการ
+            เก็บไว้ใช้ซ้ำ การสลับแชทไปมาก็แสดงผลไม่ถูกต้อง" — the switch still
+            showed the wrong thread because the app kept a single chat-shaped
+            pile of live state and tore the window down before reading the new
+            one. Now the id + floor are ONE value (ChatWindow) adopted in a
+            single emission, live turn cleared on every switch:
+            - Atomic window: activeId and windowFloor were two flows. The
+              sessionId setter nulled the floor before flipping the id, so
+              messages emitted an empty list until the local read finished —
+              and if the switch job was cancelled mid-read the floor stayed
+              null and the thread never filled again. ChatViewModel now holds
+              ChatWindow(sid, floor); storedRows flatMaps it and switchChat
+              (suspend read, non-suspend adopt) swaps both at once. A cancelled
+              switch leaves the previous chat whole.
+            - Stale live turn removed: busy, liveText, liveBlocks, reasoning,
+              usage, errorCard, turnStats, turnBaseSeq (-1) and pending
+              attachments are cleared by adoptWindow. Before, chat A's stream
+              drew in chat B and threadRows filtered B's rows by A's base seq.
+            - Cross-chat rows cannot paint: the flatMapLatest flow holds the old
+              chat's rows for the few ms of the new Room read, so threadRows now
+              takes the on-screen sid and drops anything from another chat
+              (tested). hasOlder/olderExhausted/loadingOlder reset per window.
+            - Paths converted: openChat, newChat, deleteChat, dropDeadChat, cold
+              start (cache page, then ensureSession only if the chat changed).
+              refresh() no longer re-anchors — Room writes reach the live
+              window, so pages scrolled in are kept. Attachments picked in one
+              chat no longer land in another (attach() pins its sid).
+            WS stays a send/update channel: frames are persisted to Room by
+            sessionId regardless of what is on screen, and the thread is drawn
+            from Room (observeFrom) only. assembleDebug +
+            :app:testDebugUnitTest BUILD SUCCESSFUL (JDK17 + /opt/android-sdk;
+            ThreadRowsTest +3 switch/floor tests).
+            NOT verified on a phone — no device and no KVM on this host.
 [COMPLETED] Chat thread made correct, smooth and alive (operator report:
             "การแสดงผลแชทไม่ถูกต้องอย่างรุนแรง ค้างกระตุก บางครั้งเกิดการ crash"
             — the display badly wrong, freezing/stuttering, sometimes crashing.
@@ -319,6 +353,15 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
 3fdc242, which carries the provider wording and error mapping
 
 NOTE:
+- 2026-10-28 (switch fix): unit tests green (:app:testDebugUnitTest, 34 suites
+  incl. ThreadRowsTest now 8 tests) and assembleDebug BUILD SUCCESSFUL. Not
+  seen on a device: no handset, no KVM; the operator's screen is the first
+  real render. Switching now costs one local Room read before the chip
+  flips — the previous chat stays on screen during those milliseconds rather
+  than blanking, which is the store-first trade the report asked for.
+- Still open (unchanged): the resume path (app reopened mid-turn) sets no
+  turnBaseSeq, so a replayed stream can sit beside stored rows; choosing a
+  base there risks hiding rows the replay never covered.
 - 2026-10-28T23:14Z: the thread fix above is committed as 515e9ec, pushed to
   main, and scripts/release.sh cut the rolling `latest` at it (versionName
   1.0.202610282313, versionCode 1793229184, APK 20,838,712 bytes, signature
