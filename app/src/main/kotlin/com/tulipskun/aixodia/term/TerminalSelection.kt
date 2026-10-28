@@ -38,6 +38,18 @@ internal object TerminalSelection {
      * list, heading, quote or table are not prose and end the run. The
      * padding is layout, not text, so it is dropped from continuations; the
      * first selected row tells how wide it is.
+     *
+     * A URL is one token even when it crosses rows: a line with no spaces
+     * that carries a scheme, followed by another line with no spaces, joins
+     * without the space the rule above would put back.
+     *
+     * When every selected row belongs to a box — a vertical border, a rule,
+     * or empty — the copy is the card's content. Borders and the padding that
+     * centers the text are chrome, not text, so they are dropped; content
+     * rows keep their own breaks and blank rows stay blank. Only a broken URL
+     * joins. A paragraph the program wrapped inside a card is not reflowed,
+     * because each card row is padded on its own and leaves no cut column to
+     * trust.
      */
     fun text(
         buffer: TerminalBuffer,
@@ -49,6 +61,8 @@ internal object TerminalSelection {
         if (buffer.lines.isEmpty()) return ""
         val first = firstRow.coerceIn(0, buffer.lines.size - 1)
         val last = lastRow.coerceIn(0, buffer.lines.size - 1)
+
+        cardText(buffer, first, firstCol, last, lastCol)?.let { return it }
 
         fun fromOf(r: Int): Int =
             (if (r == first) firstCol else 0)
@@ -87,43 +101,18 @@ internal object TerminalSelection {
                 return lead == pad || lead == pad + 1
             }
 
+            fun rowString(r: Int): String {
+                val row = buffer.lines[r]
+                return rowText(row, firstTextCol(row), lastTextCol(row))
+            }
+
             // Tables and code line their columns up with runs of spaces; prose
             // keeps single ones.
-            fun isProse(row: TerminalRow): Boolean {
-                val from = firstTextCol(row)
-                val to = lastTextCol(row)
-                var col = from
-                while (col < to) {
-                    if (row.chars[col] == TerminalRow.SPACE &&
-                        row.chars[col + 1] == TerminalRow.SPACE
-                    ) {
-                        return false
-                    }
-                    col++
-                }
-                return true
-            }
+            fun isProseRow(r: Int): Boolean = isProse(rowString(r))
 
             // A line that opens a list, heading, quote or table starts a new
             // element: the line above it is not its continuation.
-            fun opensElement(row: TerminalRow): Boolean {
-                val col = firstTextCol(row)
-                if (col < 0) return false
-                val cp = row.chars[col]
-                if (cp == '-'.code || cp == '*'.code || cp == '+'.code ||
-                    cp == '•'.code || cp == '>'.code || cp == '|'.code ||
-                    cp == '#'.code || cp in 0x2500..0x257F
-                ) {
-                    return true
-                }
-                if (cp in '0'.code..'9'.code) {
-                    var c = col
-                    while (c < row.columns && row.chars[c] in '0'.code..'9'.code) c++
-                    return c < row.columns &&
-                        (row.chars[c] == '.'.code || row.chars[c] == ')'.code)
-                }
-                return false
-            }
+            fun opensRow(r: Int): Boolean = opensElement(rowString(r))
 
             val block = (first..last).filter { isBlock(it) }
             val ends = block.map { buffer.lines[it].lastWritten }.filter { it >= 0 }
@@ -140,10 +129,9 @@ internal object TerminalSelection {
                     val row = buffer.lines[r]
                     if (row.columns == 0 || row.wrapped) continue
                     if (!isBlock(r) || !isBlock(r + 1)) continue
-                    val next = buffer.lines[r + 1]
-                    val lead = firstTextCol(next)
+                    val lead = firstTextCol(buffer.lines[r + 1])
                     if (lead > endOf(r + 1)) continue
-                    if (!isProse(row) || !isProse(next) || opensElement(next)) continue
+                    if (!isProseRow(r) || !isProseRow(r + 1) || opensRow(r + 1)) continue
                     if (cellCut) {
                         // Cut mid-word: only the lines ending at the column
                         // were cut, and they join as they are.
@@ -159,10 +147,10 @@ internal object TerminalSelection {
         }
 
         val sb = StringBuilder()
+        var previous: String? = null
         for (r in first..last) {
             val row = buffer.lines[r]
             if (row.columns == 0) continue
-            val from = fromOf(r)
             val end = endOf(r)
             // A wrapped row keeps every cell the shell wrote, including a space
             // that fell on the break; a rotation may have widened the row since,
@@ -172,33 +160,174 @@ internal object TerminalSelection {
             } else {
                 minOf(end, lastTextCol(row))
             }
-            val line = StringBuilder()
-            if (to >= from) {
-                var col = from
-                while (col <= to) {
-                    val cp = row.chars[col]
-                    when {
-                        cp == 0 -> Unit // a wide glyph's continuation cell
-                        cp == TerminalRow.SPACE -> line.append(' ')
-                        else -> {
-                            line.appendCodePoint(cp)
-                            row.combiningAt(col)?.let { line.append(it) }
-                        }
-                    }
-                    col += maxOf(1, row.width[col].toInt())
-                }
-            }
+            var body = rowText(row, fromOf(r), to)
             // The layout indent of a program-wrapped line is not text. A soft
             // wrap starts at column zero, so only the former can carry it.
             var start = 0
             if (r > first && continues[r - 1 - first] && !buffer.lines[r - 1].wrapped) {
-                while (start < line.length && start < pad && line[start] == ' ') start++
-                if (spaceBefore[r - first]) sb.append(' ')
+                while (start < body.length && start < pad && body[start] == ' ') start++
+                if (spaceBefore[r - first] && !isLink(previous.orEmpty(), body)) sb.append(' ')
             }
-            val body = line.substring(start)
-            sb.append(if (row.wrapped) body else body.trimEnd(' '))
+            body = body.substring(start)
+            if (!row.wrapped) body = body.trimEnd(' ')
+            sb.append(body)
+            previous = body
             if (r < last && !continues[r - first]) sb.append('\n')
         }
         return sb.toString().trim('\n')
+    }
+
+    /**
+     * The content of a box that fills the whole selection, or null when any
+     * selected row lies outside one. A card row starts with a vertical border
+     * after the layout indent; a rule row holds nothing but box drawing; any
+     * other row means the selection is not just a card.
+     */
+    private fun cardText(
+        buffer: TerminalBuffer,
+        first: Int,
+        firstCol: Int,
+        last: Int,
+        lastCol: Int,
+    ): String? {
+        val content = ArrayList<String>(last - first + 1)
+        val wrapped = ArrayList<Boolean>(last - first + 1)
+        var bordered = 0
+        for (r in first..last) {
+            val row = buffer.lines[r]
+            val lead = if (row.columns == 0) -1 else firstTextCol(row)
+            if (lead < 0) {
+                content += ""
+                wrapped += false
+                continue
+            }
+            val cutTo = (if (r == last) lastCol else row.columns - 1)
+                .coerceIn(0, row.columns - 1)
+            val cutFrom = (if (r == first) firstCol else 0)
+                .coerceIn(0, row.columns - 1)
+            if (isVerticalBorder(row.chars[lead])) {
+                bordered++
+                content += cardRow(rowText(row, maxOf(cutFrom, lead), cutTo))
+                wrapped += row.wrapped
+            } else if (isBoxOnly(row, lead, lastTextCol(row))) {
+                content += ""
+                wrapped += false
+            } else {
+                return null
+            }
+        }
+        if (bordered == 0) return null
+        return joinCard(content, wrapped)
+    }
+
+    /**
+     * Card rows, top to bottom. Blank rows separate paragraphs; a row the
+     * emulator wrapped, or one that continues a broken URL, joins the row
+     * above; everything else keeps its own line, because card rows are padded
+     * one by one and their cut column cannot be trusted.
+     */
+    private fun joinCard(lines: List<String>, wrapped: List<Boolean>): String {
+        val sb = StringBuilder()
+        var blanks = 0
+        var previous: String? = null
+        for (i in lines.indices) {
+            val line = lines[i].trim(' ')
+            if (line.isEmpty()) {
+                if (sb.isNotEmpty()) blanks++
+                continue
+            }
+            if (sb.isNotEmpty()) {
+                when {
+                    blanks > 0 -> sb.append("\n".repeat(blanks + 1))
+                    wrapped[i - 1] || isLink(previous.orEmpty(), line) -> Unit
+                    else -> sb.append('\n')
+                }
+            }
+            sb.append(line)
+            previous = line
+            blanks = 0
+        }
+        return sb.toString()
+    }
+
+    /** One card row without its borders and the padding that centers it. */
+    private fun cardRow(raw: String): String {
+        var s = raw.trim(' ')
+        if (s.isEmpty()) return ""
+        val head = s.codePointAt(0)
+        if (isVerticalBorder(head)) s = s.substring(Character.charCount(head)).trim(' ')
+        if (s.isEmpty()) return ""
+        val tail = s.codePointBefore(s.length)
+        if (isVerticalBorder(tail)) {
+            s = s.substring(0, s.length - Character.charCount(tail)).trim(' ')
+        }
+        return s
+    }
+
+    /** A rule row: nothing but box drawing up to its last visible cell. */
+    private fun isBoxOnly(row: TerminalRow, from: Int, to: Int): Boolean {
+        var col = from
+        while (col <= to) {
+            val cp = row.chars[col]
+            if (cp != 0 && cp != TerminalRow.SPACE && cp !in 0x2500..0x257F) return false
+            col += maxOf(1, row.width[col].toInt())
+        }
+        return true
+    }
+
+    /** The vertical strokes of a box: │, ┃, ╎, ╏, ║. */
+    private fun isVerticalBorder(cp: Int): Boolean =
+        cp == 0x2502 || cp == 0x2503 || cp == 0x254E || cp == 0x254F || cp == 0x2551
+
+    /** The text of one row between two columns, skipping wide-glyph tails. */
+    private fun rowText(row: TerminalRow, from: Int, to: Int): String {
+        if (from < 0 || to < from) return ""
+        val sb = StringBuilder(to - from + 1)
+        var col = from
+        while (col <= to && col < row.columns) {
+            val cp = row.chars[col]
+            when {
+                cp == 0 -> Unit // a wide glyph's continuation cell
+                cp == TerminalRow.SPACE -> sb.append(' ')
+                else -> {
+                    sb.appendCodePoint(cp)
+                    row.combiningAt(col)?.let { sb.append(it) }
+                }
+            }
+            col += maxOf(1, row.width[col].toInt())
+        }
+        return sb.toString()
+    }
+
+    private fun isProse(text: String): Boolean = "  " !in text
+
+    private fun opensElement(text: String): Boolean {
+        if (text.isEmpty()) return false
+        val cp = text.codePointAt(0)
+        if (cp == '-'.code || cp == '*'.code || cp == '+'.code ||
+            cp == '•'.code || cp == '>'.code || cp == '|'.code ||
+            cp == '#'.code || cp in 0x2500..0x257F
+        ) {
+            return true
+        }
+        if (cp in '0'.code..'9'.code) {
+            var i = 0
+            while (i < text.length && text[i] in '0'..'9') i++
+            return i < text.length && (text[i] == '.' || text[i] == ')')
+        }
+        return false
+    }
+
+    /**
+     * A URL split over two rows. Both rows must be single tokens — a line with
+     * a space is prose, not the rest of a link — and the first must carry a
+     * scheme, or the second must continue its query string.
+     */
+    private fun isLink(before: String, after: String): Boolean {
+        val a = before.trim(' ')
+        val b = after.trim(' ')
+        if (a.isEmpty() || b.isEmpty() || ' ' in a || ' ' in b) return false
+        if ("://" in a || a.startsWith("www.")) return true
+        return (a.endsWith('?') || a.endsWith('&')) && '=' in b
     }
 }

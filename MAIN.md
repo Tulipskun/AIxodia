@@ -158,6 +158,25 @@ routing through the opencode CLI
             versionCode 1793183530, APK 20,802,664 bytes,
             md5 39b15ef997949372993291f7f88b22ee, signature CN=AIxodia,
             AIxodia-version.json commit == HEAD).
+[COMPLETED] terminal: copy now survives full-screen boxes. When every
+            selected row belongs to a box — a vertical border after the
+            layout indent, a rule of box drawing, or a blank row — the copy
+            is the card's content: borders and the centering padding are
+            chrome and are dropped, content rows keep their own breaks, and
+            blank rows stay blank. A URL split by the box joins as one token:
+            the block reflow no longer puts a space between a line with no
+            spaces that carries a scheme and the next unspaced line (or a
+            query string continued with key=value), and the card join uses
+            the same test. The reported Cline sign-in box now yields
+            https://authkit.cline.bot/device?user_code=XNXG-RCNZ while the
+            "Waiting for sign-in..." row keeps its own line. A paragraph the
+            program wrapped inside a card is not reflowed (each card row is
+            padded on its own, so there is no cut column to trust), and a
+            selection that mixes a card with text outside it copies as laid
+            out. TerminalSelectionTest gained aLinkBrokenAcrossLinesIsNotSpaced
+            and aCardCopiesAsItsContent (a full ╭─╮ box from a helper).
+            :app:testDebugUnitTest BUILD SUCCESSFUL, 227 tests, Paparazzi
+            included.
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer

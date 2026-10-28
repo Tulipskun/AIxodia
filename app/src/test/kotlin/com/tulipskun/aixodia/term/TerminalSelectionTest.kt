@@ -275,6 +275,66 @@ class TerminalSelectionTest {
             TerminalSelection.text(buffer, 0, 0, 0, buffer.columns - 1),
         )
     }
+
+    /**
+     * A URL the program broke over two rows is one token. The prose rule would
+     * put a space back at the break; a line with a scheme followed by another
+     * unspaced line continues the link instead.
+     */
+    @Test
+    fun aLinkBrokenAcrossLinesIsNotSpaced() {
+        val buffer = buffer(2, cols = 52)
+        buffer.put(0, 0, "         https://authkit.cline.bot/device?")
+        buffer.put(1, 0, "         user_code=XNXG-RCNZ")
+
+        assertEquals(
+            "https://authkit.cline.bot/device?user_code=XNXG-RCNZ",
+            TerminalSelection.text(buffer, 0, 9, 1, buffer.columns - 1),
+        )
+    }
+
+    /**
+     * A box a full-screen program drew is chrome around its content. The copy
+     * drops the borders and the padding that centers the text, keeps content
+     * rows as laid out, keeps blank rows blank, and joins the URL the box
+     * split — but not the prose line under it.
+     */
+    @Test
+    fun aCardCopiesAsItsContent() {
+        val lines = boxed(
+            listOf(
+                "Signing in with Cline",
+                "",
+                "Visit this URL and enter the code above:",
+                "https://authkit.cline.bot/device?",
+                "user_code=XNXG-RCNZ",
+                "Waiting for sign-in...",
+                "",
+                "Esc to cancel, Ctrl+C to exit",
+            ),
+        )
+        val buffer = buffer(lines.size, cols = 60)
+        lines.forEachIndexed { r, line -> buffer.put(r, 0, line) }
+
+        assertEquals(
+            "Signing in with Cline\n" +
+                "\n" +
+                "Visit this URL and enter the code above:\n" +
+                "https://authkit.cline.bot/device?user_code=XNXG-RCNZ\n" +
+                "Waiting for sign-in...\n" +
+                "\n" +
+                "Esc to cancel, Ctrl+C to exit",
+            TerminalSelection.text(buffer, 0, 0, lines.size - 1, buffer.columns - 1),
+        )
+    }
+
+    /** A box with an inner width that fits every content line. */
+    private fun boxed(content: List<String>): List<String> {
+        val inner = (content.maxOfOrNull { it.length } ?: 0) + 4
+        return listOf("╭" + "─".repeat(inner) + "╮") +
+            content.map { "│  " + it.padEnd(inner - 2) + "│" } +
+            listOf("╰" + "─".repeat(inner) + "╯")
+    }
 }
 
 private fun TerminalBuffer.line(row: Int): TerminalRow = lines[row]
