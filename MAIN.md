@@ -81,6 +81,10 @@ routing through the opencode CLI
             TerminalScrollTest gained onlyATapAsksForTheKeyboard and its drags
             were re-aimed for the corrected direction; TerminalSelectionTest
             gained aSoftWrapCopiesAsOneLine and clearingARowDropsItsWrap.
+            Shipped f53939b, scripts/release.sh cut the rolling `latest` at
+            08:48:44Z (versionName 1.0.202610280848, versionCode 1793177324,
+            APK 20,802,668 bytes, md5 4f3c7df6b35205f852545b06678f14f9,
+            signature CN=AIxodia, AIxodia-version.json commit == HEAD).
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
