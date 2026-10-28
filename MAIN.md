@@ -1,4 +1,43 @@
 GOAL:
+[COMPLETED] Chat thread made correct, smooth and alive (operator report:
+            "การแสดงผลแชทไม่ถูกต้องอย่างรุนแรง ค้างกระตุก บางครั้งเกิดการ crash"
+            — the display badly wrong, freezing/stuttering, sometimes crashing.
+            Four defects, one per symptom, none of them the delta coalescing
+            fixed last time:
+            - Drawn twice / reshuffled: the engine stores a turn's narration and
+              every tool step as it happens, so those rows reached Room while the
+              live timeline was still showing them — three tool rounds read as
+              six cards. ChatViewModel turns turnBaseSeq into a flow and the
+              thread hides the rows the in-flight turn is writing
+              (threadRows: seq > base, the question itself excepted); the
+              hand-over watcher now reads storedRows, not the drawn list, or the
+              withheld rows would have kept the turn busy forever. Block.TEXT
+              upserts by block id instead of appending.
+            - Crash 1 (nested scroll): ThoughtPill's opened reasoning body was a
+              second vertical scroller — heightIn(320) + verticalScroll — inside
+              the thread's own LazyColumn. Compose refuses same-axis nesting and
+              throws on the frame the pill opens. The cap and the inner scroll
+              are gone; the thread scrolls and the header closes it back up.
+            - Crash 2 (duplicate key): a lazy list dies on a repeated key. Live
+              items were keyed by the millisecond they arrived (two blocks in one
+              ms = one key twice) and stored rows by the engine's messageId,
+              which reconcile hands to two rows when it moves a local row off a
+              seq D1 owns. uniqueLiveKeys and distinctRowIds now name every item
+              once (pure, tested: LiveKeysTest, RowKeysTest).
+            - Stutter: every streamed token rebuilt the whole visible page,
+              because itemsIndexed passed a fresh onCopy lambda per row — so
+              MessageBlock could not be skipped and re-ran Block.parse, and
+              MarkdownText re-ran its inline regex over every block on screen,
+              twice a second, on finished rows too. One remembered copyMessage is
+              handed to every row, MessageBlock takes (ChatMessage) -> Unit, and
+              inline styling is cached through rememberInline on styles that are
+              themselves remembered. The tail is now pinned by pixels
+              (dispatchRawDelta on the last item's overflow) instead of restarting
+              animateScrollToItem per flush — that chase was the shudder.
+            assembleDebug + :app:testDebugUnitTest BUILD SUCCESSFUL on JDK17 +
+            /opt/android-sdk (ThreadRowsTest, LiveKeysTest, RowKeysTest new).
+            NOT verified on a phone: this host has no device and no KVM, so the
+            operator's screen is the first real render of these changes.
 [COMPLETED] Goals on screen, compaction made visible, and the live thread
             corrected (paired with engine v1.160):
             - GoalsCard: the chat shows this session's goals and plans in three
@@ -280,6 +319,13 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
 3fdc242, which carries the provider wording and error mapping
 
 NOTE:
+- Thread-correctness work above is UNCOMMITTED on purpose: no commit, no push,
+  no release cut, because the operator reviews results and `latest` is shared
+  state. Say the word and it goes through scripts/release.sh.
+- Also still open from last session's diagnosis, deliberately not touched here:
+  the resume path (app reopened mid-turn) sets no turnBaseSeq, so a replayed
+  stream can still sit beside stored rows. Choosing a base there risks *hiding*
+  rows the replay never covered, which is worse than showing them twice.
 - App release cut and published: `latest` → commit 3fdc242, APK signed
   CN=AIxodia, versionCode from the build. The in-app checker reads
   AIxodia-version.json, so phones on the old build are offered this one.

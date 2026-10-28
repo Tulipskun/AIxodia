@@ -131,15 +131,14 @@ class ChatRepository(
     fun observeSessionUsage(sid: String): Flow<com.tulipskun.aixodia.data.model.StoredTotals?> =
         db.sessions().observeOne(sid).map { it?.storedUsage() }
 
-    private fun List<MessageEntity>.toChatMessages(): List<ChatMessage> =
+    private fun List<MessageEntity>.toChatMessages(): List<ChatMessage> {
         // An answer with no text and no tool step is an empty bubble, not a reply.
         // Tool rows and pending messages always stay visible.
-        filterNot { isEmptyAnswer(it.role, it.text, it.toolName, it.pending) }.map {
+        val visible = filterNot { isEmptyAnswer(it.role, it.text, it.toolName, it.pending) }
+        val ids = distinctRowIds(visible)
+        return visible.mapIndexed { index, it ->
             ChatMessage(
-                // The engine's sequential message id is the row's identity.
-                // Old engines and not-yet-committed rows have 0, so they keep
-                // the seq-derived fallback and a stable Compose key.
-                id = if (it.messageId > 0L) it.messageId.toString() else "${it.sessionId}:${it.seq}",
+                id = ids[index],
                 sessionId = it.sessionId,
                 seq = it.seq,
                 role = it.role,
@@ -165,6 +164,7 @@ class ChatRepository(
                 block = it.block,
             )
         }.let(::mergeToolPairs)
+    }
 
     /**
      * Session list from D1, merged into Room. D1 is authoritative when it
@@ -955,3 +955,33 @@ private fun SessionEntity.storedUsage(): StoredTotals? =
 /** True for a model reply that has no text, no tool name and was not waiting to send. */
 internal fun isEmptyAnswer(role: String, text: String, toolName: String, pending: Boolean): Boolean =
     role != "user" && !role.startsWith("tool") && text.isBlank() && toolName.isBlank() && !pending
+
+/**
+ * The key every row in the thread is drawn under, in the order it is drawn.
+ *
+ * A lazy list does not degrade gracefully when two items share a key: it throws
+ * "Key was already used" and the app dies — mid-turn, on the row on screen. The
+ * engine's message id names a row, and it is not always one row's own: repairing
+ * a seq collision moves the local copy to a number the phone invented while the
+ * engine's copy of the same message arrives at its real seq, so two rows carry
+ * one id. Such a row falls back to the session and seq the table makes unique,
+ * and only a row whose fallback is taken as well is numbered. The choice is made
+ * once per read over a stable order, so the same thread hands the same row the
+ * same key twice running and the list keeps its place instead of rebuilding.
+ */
+internal fun distinctRowIds(rows: List<MessageEntity>): List<String> {
+    val used = HashSet<String>(rows.size)
+    return rows.map { row ->
+        val engineId = if (row.messageId > 0L) row.messageId.toString() else ""
+        val fallback = "${row.sessionId}:${row.seq}"
+        when {
+            engineId.isNotEmpty() && used.add(engineId) -> engineId
+            used.add(fallback) -> fallback
+            else -> {
+                var n = 2
+                while (!used.add("$fallback#$n")) n++
+                "$fallback#$n"
+            }
+        }
+    }
+}

@@ -316,6 +316,20 @@ private val RE_INLINE = Regex(
 internal fun inline(text: String, code: SpanStyle, link: SpanStyle): AnnotatedString =
     buildAnnotatedString { renderInline(text, code, link) }
 
+/**
+ * [inline] once per block of text rather than once per recomposition.
+ *
+ * Styling a block is a regex walk over the whole of it, and a thread that does
+ * it on every recomposition pays for it again and again while an answer streams:
+ * the clock that drives the elapsed-time readouts recomposes the list several
+ * times a second, and each pass restyled every block on screen, finished rows
+ * included. The two styles are keys too, so a theme change restyles instead of
+ * serving yesterday's colours out of the cache.
+ */
+@Composable
+internal fun rememberInline(text: String, code: SpanStyle, link: SpanStyle): AnnotatedString =
+    remember(text, code, link) { inline(text, code, link) }
+
 private fun AnnotatedString.Builder.renderInline(text: String, code: SpanStyle, link: SpanStyle) {
     var rest = text
     while (true) {
@@ -367,19 +381,32 @@ fun MarkdownText(
     // meant to notice, not one that competes with the sentence around it.
     // The size comes from the theme rather than a literal, so a text-scale change
     // or a font swap moves the code with the sentence around it.
-    val codeStyle = SpanStyle(
-        fontFamily = FontFamily.Monospace,
-        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        background = MaterialTheme.colorScheme.surfaceContainerHigh,
-    )
-    val linkStyle = SpanStyle(
-        color = MaterialTheme.colorScheme.primary,
-        textDecoration = TextDecoration.Underline,
-    )
+    // They are built once per theme, because the styled blocks below are cached
+    // against these instances: a new one per recomposition would miss every
+    // cache entry and restyle the page for nothing.
+    val typography = MaterialTheme.typography
+    val colors = MaterialTheme.colorScheme
+    val codeStyle = remember(
+        typography.bodySmall.fontSize,
+        colors.onSurfaceVariant,
+        colors.surfaceContainerHigh,
+    ) {
+        SpanStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = typography.bodySmall.fontSize,
+            color = colors.onSurfaceVariant,
+            background = colors.surfaceContainerHigh,
+        )
+    }
+    val linkStyle = remember(colors.primary) {
+        SpanStyle(
+            color = colors.primary,
+            textDecoration = TextDecoration.Underline,
+        )
+    }
     if (parsed.size <= 1 && parsed.firstOrNull() is Block.Paragraph) {
         Text(
-            text = inline((parsed.first() as Block.Paragraph).text, codeStyle, linkStyle),
+            text = rememberInline((parsed.first() as Block.Paragraph).text, codeStyle, linkStyle),
             style = MaterialTheme.typography.bodyMedium,
             color = color,
             modifier = if (fillWidth) modifier.fillMaxWidth() else modifier,
@@ -390,14 +417,14 @@ fun MarkdownText(
         parsed.forEach { block ->
             when (block) {
                 is Block.Heading -> Text(
-                    text = inline(block.text, codeStyle, linkStyle),
+                    text = rememberInline(block.text, codeStyle, linkStyle),
                     style = headingStyle(block.level),
                     color = color,
                     modifier = (if (fillWidth) Modifier.fillMaxWidth() else Modifier).padding(top = if (block.level <= 2) 6.dp else 2.dp),
                 )
 
                 is Block.Paragraph -> Text(
-                    text = inline(block.text, codeStyle, linkStyle),
+                    text = rememberInline(block.text, codeStyle, linkStyle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = color,
                     modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
@@ -413,7 +440,7 @@ fun MarkdownText(
                     )
                     Spacer(Modifier.size(10.dp))
                     Text(
-                        text = inline(block.text, codeStyle, linkStyle),
+                        text = rememberInline(block.text, codeStyle, linkStyle),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
@@ -430,7 +457,7 @@ fun MarkdownText(
                                 modifier = Modifier.width(if (block.ordered) 22.dp else 14.dp),
                             )
                             Text(
-                                text = inline(item, codeStyle, linkStyle),
+                                text = rememberInline(item, codeStyle, linkStyle),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = color,
                                 modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
@@ -580,7 +607,7 @@ private fun TableRow(
                 },
             ) {
                 Text(
-                    text = inline(cells.getOrElse(index) { "" }, codeStyle, linkStyle),
+                    text = rememberInline(cells.getOrElse(index) { "" }, codeStyle, linkStyle),
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (header) color else MaterialTheme.colorScheme.onSurfaceVariant,

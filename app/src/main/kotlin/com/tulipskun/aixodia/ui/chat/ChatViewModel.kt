@@ -108,8 +108,13 @@ class ChatViewModel(
 ) : ViewModel() {
     /** One thing a live turn said or did, in the order it happened. */
     sealed interface LiveBlock {
-        /** The model's words before a tool round, as its own block. */
-        data class Say(val text: String, val atMs: Long) : LiveBlock
+        /**
+         * The model's words before a tool round, as its own block. `id` is the
+         * engine's block id when the frame carried one: a round that restates
+         * the same narration block then replaces this entry rather than adding
+         * a second copy of the same words under it.
+         */
+        data class Say(val text: String, val atMs: Long, val id: String = "") : LiveBlock
         /** A tool step: the call, then its result when it lands. */
         data class Act(val step: ToolStep) : LiveBlock
         /**
@@ -234,11 +239,36 @@ class ChatViewModel(
      * rows below it.
      */
     private val windowFloor = MutableStateFlow<Long?>(null)
-    val messages: Flow<List<ChatMessage>> =
+    /**
+     * The seq the in-flight turn starts above, as an observable: -1 between
+     * turns. The engine stores a turn's narration and tool rows as they happen,
+     * so those rows are in Room while the live timeline is still the thing
+     * drawing them, and drawing both put every tool card and every narration
+     * line on screen twice until the answer landed. While this is >= 0 the
+     * thread hides the rows it created and lets the live timeline own them; the
+     * hand-over is one emission, because clearing the live turn sets it back to
+     * -1 after the live blocks have gone.
+     */
+    private val _turnBaseSeq = MutableStateFlow(-1L)
+
+    /** The stored rows of this chat's window, exactly as the repository has them. */
+    private val storedRows: Flow<List<ChatMessage>> =
         combine(activeId, windowFloor) { sid, from -> sid to from }
             .flatMapLatest { (sid, from) ->
                 if (from == null) flowOf(emptyList()) else repo.observeMessages(sid, from)
             }
+
+    /**
+     * What the thread draws. Same rows as [storedRows] while nothing runs;
+     * during a turn, the rows that turn is still writing are withheld because
+     * the live timeline is showing them.
+     *
+     * The question itself stays: the daemon stores it before it answers, and a
+     * thread that hid the user's own message would empty out at the moment they
+     * pressed send.
+     */
+    val messages: Flow<List<ChatMessage>> =
+        combine(storedRows, _turnBaseSeq) { rows, base -> threadRows(rows, base) }
 
     /**
      * Whole-chat cost from the engine's session metadata, not from the page of
@@ -345,9 +375,13 @@ class ChatViewModel(
     /**
      * Where the thread ended when the turn was sent, so the thinking time it
      * measured can be stamped on just the rows it created. -1 when no turn is
-     * in flight.
+     * in flight. Declared with [messages] above, which reads it.
      */
-    private var turnBaseSeq = -1L
+    private var turnBaseSeq: Long
+        get() = _turnBaseSeq.value
+        set(value) {
+            _turnBaseSeq.value = value
+        }
     /**
      * The reconnect watch: after a dropped socket it polls D1 until the turn
      * that kept running on the daemon lands, and retries a turn that really
@@ -442,8 +476,12 @@ class ChatViewModel(
         // A reconnect does not replay the daemon's `done` frame, so the live
         // bubble would stay busy forever even after the answer is in D1. The
         // committed answer after the last question is the signal to hand over.
+        // It reads the stored rows and not [messages], because while a turn
+        // runs the thread's own list withholds exactly the rows being watched:
+        // watching that would mean the hand-over never happened and the live
+        // turn would sit there forever after the daemon had finished it.
         viewModelScope.launch {
-            messages.collect { rows ->
+            storedRows.collect { rows ->
                 if (!busy.value) return@collect
                 val lastUser = rows.indexOfLast { it.role == "user" }
                 if (lastUser < 0) return@collect
@@ -731,8 +769,19 @@ class ChatViewModel(
             }
             Block.TEXT -> {
                 if (block.text.isNotBlank()) {
-                    liveBlocks.value = liveBlocks.value +
-                        LiveBlock.Say(block.text, System.currentTimeMillis())
+                    // The engine names each piece of narration, so a round that
+                    // restates its block replaces it in place. Appending would
+                    // leave the same words on screen twice, and the second copy
+                    // is the one the thread scrolls to.
+                    val blocks = liveBlocks.value
+                    val at = if (block.id.isBlank()) -1 else
+                        blocks.indexOfFirst { it is LiveBlock.Say && it.id == block.id }
+                    liveBlocks.value = if (at >= 0) {
+                        val said = blocks[at] as LiveBlock.Say
+                        blocks.toMutableList().also { it[at] = said.copy(text = block.text) }
+                    } else {
+                        blocks + LiveBlock.Say(block.text, System.currentTimeMillis(), block.id)
+                    }
                 }
             }
             Block.STATUS -> traceNote(block.text)
@@ -1628,5 +1677,52 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
+    }
+}
+
+/**
+ * The rows the thread draws, from the rows the repository has.
+ *
+ * A turn is written to storage as it happens: the narration before a tool round
+ * and every tool step land in the cache while the live timeline is still the
+ * thing showing them. Drawing both put each of those items on screen twice, and
+ * the second copy sat under the answer, so a turn with three tool rounds looked
+ * like six. [baseSeq] is the seq the thread ended at when the turn was sent, and
+ * -1 between turns; while it is a real number the rows above it belong to the
+ * live timeline and are withheld here.
+ *
+ * The question stays whatever happens. The daemon stores it before it answers,
+ * so a thread that hid everything above the base would empty itself the moment
+ * the reader pressed send — and a question the app cannot see is a question it
+ * cannot send a second time to.
+ */
+internal fun threadRows(rows: List<ChatMessage>, baseSeq: Long): List<ChatMessage> =
+    if (baseSeq < 0L) rows else rows.filter { it.seq <= baseSeq || it.role == "user" }
+
+/**
+ * One LazyColumn key per live block, in the list's own order.
+ *
+ * A repeated key is not a visual glitch: a lazy list throws "Key was already
+ * used" and the app dies in the middle of a turn. Keying the streaming items by
+ * a millisecond stamp invited exactly that — a tool flush and an engine text
+ * block can land in the same millisecond, and so can two pieces of narration.
+ * Where the engine named the block, its id is the key, because it names the one
+ * thing this item is and survives the list changing around it; a block with no
+ * id of its own keeps its stamp, and only a second block wearing the same stamp
+ * is numbered, so nothing is dropped or shared.
+ */
+internal fun uniqueLiveKeys(blocks: List<ChatViewModel.LiveBlock>): List<String> {
+    val used = HashSet<String>(blocks.size)
+    return blocks.map { block ->
+        val base = when (block) {
+            is ChatViewModel.LiveBlock.Say -> "live-say-" + block.id.ifBlank { block.atMs.toString() }
+            is ChatViewModel.LiveBlock.Act -> "live-act-" + block.step.key
+            is ChatViewModel.LiveBlock.Think -> "live-think-" + block.id.ifBlank { block.startedAtMs.toString() }
+            is ChatViewModel.LiveBlock.Compact -> "live-compact-" + block.atMs
+        }
+        if (used.add(base)) return@map base
+        var n = 2
+        while (!used.add("$base#$n")) n++
+        "$base#$n"
     }
 }

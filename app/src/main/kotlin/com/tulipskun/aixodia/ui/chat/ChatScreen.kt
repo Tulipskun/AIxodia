@@ -297,6 +297,10 @@ fun ChatScreen(
     // differs: Anthropic has no reasoning count to show.
     val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initialValue = TokenField.DEFAULT)
     val footerIds = remember(messages) { turnFooterIds(messages) }
+    // One key per live item, handed out so no two of them can ever collide: a
+    // repeated key in a lazy list is not a glitch but a crash, and the streaming
+    // blocks were stamped by the millisecond they arrived.
+    val liveKeys = remember(liveBlocks) { uniqueLiveKeys(liveBlocks) }
     val providers by vm.providers.collectAsStateWithLifecycle()
     val providerStatuses by vm.providerStatuses.collectAsStateWithLifecycle()
     val pickedProvider by vm.selectedProvider.collectAsStateWithLifecycle()
@@ -382,6 +386,17 @@ fun ChatScreen(
     // removed, so the menu does not move under the thumb between openings.
     val copiedText = stringResource(R.string.copied)
     val copyHintText = stringResource(R.string.copy_long_press)
+    // One copy action for the whole thread, made once and handed to every row.
+    // Building it per row makes each row's arguments a new instance on every
+    // recomposition, so Compose rebuilt the visible page for every streamed
+    // token — the thread re-styled its own Markdown twice a second while an
+    // answer was writing, and that is the stutter.
+    val copyMessage: (ChatMessage) -> Unit = remember(clip, copiedText) {
+        { m: ChatMessage ->
+            clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
+            toast = copiedText
+        }
+    }
     val composerCommands = listOf(
         ComposerCommand(stringResource(R.string.new_chat)) { vm.newChat() },
         ComposerCommand(stringResource(R.string.stop), enabled = busy) { vm.stop() },
@@ -500,9 +515,25 @@ fun ChatScreen(
 
     // A streamed answer grows without adding a row, so the thread follows the
     // live text too instead of leaving it half under the input bar.
+    //
+    // It follows by pixels, not by an animation to the last item: restarting an
+    // animated scroll on every coalesced flush made the thread lurch after each
+    // token — the shudder the reader feels as the answer writes itself. The one
+    // thing being followed is the last item's bottom edge, so that is what is
+    // moved up to the fold.
     LaunchedEffect(liveText.length, liveBlocks.size, followTail) {
-        if (followTail && (liveText.isNotBlank() || liveBlocks.isNotEmpty())) {
-            listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+        if (!followTail) return@LaunchedEffect
+        if (liveText.isBlank() && liveBlocks.isEmpty()) return@LaunchedEffect
+        val info = listState.layoutInfo
+        if (info.totalItemsCount <= 0) return@LaunchedEffect
+        val last = info.visibleItemsInfo.lastOrNull()
+        if (last == null || last.index < info.totalItemsCount - 1) {
+            // The tail has not been laid out yet: a block that has never been
+            // measured cannot be reached by pixels, so jump to its slot.
+            listState.scrollToItem(info.totalItemsCount - 1)
+        } else {
+            val overflow = last.offset + last.size - info.viewportEndOffset
+            if (overflow > 0) listState.dispatchRawDelta(overflow.toFloat())
         }
     }
 
@@ -856,10 +887,7 @@ fun ChatScreen(
                     MessageBlock(
                         m,
                         startsAfterUser = index > 0 && messages[index - 1].role == "user",
-                        onCopy = {
-                            clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
-                            toast = copiedText
-                        },
+                        onCopy = copyMessage,
                         showFooter = m.id in footerIds,
                         tokenFields = tokenFields,
                         copyLabel = copyHintText,
@@ -884,13 +912,13 @@ fun ChatScreen(
                 // same place, instead of piling at the bottom.
                 liveBlocks.forEachIndexed { index, block ->
                     when (block) {
-                        is LiveBlock.Say -> item(key = "live-say-${block.atMs}") {
+                        is LiveBlock.Say -> item(key = liveKeys[index]) {
                             MarkdownText(
                                 text = block.text,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
-                        is LiveBlock.Act -> item(key = "live-act-${block.step.id.ifBlank { "n$index" }}") {
+                        is LiveBlock.Act -> item(key = liveKeys[index]) {
                             ToolStepCard(block.step, nowMs)
                         }
                         // Each request's own wait-and-thought, in the place it
@@ -898,7 +926,7 @@ fun ChatScreen(
                         // "Thinking…" and then a finished "Thought for …", so a
                         // turn with three tool rounds reads as three requests
                         // rather than one merged block at the bottom.
-                        is LiveBlock.Think -> item(key = "live-think-${block.id.ifBlank { "n$index" }}") {
+                        is LiveBlock.Think -> item(key = liveKeys[index]) {
                             val elapsed = when (block.phase) {
                                 ThinkPhase.DONE ->
                                     (block.endedAtMs - block.startedAtMs).coerceAtLeast(0L)
@@ -914,7 +942,7 @@ fun ChatScreen(
                         // Where the engine trimmed its own prompt. It is not a
                         // stored row: it marks the point in the live thread the
                         // older turns fell out of the window.
-                        is LiveBlock.Compact -> item(key = "live-compact-${block.atMs}") {
+                        is LiveBlock.Compact -> item(key = liveKeys[index]) {
                             CompactMarker(
                                 keptTurns = block.keptTurns,
                                 droppedTurns = block.droppedTurns,

@@ -51,9 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -124,12 +122,18 @@ private fun clockTint() = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha 
 /**
  * One message in the thread. A user turn is a bubble on the right, an answer is
  * plain text on the background, a tool step is a monospace card.
+ *
+ * [onCopy] takes the message rather than closing over it: the thread hands the
+ * same action to every row. A per-row lambda is a new instance for a row whose
+ * words have not changed, and Compose then rebuilds that row — every streamed
+ * token rebuilt the visible page, and the page re-styled its own Markdown twice
+ * a second while an answer was writing.
  */
 @Composable
 fun MessageBlock(
     m: ChatMessage,
     startsAfterUser: Boolean = false,
-    onCopy: () -> Unit = {},
+    onCopy: (ChatMessage) -> Unit = {},
     showFooter: Boolean = false,
     tokenFields: List<TokenField> = TokenField.DEFAULT,
     copyLabel: String = "",
@@ -212,7 +216,7 @@ fun MessageBlock(
                     // running.
                     done = toolCardDone(m),
                     failed = toolCardFailed(m, block),
-                    onCopy = onCopy,
+                    onCopy = { onCopy(m) },
                     copyLabel = copyLabel,
                 )
             }
@@ -236,7 +240,7 @@ fun MessageBlock(
                         // behave like one. Only the long press that copies is
                         // offered, and it says so.
                         onClick = {},
-                        onLongClick = onCopy,
+                        onLongClick = { onCopy(m) },
                         onLongClickLabel = copyLabel,
                     ),
             ) {
@@ -342,7 +346,7 @@ fun MessageBlock(
                         // behave like one. Only the long press that copies is
                         // offered, and it says so.
                         onClick = {},
-                        onLongClick = onCopy,
+                        onLongClick = { onCopy(m) },
                         onLongClickLabel = copyLabel,
                     ),
                 )
@@ -666,8 +670,13 @@ private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
             ) {
                 // The model's own words, in the same recess a tool's output
                 // sits in: a different kind of text from the thread around it.
-                // Capped in height with its own scroll, so a long chain of
-                // thought does not push the answer off the screen.
+                // There is deliberately no scroll of its own and no cap on its
+                // height: the thread is already the vertical scroller, and a
+                // second one nested inside it on the same axis is the one thing
+                // Compose refuses outright — it throws on the first frame the
+                // opened thought is laid out, which is the crash this pill was
+                // handing out. How tall the thinking is, is the thread's
+                // business; the header closes it back up on a tap.
                 Surface(
                     color = scheme.surfaceContainerLowest,
                     shape = RoundedCornerShape(4.dp),
@@ -678,10 +687,7 @@ private fun ThoughtPill(thinkingMs: Long, reasoning: String) {
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = scheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
-                            .heightIn(max = 320.dp)
-                            .verticalScroll(rememberScrollState()),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                     )
                 }
             }
