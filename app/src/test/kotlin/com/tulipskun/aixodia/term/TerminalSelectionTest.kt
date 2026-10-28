@@ -48,20 +48,89 @@ class TerminalSelectionTest {
         assertFalse("an erased row no longer continues below", buffer.line(0).wrapped)
     }
 
-    private fun TerminalBuffer.put(row: Int, col: Int, text: String, width: Int = 1) {
+    /**
+     * The text a full-screen program drew: it wraps its own paragraphs, so the
+     * rows are hard breaks with the block's layout padding, not soft wraps.
+     * Nothing marks them; the copy has to read the padding from the first row
+     * and the cut from the row running to the edge.
+     */
+    @Test
+    fun aProgramWrappedParagraphCopiesAsOneParagraph() {
+        val part1 = "ข้อควรทราบ: เครื่องนี้ไม่มีมือถือต่อและไม่มี KVM จึงยืนยันได้แค่ระดับ"
+        val part2 = "MotionEvent/unit test เท่านั้น ฝากลองบนเครื่องจริงอีกรอบว"
+        val part3 = "าทิศทางและแป้นพิมพ์ตรงตามที่ต้องการไหมครับ"
+        // The lines end three cells short of the edge, the padding's width —
+        // exactly how the screen the sample was copied from was laid out.
+        val buffer = buffer(3, cols = 57)
+        buffer.put(0, 0, "   $part1")
+        buffer.put(1, 0, "    $part2")
+        buffer.put(2, 0, "   $part3")
+
+        assertEquals(
+            "$part1 $part2$part3",
+            TerminalSelection.text(buffer, 0, 3, 2, buffer.columns - 1),
+        )
+    }
+
+    @Test
+    fun aShortRowKeepsItsBreak() {
+        val buffer = buffer(2, cols = 64)
+        buffer.put(0, 0, "   short")
+        buffer.put(1, 0, "   next")
+
+        assertEquals(
+            "short\n   next",
+            TerminalSelection.text(buffer, 0, 3, 1, buffer.columns - 1),
+        )
+    }
+
+    @Test
+    fun aRowAtTheEdgeIsNotJoinedToAnUnindentedOne() {
+        val buffer = buffer(2, cols = 64)
+        buffer.put(0, 0, "   " + "y".repeat(61))
+        buffer.put(1, 0, "next")
+
+        assertEquals(
+            "y".repeat(61) + "\nnext",
+            TerminalSelection.text(buffer, 0, 3, 1, buffer.columns - 1),
+        )
+    }
+
+    /**
+     * Without a left padding there is no block whose indentation could be
+     * stripped, so an edge-to-edge row is more likely a table than a wrap.
+     */
+    @Test
+    fun aFullBleedBlockKeepsItsBreaks() {
+        val buffer = buffer(2, cols = 64)
+        buffer.put(0, 0, "x".repeat(64))
+        buffer.put(1, 0, "    MotionEvent")
+
+        assertEquals(
+            "x".repeat(64) + "\n    MotionEvent",
+            TerminalSelection.text(buffer, 0, 0, 1, buffer.columns - 1),
+        )
+    }
+
+    private fun TerminalBuffer.put(row: Int, col: Int, text: String, width: Int = 0) {
         var at = col
         var i = 0
         while (i < text.length) {
             val cp = text.codePointAt(i)
-            lines[row].setChar(
-                at,
-                cp,
-                width,
-                TerminalColors.DEFAULT_FG,
-                TerminalColors.DEFAULT_BG,
-                0,
-            )
-            at += width
+            val w = if (width != 0) width else WcWidth.width(cp)
+            if (w == 0) {
+                lines[row].appendCombining(at - 1, cp)
+            } else {
+                lines[row].setChar(
+                    at,
+                    cp,
+                    w,
+                    TerminalColors.DEFAULT_FG,
+                    TerminalColors.DEFAULT_BG,
+                    0,
+                )
+                at += w
+            }
             i += Character.charCount(cp)
         }
     }

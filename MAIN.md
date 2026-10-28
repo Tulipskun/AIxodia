@@ -85,6 +85,30 @@ routing through the opencode CLI
             08:48:44Z (versionName 1.0.202610280848, versionCode 1793177324,
             APK 20,802,668 bytes, md5 4f3c7df6b35205f852545b06678f14f9,
             signature CN=AIxodia, AIxodia-version.json commit == HEAD).
+[COMPLETED] terminal: the paragraph the operator copied out of 08:48 still
+            came back in three pieces. The engine streams the tmux client's
+            screen, and tmux lets the terminal autowrap long lines — pty probes
+            show 200 X's in one write followed by \r\n, and 130 X's written
+            continuously on the repaint after SIGWINCH — so shell output is a
+            real soft wrap and already joined. The sample was not shell output:
+            a full-screen program had wrapped its own paragraph into hard
+            rows with three cells of left padding, a break space kept at the
+            first cut and none at the second (a word split mid-syllable). Those
+            rows carry no wrap mark. Copy now reads the block's padding from
+            the first selected row and joins a row that ends within
+            max(8, pad) cells of the right edge to an indented row below,
+            stripping the padding from the continuation; a soft wrap is left
+            alone, and full-bleed output (pad 0) or a row followed by column-0
+            text never joins. TerminalSelectionTest gained
+            aProgramWrappedParagraphCopiesAsOneParagraph (the operator's Thai
+            paragraph on a 57-column screen, back as one line),
+            aShortRowKeepsItsBreak, aRowAtTheEdgeIsNotJoinedToAnUnindentedOne
+            and aFullBleedBlockKeepsItsBreaks; its put() helper uses WcWidth
+            now so Thai marks do not take a cell. Known cost: a padded line
+            ending within eight columns of the edge, followed by an indented
+            line, is taken for a wrap.
+            :app:testDebugUnitTest BUILD SUCCESSFUL, 222 tests, Paparazzi
+            included.
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
