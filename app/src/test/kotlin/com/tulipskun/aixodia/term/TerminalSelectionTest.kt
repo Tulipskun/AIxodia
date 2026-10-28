@@ -1,12 +1,52 @@
 package com.tulipskun.aixodia.term
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TerminalSelectionTest {
 
     private fun buffer(rows: Int, cols: Int = 20): TerminalBuffer =
         TerminalBuffer(cols, rows, scrollbackLimit = 0)
+
+    private class Sink : TerminalOutput {
+        override fun write(bytes: ByteArray) = Unit
+        override fun onScreenChanged() = Unit
+        override fun onTitleChanged(title: String) = Unit
+    }
+
+    /**
+     * A command longer than the screen is one logical line. The break falls on
+     * a space here, so only a copy that keeps the full wrapped row can put the
+     * words back together with their spacing intact.
+     */
+    @Test
+    fun aSoftWrapCopiesAsOneLine() {
+        val emulator = TerminalEmulator(cols = 20, rows = 4, output = Sink())
+        emulator.write("hello world this is a long line".toByteArray())
+        val buffer = emulator.buffer
+        assertTrue("the first row wrapped", buffer.lines[0].wrapped)
+        assertFalse("the second row did not", buffer.lines[1].wrapped)
+
+        assertEquals(
+            "hello world this is a long line",
+            TerminalSelection.text(buffer, 0, 0, 1, buffer.columns - 1),
+        )
+    }
+
+    @Test
+    fun clearingARowDropsItsWrap() {
+        val buffer = buffer(2)
+        buffer.line(0).wrapped = true
+        buffer.line(0).clearCells(
+            0,
+            buffer.columns - 1,
+            TerminalColors.DEFAULT_FG,
+            TerminalColors.DEFAULT_BG,
+        )
+        assertFalse("an erased row no longer continues below", buffer.line(0).wrapped)
+    }
 
     private fun TerminalBuffer.put(row: Int, col: Int, text: String, width: Int = 1) {
         var at = col

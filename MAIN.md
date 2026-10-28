@@ -58,6 +58,29 @@ routing through the opencode CLI
             1.0.202610280822, versionCode 1793175727, APK 20,802,668 bytes,
             signature CN=AIxodia). Still unverified on a real phone — there is
             no device or KVM here, so the evidence is MotionEvent-level only.
+[COMPLETED] terminal: on the phone the page still ran the wrong way, the IME
+            opened by itself mid-scroll, and copied text lost its spacing and
+            breaks. The drag compared against the wrong sign —
+            dy = lastTouchY - event.y, so `pan += dy` moved the page against the
+            finger — and the fling had been negated to match; both now run with
+            the finger (down pulls history in, up returns to the prompt, fling
+            follows). The keyboard came from `if (quick) keepSoftKeyboard()` on
+            any ACTION_UP under 200 ms, which a flick also satisfies; only a
+            still tap may ask now, and a tap that dismissed a live selection
+            leaves the IME alone. Copy: TerminalRow.wrapped was declared but
+            never set by the emulator, so every screen row became its own
+            clipboard line; markWrapped() now marks both soft-wrap paths and a
+            full-row erase drops the flag. Wrapped rows keep the width the shell
+            wrote (lastWritten, so a rotation cannot turn unwritten cells into
+            trailing spaces) and join the next row with no break, so a long ls
+            line and the space it broke at survive. The composer moved to
+            TextFieldValue: Enter sends only with the caret at the very end,
+            anywhere else it is a line break, and the old latch that fired a
+            send for every newline in the change is gone.
+            :app:testDebugUnitTest BUILD SUCCESSFUL (Paparazzi included);
+            TerminalScrollTest gained onlyATapAsksForTheKeyboard and its drags
+            were re-aimed for the corrected direction; TerminalSelectionTest
+            gained aSoftWrapCopiesAsOneLine and clearingARowDropsItsWrap.
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer

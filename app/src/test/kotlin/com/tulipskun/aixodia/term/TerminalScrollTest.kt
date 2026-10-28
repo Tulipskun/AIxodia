@@ -78,20 +78,19 @@ class TerminalScrollTest {
     }
 
     @Test
-    fun dragUpShowsHistory() {
+    fun dragDownShowsHistory() {
         val tty = tty(lines = 100)
-        tty.view.drag(fromY = 1200f, toY = 600f)
-        assertTrue("a drag up should pull the page into history", tty.pan > 0f)
+        tty.view.drag(fromY = 600f, toY = 1200f)
+        assertTrue("the page should follow the finger down into history", tty.pan > 0f)
         assertFalse("the page is no longer at the prompt", tty.atBottom.last())
     }
 
     @Test
-    fun dragDownReturnsToThePrompt() {
+    fun dragUpReturnsToThePrompt() {
         val tty = tty(lines = 100)
-        tty.view.drag(fromY = 1200f, toY = 200f)
-        val deep = tty.pan
-        assertTrue(deep > 0f)
-        repeat(6) { tty.view.drag(fromY = 400f, toY = 1400f) }
+        tty.view.drag(fromY = 200f, toY = 1200f)
+        assertTrue(tty.pan > 0f)
+        repeat(6) { tty.view.drag(fromY = 1400f, toY = 400f) }
         assertEquals("back at the live screen", 0f, tty.pan, 0.5f)
         assertTrue("the button disappears again", tty.atBottom.last())
     }
@@ -99,19 +98,35 @@ class TerminalScrollTest {
     @Test
     fun thePageStopsAtTheOldestRow() {
         val tty = tty(lines = 100)
-        repeat(30) { tty.view.drag(fromY = 1800f, toY = 100f) }
+        repeat(30) { tty.view.drag(fromY = 100f, toY = 1800f) }
         val max = tty.pan
-        tty.view.drag(fromY = 1800f, toY = 100f)
+        tty.view.drag(fromY = 100f, toY = 1800f)
         assertEquals("dragging past the top changes nothing", max, tty.pan, 0.5f)
     }
 
     @Test
     fun typingBringsThePageBack() {
         val tty = tty(lines = 100)
-        tty.view.drag(fromY = 1200f, toY = 600f)
+        tty.view.drag(fromY = 600f, toY = 1200f)
         assertTrue(tty.pan > 0f)
         tty.view.sendTyped("l")
         assertEquals(0f, tty.pan, 0.5f)
+    }
+
+    /**
+     * A flick up or down is a scroll, not a request to type; only a tap may
+     * bring the IME up. The fast flick that ends inside the tap window used to
+     * open the keyboard in the middle of scrolling.
+     */
+    @Test
+    fun onlyATapAsksForTheKeyboard() {
+        val tty = tty(lines = 100)
+        var interactions = 0
+        tty.view.onUserInteraction = { interactions++ }
+        tty.view.drag(fromY = 600f, toY = 1200f)
+        assertEquals("a drag is not a tap", 0, interactions)
+        tty.view.tap(y = 900f)
+        assertEquals("a tap still counts", 1, interactions)
     }
 
     @Test
@@ -134,7 +149,7 @@ class TerminalScrollTest {
         assertTrue(tty.emulator.fullScreenDetected)
         assertFalse(tty.emulator.mouseReporting())
         assertFalse(tty.emulator.alternateScreen)
-        tty.view.drag(fromY = 1200f, toY = 600f)
+        tty.view.drag(fromY = 600f, toY = 1200f)
         assertTrue("a plain prompt still scrolls", tty.pan > 0f)
     }
 

@@ -24,6 +24,15 @@ class TerminalRow(columns: Int) {
     /** True when this row wrapped into the next, for copy and reflow. */
     var wrapped = false
 
+    /**
+     * The rightmost cell the shell has written, or -1 for a blank row. A
+     * wrapped row copies its full width so a space at the break survives; this
+     * keeps that width honest after a rotation widens the row, where the new
+     * cells were never written and must not become spaces in the clipboard.
+     */
+    var lastWritten = -1
+        internal set
+
     private var combining: HashMap<Int, StringBuilder>? = null
 
     fun resize(newColumns: Int) {
@@ -46,6 +55,7 @@ class TerminalRow(columns: Int) {
         System.arraycopy(oldFlags, 0, flags, 0, keep)
         combining?.keys?.removeAll { it >= newColumns }
         columns = newColumns
+        lastWritten = minOf(lastWritten, newColumns - 1)
     }
 
     fun reset(fgColor: Int, bgColor: Int) {
@@ -58,6 +68,7 @@ class TerminalRow(columns: Int) {
         }
         combining = null
         wrapped = false
+        lastWritten = -1
     }
 
     fun isBlank(): Boolean {
@@ -78,6 +89,7 @@ class TerminalRow(columns: Int) {
         fg[col] = fgColor
         bg[col] = bgColor
         flags[col] = attr.toByte()
+        lastWritten = maxOf(lastWritten, col + cellWidth - 1)
         // A wide glyph owns the cell after it; that cell draws nothing.
         if (cellWidth == 2 && col + 1 < columns) {
             clearCombining(col + 1)
@@ -91,6 +103,10 @@ class TerminalRow(columns: Int) {
 
     fun clearCells(from: Int, to: Int, fgColor: Int, bgColor: Int) {
         val end = minOf(to, columns - 1)
+        // A line cleared end to end no longer continues into the row below, so
+        // copy must not glue whatever is written there next onto it.
+        if (from <= 0 && end >= columns - 1) wrapped = false
+        if (end >= lastWritten) lastWritten = minOf(lastWritten, from - 1)
         for (i in maxOf(0, from)..end) {
             clearCombining(i)
             chars[i] = SPACE
@@ -125,6 +141,7 @@ class TerminalRow(columns: Int) {
         System.arraycopy(other.bg, 0, bg, 0, columns)
         System.arraycopy(other.flags, 0, flags, 0, columns)
         wrapped = other.wrapped
+        lastWritten = other.lastWritten
         combining = other.combining?.let { HashMap(it) }
     }
 
@@ -241,6 +258,7 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
             line.chars[i] = line.chars[i - n]; line.width[i] = line.width[i - n]
             line.fg[i] = line.fg[i - n]; line.bg[i] = line.bg[i - n]; line.flags[i] = line.flags[i - n]
         }
+        if (line.lastWritten >= col) line.lastWritten = minOf(columns - 1, line.lastWritten + n)
         line.clearCells(col, col + n - 1, fgColor, bgColor)
         // continuation cells introduced at the edge are not worth repairing;
         // the next full redraw settles them.
@@ -255,6 +273,7 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
             line.chars[i] = line.chars[i + n]; line.width[i] = line.width[i + n]
             line.fg[i] = line.fg[i + n]; line.bg[i] = line.bg[i + n]; line.flags[i] = line.flags[i + n]
         }
+        if (line.lastWritten >= col) line.lastWritten = maxOf(col - 1, line.lastWritten - n)
         line.clearCells(columns - n, columns - 1, fgColor, bgColor)
         line.clearCombining(columns - n)
     }

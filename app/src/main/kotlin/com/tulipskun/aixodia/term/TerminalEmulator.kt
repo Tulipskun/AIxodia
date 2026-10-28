@@ -192,6 +192,15 @@ class TerminalEmulator(
         wrapPending = false
     }
 
+    /**
+     * The row the cursor is leaving soft-wrapped into the next one. Copy joins
+     * the two halves back into one line; without the mark every screen row is
+     * read as its own line and a long `ls` comes apart in the clipboard.
+     */
+    private fun markWrapped() {
+        buffer.lines.getOrNull(buffer.cursorRow)?.wrapped = true
+    }
+
     private fun printCodePoint(cp: Int) {
         val w = WcWidth.width(cp)
         if (w == 0) {
@@ -204,6 +213,7 @@ class TerminalEmulator(
             return
         }
         if (wrapPending) {
+            markWrapped()
             carriageReturn()
             index()
             wrapPending = false
@@ -214,6 +224,7 @@ class TerminalEmulator(
         // split it, the way a terminal does.
         if (w == 2 && buffer.cursorCol == columns - 1) {
             if (autoWrap) {
+                markWrapped()
                 carriageReturn()
                 index()
             } else {

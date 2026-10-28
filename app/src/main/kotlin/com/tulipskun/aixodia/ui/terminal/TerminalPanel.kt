@@ -81,6 +81,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -1122,11 +1123,12 @@ private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
 
 /**
  * A line the phone keyboard can type into. Enter is the ordinary return key, not
- * an IME "send" key: the newline that ends a line belongs to the shell.
+ * an IME "send" key: at the end of the text it hands the line to the shell, and
+ * anywhere else it is a line break, so a multi-line command can be written first.
  */
 @Composable
 private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
-    var text by remember { mutableStateOf("") }
+    var field by remember { mutableStateOf(TextFieldValue("")) }
     Row(
         Modifier
             .fillMaxWidth()
@@ -1134,24 +1136,28 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
-            value = text,
-            onValueChange = { value ->
-                // A newline means the line is finished: send every completed line
-                // and keep only what is still being typed. An empty line is not
-                // dropped — pressing return on a bare prompt sends the newline
-                // the shell is waiting for.
-                var rest = value
-                var nl = rest.indexOf('\n')
-                while (nl >= 0) {
-                    val line = rest.substring(0, nl)
+            value = field,
+            onValueChange = { next ->
+                // The keyboard reports the text only after the key is already
+                // in it, so the caret that pressed Enter is read from the old
+                // value. At the end of the text Enter runs the command; in the
+                // middle it is a line break, letting a loop or here-doc be
+                // built over several lines before it goes to the shell.
+                val old = field
+                val enterAtEnd = old.selection.collapsed &&
+                    old.selection.end == old.text.length &&
+                    next.text.length == old.text.length + 1 &&
+                    next.text.startsWith(old.text) &&
+                    next.text.endsWith('\n')
+                if (enterAtEnd) {
                     // CR, not LF: this is the same byte the terminal's Enter
                     // sends, so an empty line submits exactly like a real one.
-                    socket.send((line + "\r").toByteArray())
+                    socket.send((old.text.replace('\n', '\r') + "\r").toByteArray())
                     onSend()
-                    rest = rest.substring(nl + 1)
-                    nl = rest.indexOf('\n')
+                    field = TextFieldValue("")
+                } else {
+                    field = next
                 }
-                text = rest
             },
             modifier = Modifier.weight(1f),
             placeholder = { Text("Type a command…", color = InkDim) },

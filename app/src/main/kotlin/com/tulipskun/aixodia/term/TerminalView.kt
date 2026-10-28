@@ -154,6 +154,9 @@ class TerminalView @JvmOverloads constructor(
     // finger lifts. A vertical scroll must never become a drawer swipe midway.
     private var dragAxisLocked = false
     private var verticalDrag = false
+    // A press that landed on a live selection is dismissing it, not asking for
+    // the keyboard: reading and copying text must not summon the IME.
+    private var pressDismissedSelection = false
 
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
     private val minFlingVelocity = android.view.ViewConfiguration.get(context).scaledMinimumFlingVelocity
@@ -958,6 +961,7 @@ class TerminalView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 removeCallbacks(longPress)
                 selectingHandle = HANDLE_NONE
+                pressDismissedSelection = selecting
                 if (selecting) {
                     val handle = selectionHandleAt(event.x, event.y)
                     if (handle != HANDLE_NONE) {
@@ -968,7 +972,6 @@ class TerminalView @JvmOverloads constructor(
                     clearSelection()
                 }
                 requestFocus()
-                onUserInteraction?.invoke()
                 scroller.forceFinished(true)
                 lastTouchY = event.y
                 downY = event.y
@@ -1037,10 +1040,11 @@ class TerminalView @JvmOverloads constructor(
                     wheelAccum += dy
                     dispatchWheel(em, event)
                 } else if (verticalDrag) {
-                    // Nobody else is holding the screen, so the finger moves the
-                    // page: up reads history, down comes back to the prompt.
+                    // Nobody else is holding the screen, so the page follows the
+                    // finger: down pulls the history into view, up puts it back
+                    // and walks towards the prompt.
                     scroller.forceFinished(true)
-                    scrollTopPx += dy
+                    scrollTopPx -= dy
                     clampScroll()
                     invalidate()
                 }
@@ -1073,7 +1077,10 @@ class TerminalView @JvmOverloads constructor(
                     sendMouse(em, event, button = 0, release = false)
                     sendMouse(em, event, button = 0, release = true)
                 }
-                if (quick) {
+                // Only a still tap asks for the keyboard. A drag is scrolling,
+                // and a tap that dismissed a selection was reading text: both
+                // must leave the IME exactly as it was.
+                if (quick && !dragging && !pressDismissedSelection) {
                     // Full-screen programs (opencode) are exactly where typing
                     // is needed most. Showing the IME here used to be limited
                     // to the non-mouse branch, so a tap closed the keyboard.
@@ -1111,9 +1118,9 @@ class TerminalView @JvmOverloads constructor(
         velocityTracker.computeCurrentVelocity(1000)
         val vy = velocityTracker.yVelocity
         if (kotlin.math.abs(vy) < minFlingVelocity) return
-        // A flick upward means "show me more history", which is the page's own
-        // axis running in the opposite direction to the finger.
-        scroller.fling(0, scrollTopPx.toInt(), 0, -vy.toInt(), 0, 0, 0, max.toInt())
+        // The page runs with the finger: a flick downwards is positive y and
+        // keeps pulling history in, exactly as the drag it continues did.
+        scroller.fling(0, scrollTopPx.toInt(), 0, vy.toInt(), 0, 0, 0, max.toInt())
         postInvalidateOnAnimation()
     }
 
