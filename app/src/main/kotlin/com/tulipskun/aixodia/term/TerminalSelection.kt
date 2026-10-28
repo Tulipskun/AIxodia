@@ -26,14 +26,18 @@ internal object TerminalSelection {
      *
      * A row that continues the one above joins it without a break. That is a
      * soft wrap the emulator saw — such a row keeps its full width, because its
-     * last cell is real text, often the space a word was broken at — or a row
-     * a full-screen program wrapped itself. The program leaves no mark: its
-     * rows are hard breaks carrying the block's left padding. The right margin
-     * is read from the block itself — the column where at least two of its
-     * lines end, in a block that also ends in a shorter line — and a row
-     * ending there joins an indented row below. The padding is layout, not
-     * text, so it is dropped from those continuations; the first selected row
-     * tells how wide it is.
+     * last cell is real text, often the space a word was broken at — or a
+     * paragraph a full-screen program wrapped itself. The program marks
+     * nothing: its rows are hard breaks inside a padded block, so the block
+     * itself is the evidence. When at least two of its lines end at the same
+     * column and another ends short, the program cut at that column,
+     * mid-word, and those lines join as they are. Otherwise the cut fell on a
+     * space, which the program dropped; the block's prose lines join with one
+     * space put back, unless the program carried it to the next line. Rows
+     * with a column-aligned gap (two spaces in a row) and rows that open a
+     * list, heading, quote or table are not prose and end the run. The
+     * padding is layout, not text, so it is dropped from continuations; the
+     * first selected row tells how wide it is.
      */
     fun text(
         buffer: TerminalBuffer,
@@ -67,41 +71,89 @@ internal object TerminalSelection {
 
         // Does row r run on into r+1?
         val continues = BooleanArray(last - first + 1)
+        // A cut at a space drops the space; when the program did not carry it
+        // to the next line, the join puts one back.
+        val spaceBefore = BooleanArray(last - first + 1)
         for (r in first until last) {
             if (buffer.lines[r].wrapped) continues[r - first] = true
         }
-        // A program-wrapped row is only believed when the block is padded:
-        // full-bleed output is more likely a table or a long command line than
-        // a paragraph.
-        if (pad > 0) {
-            // Where the block's text area stops, read from the rows: a column
-            // where at least two of its lines end. One line ending there proves
-            // nothing — a heading is often the longest line of its block — and
-            // a block whose every line reaches the same column is aligned
-            // content, a table, not prose. So the margin only counts when some
-            // line ends short of it, the ragged last line of a paragraph.
-            val ends = HashMap<Int, Int>()
-            for (r in first..last) {
-                val row = buffer.lines[r]
-                if (row.columns == 0 || row.lastWritten < 0) continue
-                if (firstTextCol(row) < pad) continue
-                ends[row.lastWritten] = (ends[row.lastWritten] ?: 0) + 1
+        // A program-wrapped row is only believed inside a padded block:
+        // full-bleed output is more likely a table or a long command line.
+        if (pad > 0 && last > first) {
+            // A line of the block starts where the block's text starts, or one
+            // cell further right when the program carried the break space over.
+            fun isBlock(r: Int): Boolean {
+                val lead = firstTextCol(buffer.lines[r])
+                return lead == pad || lead == pad + 1
             }
-            var margin = -1
-            for ((end, count) in ends) if (count >= 2 && end > margin) margin = end
-            if (ends.keys.none { it < margin }) margin = -1
-            if (margin >= 0) {
+
+            // Tables and code line their columns up with runs of spaces; prose
+            // keeps single ones.
+            fun isProse(row: TerminalRow): Boolean {
+                val from = firstTextCol(row)
+                val to = lastTextCol(row)
+                var col = from
+                while (col < to) {
+                    if (row.chars[col] == TerminalRow.SPACE &&
+                        row.chars[col + 1] == TerminalRow.SPACE
+                    ) {
+                        return false
+                    }
+                    col++
+                }
+                return true
+            }
+
+            // A line that opens a list, heading, quote or table starts a new
+            // element: the line above it is not its continuation.
+            fun opensElement(row: TerminalRow): Boolean {
+                val col = firstTextCol(row)
+                if (col < 0) return false
+                val cp = row.chars[col]
+                if (cp == '-'.code || cp == '*'.code || cp == '+'.code ||
+                    cp == '•'.code || cp == '>'.code || cp == '|'.code ||
+                    cp == '#'.code || cp in 0x2500..0x257F
+                ) {
+                    return true
+                }
+                if (cp in '0'.code..'9'.code) {
+                    var c = col
+                    while (c < row.columns && row.chars[c] in '0'.code..'9'.code) c++
+                    return c < row.columns &&
+                        (row.chars[c] == '.'.code || row.chars[c] == ')'.code)
+                }
+                return false
+            }
+
+            val block = (first..last).filter { isBlock(it) }
+            val ends = block.map { buffer.lines[it].lastWritten }.filter { it >= 0 }
+            val maxEnd = ends.maxOrNull() ?: -1
+            val full = ends.count { it == maxEnd }
+            // Lines cut at the program's text edge stop at one column, and the
+            // paragraph ends in a shorter line. Every line reaching that column
+            // with none shorter is aligned content, a table — no wrap at all.
+            val cellCut = full >= 2 && ends.any { it < maxEnd }
+            val aligned = full >= 2 && !cellCut
+
+            if (!aligned) {
                 for (r in first until last) {
                     val row = buffer.lines[r]
                     if (row.columns == 0 || row.wrapped) continue
-                    // The program cuts a line where its text area stops; one
-                    // that stops anywhere else ended by itself.
-                    if (row.lastWritten != margin) continue
+                    if (!isBlock(r) || !isBlock(r + 1)) continue
                     val next = buffer.lines[r + 1]
-                    if (next.columns == 0) continue
                     val lead = firstTextCol(next)
-                    if (lead < pad || lead > endOf(r + 1)) continue
-                    continues[r - first] = true
+                    if (lead > endOf(r + 1)) continue
+                    if (!isProse(row) || !isProse(next) || opensElement(next)) continue
+                    if (cellCut) {
+                        // Cut mid-word: only the lines ending at the column
+                        // were cut, and they join as they are.
+                        if (row.lastWritten != maxEnd) continue
+                        continues[r - first] = true
+                    } else {
+                        // Cut at a space, which the program dropped.
+                        continues[r - first] = true
+                        spaceBefore[r - first + 1] = lead == pad
+                    }
                 }
             }
         }
@@ -141,6 +193,7 @@ internal object TerminalSelection {
             var start = 0
             if (r > first && continues[r - 1 - first] && !buffer.lines[r - 1].wrapped) {
                 while (start < line.length && start < pad && line[start] == ' ') start++
+                if (spaceBefore[r - first]) sb.append(' ')
             }
             val body = line.substring(start)
             sb.append(if (row.wrapped) body else body.trimEnd(' '))

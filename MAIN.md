@@ -134,6 +134,26 @@ routing through the opencode CLI
             1.0.202610280956, versionCode 1793181379, APK 20,802,668 bytes,
             md5 85e4cec6b2df7c49aa7cbe1b4368536b, signature CN=AIxodia,
             AIxodia-version.json commit == HEAD).
+[COMPLETED] terminal: the copy still broke the operator's paragraph — a chat
+            style program word-wraps English words and Thai runs at the spaces
+            between them, so its lines end at different columns and the
+            repeated-column margin never forms. The block now tells the two
+            cuts apart itself. When at least two lines end at one column and
+            another ends shorter, the cut is at the text edge and mid-word:
+            those lines join as they are, keeping their cells. Otherwise the
+            cut fell on a space the program dropped: consecutive prose lines
+            join with one space put back, unless the program carried it to the
+            next line (the line starts at pad+1). Rows with two spaces in a
+            row (tables, aligned code) and rows opening a list, heading,
+            quote, table or box drawing end the run, and a block whose lines
+            all reach the same column is aligned content, never reflowed. The
+            operator's four-line Thai/English paragraph comes back on one line
+            with its spaces intact. TerminalSelectionTest gained
+            aWordWrappedParagraphCopiesAsOneParagraph (the reported text on a
+            52-column screen), aCarriedSpaceIsNotDoubled and
+            aListItemStartsANewLine; the two cases pinning the old margin rule
+            were replaced. :app:testDebugUnitTest BUILD SUCCESSFUL, 225 tests,
+            Paparazzi included.
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer

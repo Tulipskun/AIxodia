@@ -49,10 +49,10 @@ class TerminalSelectionTest {
     }
 
     /**
-     * The text a full-screen program drew: it wraps its own paragraphs, so the
-     * rows are hard breaks with the block's layout padding, not soft wraps.
-     * Nothing marks them; the copy has to read the padding from the first row
-     * and the cut from the row running to the edge.
+     * The text a full-screen program drew in a script without spaces: it cuts
+     * mid-word where its text area stops, so two lines end at one column and
+     * the last is shorter. The copy joins exactly those lines; the space that
+     * fell on the first break is real text and must not be lost.
      */
     @Test
     fun aProgramWrappedParagraphCopiesAsOneParagraph() {
@@ -72,14 +72,51 @@ class TerminalSelectionTest {
         )
     }
 
+    /**
+     * The same paragraph broken at the spaces between its words: the lines
+     * end at different columns, so the program cut at a space and dropped it.
+     * Copy puts the paragraph back with those spaces.
+     */
     @Test
-    fun aShortRowKeepsItsBreak() {
-        val buffer = buffer(2, cols = 64)
-        buffer.put(0, 0, "   short")
-        buffer.put(1, 0, "   next")
+    fun aWordWrappedParagraphCopiesAsOneParagraph() {
+        val part1 = "ข้อจำกัดที่เหลือ (โดยธรรมชาติของการเดา): ย่อหน้าที่มีแค่ 2"
+        val part2 = "บรรทัดและบรรทัดที่สองสั้น จะยังไม่ต่อให้"
+        val part3 = "เพราะหาขอบไม่ได้จากสองบรรทัด —"
+        val part4 = "ลองใช้บนเครื่องจริงแล้วเจอเคสไหนบอกได้ครับ"
+        // The screen the sample was copied from: the first line fills it.
+        val buffer = buffer(4, cols = 52)
+        buffer.put(0, 0, "   $part1")
+        buffer.put(1, 0, "   $part2")
+        buffer.put(2, 0, "   $part3")
+        buffer.put(3, 0, "   $part4")
 
         assertEquals(
-            "short\n   next",
+            "$part1 $part2 $part3 $part4",
+            TerminalSelection.text(buffer, 0, 3, 3, buffer.columns - 1),
+        )
+    }
+
+    /** The program carried the break space over, so no second one is added. */
+    @Test
+    fun aCarriedSpaceIsNotDoubled() {
+        val buffer = buffer(2, cols = 40)
+        buffer.put(0, 0, "   alpha beta")
+        buffer.put(1, 0, "    gamma")
+
+        assertEquals(
+            "alpha beta gamma",
+            TerminalSelection.text(buffer, 0, 3, 1, buffer.columns - 1),
+        )
+    }
+
+    @Test
+    fun aListItemStartsANewLine() {
+        val buffer = buffer(2, cols = 40)
+        buffer.put(0, 0, "   the paragraph above")
+        buffer.put(1, 0, "   - item one")
+
+        assertEquals(
+            "the paragraph above\n   - item one",
             TerminalSelection.text(buffer, 0, 3, 1, buffer.columns - 1),
         )
     }
@@ -104,21 +141,10 @@ class TerminalSelectionTest {
         )
     }
 
-    @Test
-    fun aLongestLineIsNotAWrapColumn() {
-        val buffer = buffer(2, cols = 64)
-        buffer.put(0, 0, "   the longest line here")
-        buffer.put(1, 0, "   body")
-
-        assertEquals(
-            "the longest line here\n   body",
-            TerminalSelection.text(buffer, 0, 3, 1, buffer.columns - 1),
-        )
-    }
-
     /**
-     * Every line ending at the same column, with none shorter, is a table or
-     * a column-aligned list; prose always ends in a ragged line.
+     * A block whose lines all reach the same column, with none shorter, is
+     * aligned content — a table or a column-aligned list — not a wrapped
+     * paragraph, and the gaps between its columns are not prose either.
      */
     @Test
     fun alignedRowsAreNotAWrapColumn() {
