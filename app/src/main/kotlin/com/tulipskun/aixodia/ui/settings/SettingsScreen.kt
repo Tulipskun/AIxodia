@@ -763,13 +763,6 @@ private fun ProviderSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (providers.isEmpty()) {
-                Text(
-                    "No providers yet — add a provider or press \"Test all\" first",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             LazyColumn(Modifier.heightIn(max = 420.dp)) { items(list) { p ->
                 val selected = p.id == current
                 Row(

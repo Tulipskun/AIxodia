@@ -190,10 +190,8 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
 
             when {
-                loaded && providers.isEmpty() -> EmptyState(
-                    "ยังไม่มีผู้ให้บริการ\nกด + เพื่อเพิ่ม หรือกดรีเฟรชเพื่อให้ daemon รายงาน",
-                )
-                loaded && visible.isEmpty() -> EmptyState("ไม่มีรายการที่ตรงกับตัวกรอง")
+                loaded && visible.isEmpty() && providers.isNotEmpty() ->
+                    EmptyState("ไม่มีรายการที่ตรงกับตัวกรอง")
             }
 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {

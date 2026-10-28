@@ -1,4 +1,8 @@
 GOAL:
+[IN_PROCESS] Remove the empty-provider dead-ends: the chat model sheet, the
+            Settings provider sheet and the Providers page must always open as a
+            picker (an empty list is fine, "ถ้าไม่มีก็คือไม่มี") — no "No provider
+            yet" nag. Paired with the engine defaulting to keyless Opencode.
 [COMPLETED] chat AI works: message appears fast, AI answer arrives
 [COMPLETED] app shows chats that live in D1 even without the tunnel
 [COMPLETED] switching chat session does not reconnect the websocket
@@ -81,3 +85,8 @@ NOTE:
 - Menu chip removed; Kotlin compiles green (compileDebugKotlin).
 - Unit tests green after the menu-chip removal.
 - Commit 847f77b (menu opens by swipe only) pushed to main.
+- 2026-10-28T03:05Z: fresh clone of Tulipskun/AIxodia to /root/AIxodia (public
+  repo, no credential in the remote URL) and AGENTS.md read; its sections 1–2
+  (find-based exploration, MAIN.md state tracking) are the protocol in force.
+  Token hygiene: the PAT the operator pasted into chat was used only as a
+  per-command GH_TOKEN env and never stored; it should be revoked and reissued.

@@ -976,113 +976,102 @@ private fun ChatModelSheet(
             // is a drop-down rather than a row of chips so a long provider list
             // opens over the dialog instead of pushing the model list off screen.
             Text("Model", style = MaterialTheme.typography.titleMedium)
-            if (providers.isEmpty()) {
+            // Always the picker, never a "no provider" notice: the built-in
+            // keyless provider makes this list non-empty on any daemon that
+            // answers, and a daemon that does not answer should show an empty
+            // dropdown to pick from, not a dead-end message.
+            ExposedDropdownMenuBox(
+                expanded = providerMenu,
+                onExpandedChange = { providerMenu = it },
+            ) {
+                OutlinedTextField(
+                    value = pickedProvider,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Provider") },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu)
+                    },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                )
+                ExposedDropdownMenu(
+                    expanded = providerMenu,
+                    onDismissRequest = { providerMenu = false },
+                ) {
+                    providers.forEach { p ->
+                        DropdownMenuItem(
+                            text = { Text(p.id) },
+                            onClick = { onProvider(p.id); providerMenu = false },
+                        )
+                    }
+                }
+            }
+            val currentStatus = statuses[pickedProvider]
+            val statusLine = when {
+                currentStatus == null -> "No status"
+                !currentStatus.probed -> "" // nothing to say until a test has run
+                currentStatus.reachable -> buildString {
+                    append("OK")
+                    if (currentStatus.workingModel.isNotBlank()) append(" · ${currentStatus.workingModel}")
+                }
+                else -> "Unusable" + (if (currentStatus.lastError.isNotBlank()) " · ${currentStatus.lastError}" else "")
+            }
+            if (pickedProvider.isNotBlank() && statusLine.isNotBlank()) {
                 Text(
-                    "No provider yet — add or test a provider in Settings",
-                    style = MaterialTheme.typography.bodyMedium,
+                    statusLine,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
-                ExposedDropdownMenuBox(
-                    expanded = providerMenu,
-                    onExpandedChange = { providerMenu = it },
-                ) {
-                    OutlinedTextField(
-                        value = pickedProvider,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Provider") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu)
-                        },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = providerMenu,
-                        onDismissRequest = { providerMenu = false },
-                    ) {
-                        providers.forEach { p ->
-                            DropdownMenuItem(
-                                text = { Text(p.id) },
-                                onClick = { onProvider(p.id); providerMenu = false },
-                            )
-                        }
-                    }
-                }
-                val currentStatus = statuses[pickedProvider]
-                val statusLine = when {
-                    currentStatus == null -> "No status"
-                    !currentStatus.probed -> "" // nothing to say until a test has run
-                    currentStatus.reachable -> buildString {
-                        append("OK")
-                        if (currentStatus.workingModel.isNotBlank()) append(" · ${currentStatus.workingModel}")
-                    }
-                    else -> "Unusable" + (if (currentStatus.lastError.isNotBlank()) " · ${currentStatus.lastError}" else "")
-                }
-                if (pickedProvider.isNotBlank() && statusLine.isNotBlank()) {
-                    Text(
-                        statusLine,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (pickedProvider.isBlank()) {
-                    Text(
-                        "Select a provider above first",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // The model is the picked provider's catalogue, so it is already
-                // filtered by provider; typing narrows it further. A drop-down
-                // rather than a visible list keeps the dialog from scrolling.
-                ExposedDropdownMenuBox(
+            }
+            // The model is the picked provider's catalogue, so it is already
+            // filtered by provider; typing narrows it further. A drop-down
+            // rather than a visible list keeps the dialog from scrolling.
+            ExposedDropdownMenuBox(
+                expanded = modelMenu,
+                onExpandedChange = { modelMenu = it },
+            ) {
+                OutlinedTextField(
+                    value = if (modelMenu) modelQuery else pickedModel,
+                    onValueChange = { modelQuery = it; modelMenu = true },
+                    singleLine = true,
+                    label = { Text("Model (${models.size})") },
+                    placeholder = {
+                        Text(if (modelMenu) "Type to search" else "Select a model")
+                    },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu)
+                    },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                )
+                ExposedDropdownMenu(
                     expanded = modelMenu,
-                    onExpandedChange = { modelMenu = it },
+                    onDismissRequest = { modelMenu = false },
                 ) {
-                    OutlinedTextField(
-                        value = if (modelMenu) modelQuery else pickedModel,
-                        onValueChange = { modelQuery = it; modelMenu = true },
-                        singleLine = true,
-                        label = { Text("Model (${models.size})") },
-                        placeholder = {
-                            Text(if (modelMenu) "Type to search" else "Select a model")
-                        },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu)
-                        },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = modelMenu,
-                        onDismissRequest = { modelMenu = false },
-                    ) {
-                        if (filtered.isEmpty()) {
+                    if (filtered.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("No matching model") },
+                            onClick = {},
+                            enabled = false,
+                        )
+                    } else {
+                        filtered.forEach { m ->
                             DropdownMenuItem(
-                                text = { Text("No matching model") },
-                                onClick = {},
-                                enabled = false,
+                                text = {
+                                    Text(
+                                        m.id,
+                                        fontWeight = if (m.id == pickedModel || m.id == working) {
+                                            FontWeight.SemiBold
+                                        } else {
+                                            FontWeight.Normal
+                                        },
+                                    )
+                                },
+                                onClick = {
+                                    onModel(m.id)
+                                    modelQuery = ""
+                                    modelMenu = false
+                                },
                             )
-                        } else {
-                            filtered.forEach { m ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            m.id,
-                                            fontWeight = if (m.id == pickedModel || m.id == working) {
-                                                FontWeight.SemiBold
-                                            } else {
-                                                FontWeight.Normal
-                                            },
-                                        )
-                                    },
-                                    onClick = {
-                                        onModel(m.id)
-                                        modelQuery = ""
-                                        modelMenu = false
-                                    },
-                                )
-                            }
                         }
                     }
                 }
