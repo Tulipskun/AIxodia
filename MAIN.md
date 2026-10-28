@@ -23,23 +23,30 @@ GOAL:
 [COMPLETED] terminal: arrows aligned (up above down, D-pad style) and holdable
 [IN_PROCESS] non-login mode: the app must work with no API key at all, without
 routing through the opencode CLI
-[IN_PROCESS] Terminal tabs: the session list moves to the top of the drawer, a
+[COMPLETED] Terminal tabs: the session list moves to the top of the drawer, a
             tab is closed by holding it instead of by a separate Close-session
             button, and reopening the terminal lands on the shells that are
             really there — the same pid, never a shell that was closed, and one
-            fresh tab only when nothing is left
-[IN_PROCESS] terminal: a drag scrolls the page in a plain shell, not only
-            inside a TUI like vim
+            fresh tab only when nothing is left. Shipped: 37e99e4 + bb4afae,
+            released to the rolling `latest` with the scroll fix below.
+[COMPLETED] terminal: a drag scrolls the page in a plain shell, not only inside
+            a TUI like vim. :app:testDebugUnitTest BUILD SUCCESSFUL (Paparazzi
+            included), shipped in bb4afae and released via scripts/release.sh
+            to the rolling `latest` at 08:05:40Z (versionName
+            1.0.202610280805, versionCode 1793174740, APK 20,802,664 bytes,
+            signature CN=AIxodia, AIxodia-version.json commit == HEAD).
+            History can be read but not copied: selection still addresses the
+            live screen's rows, painted at the pan offset.
 
 PLAN:
-[IN_PROCESS] TerminalSocket.open() waits for the engine's /v1/terminals answer
+[COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
             before dialing anything (an engine mid-restart holds nothing in
             memory, and attaching a saved id there starts a new shell under the
             old tab); HistoryApi.terminalShells() tells Listed / Unlisted /
             Unreachable apart so silence cannot be read as "no shells"
-[IN_PROCESS] closeSession(id) takes the tab from the row that was held, drops
+[COMPLETED] closeSession(id) takes the tab from the row that was held, drops
             that tab's emulator, and opens one fresh shell when nothing is left
-[IN_PROCESS] TerminalView painted only the emulator's screen and pinned
+[COMPLETED] TerminalView painted only the emulator's screen and pinned
             scrollTopPx to 0, so a vertical drag did nothing unless the program
             asked for the mouse; the page now pans over the normal buffer's
             scrollback (drag, fling, scroll-to-bottom button, selection
@@ -48,6 +55,11 @@ PLAN:
             build-tools 35 at /root/android-sdk. Gradle needs JDK 17
             (/usr/lib/jvm/java-17-openjdk-amd64): under JDK 21 the build dies
             in :app:compileDebugJavaWithJavac on JdkImageTransform/jmod
+[COMPLETED] scripts/release.sh pushes before it builds, and git has no
+            credential helper here: run it with
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper
+            GIT_CONFIG_VALUE_0='!gh auth git-credential' plus
+            ANDROID_HOME=/root/android-sdk, or it stops at "pushing main"
 
 [COMPLETED] D1Api: typed binds (numbers as numbers) + chatSessions/chatTurns reads
 [COMPLETED] HistoryApi: sessions()/turns() fall back to D1 when the tunnel is down
