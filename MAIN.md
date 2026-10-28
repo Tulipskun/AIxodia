@@ -37,7 +37,7 @@ routing through the opencode CLI
             signature CN=AIxodia, AIxodia-version.json commit == HEAD).
             History can be read but not copied: selection still addresses the
             live screen's rows, painted at the pan offset.
-[IN_PROCESS] terminal: scrolling STILL dead in the operator's hands after
+[COMPLETED] terminal: scrolling STILL dead in the operator's hands after
             1793174740, so the first round was wrong on device even though the
             pan math was right. Cause: every drag decision was gated on
             `fullScreenDetected`, a guess set by any program that parks the
@@ -53,7 +53,11 @@ routing through the opencode CLI
             (MotionEvent) over a laid-out view: 7 tests, 0 failures, covering
             drag up, drag back to the prompt, the top of the history, typing,
             a mouse program getting the wheel, the guess not freezing a prompt,
-            and a tap still clicking for a guessed program.
+            and a tap still clicking for a guessed program. Shipped ecffe26,
+            released to the rolling `latest` at 08:22:07Z (versionName
+            1.0.202610280822, versionCode 1793175727, APK 20,802,668 bytes,
+            signature CN=AIxodia). Still unverified on a real phone — there is
+            no device or KVM here, so the evidence is MotionEvent-level only.
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
