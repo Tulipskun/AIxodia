@@ -108,7 +108,11 @@ routing through the opencode CLI
             ending within eight columns of the edge, followed by an indented
             line, is taken for a wrap.
             :app:testDebugUnitTest BUILD SUCCESSFUL, 222 tests, Paparazzi
-            included.
+            included. Shipped 9b556a6, scripts/release.sh cut the rolling
+            `latest` at 09:25:30Z (versionName 1.0.202610280925, versionCode
+            1793179530, APK 20,802,664 bytes, md5
+            ce4b1ec96db1a75f242cf567c315d061, signature CN=AIxodia,
+            AIxodia-version.json commit == HEAD).
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
