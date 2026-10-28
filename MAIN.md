@@ -1,5 +1,5 @@
 GOAL:
-[IN_PROCESS] Move the terminal's window title into the drawer, off the shell:
+[COMPLETED] Move the terminal's window title into the drawer, off the shell:
             the engine (v1.159) reports #{pane_title} per session in
             /v1/terminals; TerminalSocket.syncSessions folds it into
             sessionTitles and TerminalSidebar shows a "Window title" card
@@ -7,7 +7,9 @@ GOAL:
             tmux.conf status-left/right — already gone because tmux.rs sets
             status off per session. assembleDebug + :app:testDebugUnitTest
             BUILD SUCCESSFUL on JDK17 + /opt/android-sdk (installed this
-            host). Release pending: scripts/release.sh.
+            host). Shipped: baf005a pushed, scripts/release.sh published the
+            rolling `latest` (signed CN=AIxodia); engine v1.159 self-updated
+            in place (pid 1354).
 [COMPLETED] Name the keyless fallback provider by what actually serves it:
             ErrorText's free-tier guidance says "Pick Pollinations" instead of
             an "AIxodia Free" that is not a provider — the engine's built-in
