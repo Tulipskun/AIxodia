@@ -319,9 +319,12 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
 3fdc242, which carries the provider wording and error mapping
 
 NOTE:
-- Thread-correctness work above is UNCOMMITTED on purpose: no commit, no push,
-  no release cut, because the operator reviews results and `latest` is shared
-  state. Say the word and it goes through scripts/release.sh.
+- 2026-10-28T23:14Z: the thread fix above is committed as 515e9ec, pushed to
+  main, and scripts/release.sh cut the rolling `latest` at it (versionName
+  1.0.202610282313, versionCode 1793229184, APK 20,838,712 bytes, signature
+  CN=AIxodia, AIxodia-version.json commit == HEAD). Phones on the old build are
+  offered this one by the in-app checker. Still not seen on a device — no
+  handset and no KVM on this host, so the operator's screen is the test.
 - Also still open from last session's diagnosis, deliberately not touched here:
   the resume path (app reopened mid-turn) sets no turnBaseSeq, so a replayed
   stream can still sit beside stored rows. Choosing a base there risks *hiding*
