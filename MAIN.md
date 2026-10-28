@@ -1,8 +1,10 @@
 GOAL:
-[IN_PROCESS] Remove the empty-provider dead-ends: the chat model sheet, the
-            Settings provider sheet and the Providers page must always open as a
-            picker (an empty list is fine, "ถ้าไม่มีก็คือไม่มี") — no "No provider
-            yet" nag. Paired with the engine defaulting to keyless Opencode.
+[COMPLETED] Remove the empty-provider dead-ends: the chat model sheet, the
+            Settings provider sheet and the Providers page always open as a
+            picker (an empty list is fine) — no "No provider yet" nag. Paired
+            with the engine defaulting to keyless Opencode. Shipped: 7329a73,
+            compileDebugKotlin green, released via scripts/release.sh to the
+            rolling `latest` (versionName 1.0.202610280344, signed CN=AIxodia).
 [COMPLETED] chat AI works: message appears fast, AI answer arrives
 [COMPLETED] app shows chats that live in D1 even without the tunnel
 [COMPLETED] switching chat session does not reconnect the websocket
