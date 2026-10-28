@@ -24,7 +24,7 @@ fun friendlyError(raw: String): String {
         // was misread as a rejected key, the user went to check a key that was
         // never the problem. The refusal is now a 429 FreeUsageLimitError.
         "free tier" in s || "can only be used from within" in s || "freeusagelimit" in s ->
-            "OpenCode serves its free models to the OpenCode app only, so the engine is refused here. Pick AIxodia Free, which needs no key, or add an OpenCode key to that provider."
+            "OpenCode serves its free models to the OpenCode app only, so the engine is refused here. Pick Pollinations, which needs no key, or add an OpenCode key to that provider."
 
         // The keyless provider throttles an unauthenticated network to roughly
         // one reply per 30 seconds and says so in its own 402 body.

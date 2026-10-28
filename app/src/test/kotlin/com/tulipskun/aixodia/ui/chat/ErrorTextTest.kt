@@ -28,7 +28,7 @@ class ErrorTextTest {
     @Test fun freeTierRefusalPointsAtTheKeylessProvider() =
         assertEquals(
             "OpenCode serves its free models to the OpenCode app only, so the engine is refused here. " +
-                "Pick AIxodia Free, which needs no key, or add an OpenCode key to that provider.",
+                "Pick Pollinations, which needs no key, or add an OpenCode key to that provider.",
             friendlyError(
                 "upstream_error: OpenCode's free tier can only be used from within OpenCode. " +
                     "Download it at https://opencode.ai and keep building.",
@@ -38,7 +38,7 @@ class ErrorTextTest {
     @Test fun freeUsageQuotaIsNotAKeyProblem() =
         assertEquals(
             "OpenCode serves its free models to the OpenCode app only, so the engine is refused here. " +
-                "Pick AIxodia Free, which needs no key, or add an OpenCode key to that provider.",
+                "Pick Pollinations, which needs no key, or add an OpenCode key to that provider.",
             friendlyError(
                 "upstream HTTP 429: {\"code\":\"FreeUsageLimitError\",\"title\":\"Free models " +
                     "usage limited\"}: try again later",

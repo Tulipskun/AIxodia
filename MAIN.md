@@ -1,4 +1,10 @@
 GOAL:
+[COMPLETED] Name the keyless fallback provider by what actually serves it:
+            ErrorText's free-tier guidance says "Pick Pollinations" instead of
+            an "AIxodia Free" that is not a provider — the engine's built-in
+            talks to text.pollinations.ai, and its builtin was renamed to match
+            (engine v1.158). The two ErrorText unit-test expectations moved with
+            the string; :app:testDebugUnitTest BUILD SUCCESSFUL.
 [COMPLETED] Remove the empty-provider dead-ends: the chat model sheet, the
             Settings provider sheet and the Providers page always open as a
             picker (an empty list is fine) — no "No provider yet" nag. Paired
