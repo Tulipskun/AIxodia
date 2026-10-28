@@ -96,6 +96,23 @@ internal object RunFrames {
         if (obj == null) return null
         val stage = obj.optString("stage")
         if (stage.isBlank()) return null
+        if (stage == "compact") {
+            val arr = obj.optJSONArray("summary")
+            val lines = ArrayList<String>(arr?.length() ?: 0)
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let(lines::add)
+                }
+            }
+            return AiOutput(
+                sessionId = session,
+                kind = "trace",
+                stage = "compact",
+                keptTurns = obj.optInt("kept_turns"),
+                droppedTurns = obj.optInt("dropped_turns"),
+                compactSummary = lines,
+            )
+        }
         val block = obj.optJSONObject("block")?.let {
             runCatching { blockAdapter.fromJson(it.toString()) }.getOrNull()
         }

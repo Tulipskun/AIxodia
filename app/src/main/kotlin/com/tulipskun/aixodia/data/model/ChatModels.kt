@@ -249,6 +249,11 @@ data class AiOutput(
     @Json(name = "reasoning_tokens") val reasoningTokens: Int = 0,
     @Json(name = "input_includes_cache") val inputIncludesCache: Boolean = false,
     @Json(name = "tool_duration_ms") val toolDurationMs: Long = 0,
+    // The engine dropped whole turns from the prompt to make it fit. These
+    // describe what it kept and what fell out, for the thread's compact marker.
+    @Json(name = "kept_turns") val keptTurns: Int = 0,
+    @Json(name = "dropped_turns") val droppedTurns: Int = 0,
+    @Json(name = "compact_summary") val compactSummary: List<String> = emptyList(),
     // Footer of this one message: the model that produced it and how
     // long it took, straight off the terminal trace.
     @Json(name = "model") val model: String = "",

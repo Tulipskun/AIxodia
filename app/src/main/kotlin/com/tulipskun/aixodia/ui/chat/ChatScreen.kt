@@ -124,8 +124,10 @@ import com.tulipskun.aixodia.ui.display.ComposerCommand
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
+import com.tulipskun.aixodia.ui.display.GoalsCard
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.LiveThink
+import com.tulipskun.aixodia.ui.display.CompactMarker
 import com.tulipskun.aixodia.ui.display.MessageBlock
 import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SessionStrip
@@ -287,6 +289,7 @@ fun ChatScreen(
     val daemonStartedAt by vm.daemonStartedAt.collectAsStateWithLifecycle()
     val liveText by vm.liveText.collectAsStateWithLifecycle()
     val liveBlocks by vm.liveBlocks.collectAsStateWithLifecycle()
+    val objectives by vm.objectives.collectAsStateWithLifecycle()
     val liveReasoning by vm.liveReasoning.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     val liveUsage by vm.liveUsage.collectAsStateWithLifecycle()
@@ -840,6 +843,15 @@ fun ChatScreen(
                         }
                     }
                 }
+                // The goals and plans this chat's turn is working through, kept
+                // in step with the engine's store. It sits above the thread so
+                // it reads as the turn's ledger, not one more message.
+                val goalsPage = objectives?.takeIf { it.goals.isNotEmpty() || it.plans.isNotEmpty() }
+                if (goalsPage != null) {
+                    item(key = "goals-card") {
+                        GoalsCard(goalsPage)
+                    }
+                }
                 itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
                     MessageBlock(
                         m,
@@ -872,13 +884,13 @@ fun ChatScreen(
                 // same place, instead of piling at the bottom.
                 liveBlocks.forEachIndexed { index, block ->
                     when (block) {
-                        is LiveBlock.Say -> item(key = "live-say-$index") {
+                        is LiveBlock.Say -> item(key = "live-say-${block.atMs}") {
                             MarkdownText(
                                 text = block.text,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
-                        is LiveBlock.Act -> item(key = "live-act-$index") {
+                        is LiveBlock.Act -> item(key = "live-act-${block.step.id.ifBlank { "n$index" }}") {
                             ToolStepCard(block.step, nowMs)
                         }
                         // Each request's own wait-and-thought, in the place it
@@ -886,7 +898,7 @@ fun ChatScreen(
                         // "Thinking…" and then a finished "Thought for …", so a
                         // turn with three tool rounds reads as three requests
                         // rather than one merged block at the bottom.
-                        is LiveBlock.Think -> item(key = "live-think-$index") {
+                        is LiveBlock.Think -> item(key = "live-think-${block.id.ifBlank { "n$index" }}") {
                             val elapsed = when (block.phase) {
                                 ThinkPhase.DONE ->
                                     (block.endedAtMs - block.startedAtMs).coerceAtLeast(0L)
@@ -897,6 +909,16 @@ fun ChatScreen(
                                 phase = block.phase,
                                 reasoning = block.reasoning,
                                 elapsedMs = elapsed,
+                            )
+                        }
+                        // Where the engine trimmed its own prompt. It is not a
+                        // stored row: it marks the point in the live thread the
+                        // older turns fell out of the window.
+                        is LiveBlock.Compact -> item(key = "live-compact-${block.atMs}") {
+                            CompactMarker(
+                                keptTurns = block.keptTurns,
+                                droppedTurns = block.droppedTurns,
+                                summary = block.summary,
                             )
                         }
                     }

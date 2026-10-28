@@ -410,6 +410,10 @@ class ChatRepository(
             ?.let { it.provider to it.model }
             ?.takeIf { it.first.isNotBlank() }
 
+    /** One chat's goals and plans with statuses, from the daemon. */
+    suspend fun objectives(sid: String): com.tulipskun.aixodia.data.remote.ObjectivesPage? =
+        runCatching { history.objectives(sid) }.getOrNull()
+
     /**
      * Pins provider and model for one chat. The daemon validates the pair and
      * stores it on the session, so the choice survives a restart and is shared

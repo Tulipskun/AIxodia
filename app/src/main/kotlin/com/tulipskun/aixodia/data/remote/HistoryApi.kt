@@ -93,6 +93,19 @@ data class SessionRow(
     @Json(name = "usage") val usage: SessionUsageRow? = null,
 )
 
+/** A chat's goal and plan lists as the engine's objectives endpoint serves them. */
+data class ObjectiveRow(
+    val id: String = "",
+    val content: String = "",
+    /** open, done, or dropped. */
+    val status: String = "open",
+)
+
+data class ObjectivesPage(
+    val goals: List<ObjectiveRow> = emptyList(),
+    val plans: List<ObjectiveRow> = emptyList(),
+)
+
 /** A chat's cost as the engine summed it. Mirrors session.SessionUsage. */
 data class SessionUsageRow(
     @Json(name = "prompt_tokens") val promptTokens: Int = 0,
@@ -846,6 +859,45 @@ class HistoryApi(private val settings: SettingsStore) {
                 TerminalShells.Listed(rows)
             }
         }.getOrDefault(TerminalShells.Unreachable)
+    }
+
+    /**
+     * One chat's goals and plans with their statuses, for the goals card.
+     * Null when the engine cannot be reached or predates the endpoint.
+     */
+    suspend fun objectives(sessionId: String): ObjectivesPage? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatching {
+            val req = Request.Builder().url("$base/v1/sessions/$sessionId/objectives")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use null
+                val env = runCatching { JSONObject(r.body!!.string()) }.getOrNull() ?: return@use null
+                ObjectivesPage(
+                    goals = objectiveRows(env.optJSONArray("goals")),
+                    plans = objectiveRows(env.optJSONArray("plans")),
+                )
+            }
+        }.getOrDefault(null)
+    }
+
+    private fun objectiveRows(arr: JSONArray?): List<ObjectiveRow> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<ObjectiveRow>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            out.add(
+                ObjectiveRow(
+                    id = o.optString("id"),
+                    content = o.optString("content"),
+                    status = o.optString("status").ifBlank { "open" },
+                )
+            )
+        }
+        return out
     }
 
     /** Connectivity check for the Settings screen: session count, or throw. */

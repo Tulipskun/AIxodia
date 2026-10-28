@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.Block
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.model.humanToolArgs
 
 /**
  * The generic renderer for engine display blocks. Known types reuse the
@@ -82,6 +83,14 @@ fun toolCardArgs(m: ChatMessage, block: Block?): String =
 /** A stored tool step is settled unless its call is still waiting for a result. */
 fun toolCardDone(m: ChatMessage): Boolean = m.role == "tool_result"
 
+/**
+ * Whether a stored tool step ended in failure. The block says so directly; a
+ * row that predates blocks only has its result text, where the daemon wrote a
+ * JSON object opening with the error key.
+ */
+fun toolCardFailed(m: ChatMessage, block: Block?): Boolean =
+    block?.isError ?: (m.role == "tool_result" && m.text.startsWith("{\"error\""))
+
 /** How long the step ran, preferring the stored measurement. */
 fun toolCardDurationMs(m: ChatMessage, block: Block?): Long =
     m.durationMs.takeIf { it > 0L } ?: (block?.durationMs ?: 0L)
@@ -95,7 +104,7 @@ fun toolStepFor(block: Block, knownArgs: String, startedAtMs: Long): com.tulipsk
     com.tulipskun.aixodia.data.model.ToolStep(
         id = block.id,
         name = block.name,
-        args = block.args.ifBlank { knownArgs },
+        args = humanToolArgs(block.args).ifBlank { knownArgs },
         result = block.result,
         isError = block.isError,
         done = block.state == "done" || block.state == "error",

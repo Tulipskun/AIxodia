@@ -12,6 +12,7 @@ import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.ToolStep
+import com.tulipskun.aixodia.data.model.humanToolArgs
 import com.tulipskun.aixodia.data.remote.ApprovalRequest
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.CHAT_PAGE
@@ -130,6 +131,17 @@ class ChatViewModel(
              * then adopts instead of doubling.
              */
             val id: String = "",
+        ) : LiveBlock
+        /**
+         * The engine trimmed the prompt: whole older turns fell out of the
+         * window to make this request fit. The marker says how many were kept,
+         * how many fell, and what they were about.
+         */
+        data class Compact(
+            val keptTurns: Int,
+            val droppedTurns: Int,
+            val summary: List<String>,
+            val atMs: Long,
         ) : LiveBlock
     }
 
@@ -304,6 +316,26 @@ class ChatViewModel(
     /** The error to show as a retryable card, or "" when nothing failed. */
     val errorCard = MutableStateFlow("")
     /**
+     * The open chat's goals and plans with their statuses, for the goals card.
+     * Null until the engine first answers; refreshed on open, after a turn,
+     * and whenever a goal or plan tool reports a result.
+     */
+    val objectives = MutableStateFlow<com.tulipskun.aixodia.data.remote.ObjectivesPage?>(null)
+    private var objectivesJob: Job? = null
+
+    /** Re-reads the goals card. The newest request wins; stale reads are cut. */
+    private fun refreshObjectives(sid: String = sessionId) {
+        if (sid.isBlank()) return
+        objectivesJob?.cancel()
+        objectivesJob = viewModelScope.launch {
+            // The engine writes D1 right after the tool result frame; a moment's
+            // delay keeps the card from re-reading the list before the write lands.
+            delay(400)
+            val page = repo.objectives(sid)
+            if (sid == sessionId && page != null) objectives.value = page
+        }
+    }
+    /**
      * True once the daemon's closing message has replaced the streamed text.
      * A delta arriving after that would be appended to the finished answer and
      * read as a repetition, so it is dropped.
@@ -388,6 +420,14 @@ class ChatViewModel(
             refreshDaemonStart()
         }
         viewModelScope.launch {
+            // Opening or switching a chat re-reads its goals card; the card
+            // belongs to the chat on screen, never to the one left behind.
+            activeId.collect { sid ->
+                if (sid.isNotBlank()) objectives.value = null
+                if (sid.isNotBlank()) refreshObjectives(sid)
+            }
+        }
+        viewModelScope.launch {
             var wasOnline = repo.connState.value == ConnState.ONLINE
             repo.connState.collect { state ->
                 if (state == ConnState.ONLINE) {
@@ -459,6 +499,7 @@ class ChatViewModel(
                         val baseSeq = turnBaseSeq
                         status.value = ""
                         liveText.value = ""
+                        discardDeltas()
                         liveBlocks.value = emptyList()
                         liveThinkingMs.value = 0L
                         liveReasoning.value = ""
@@ -520,7 +561,11 @@ class ChatViewModel(
         liveAgent.value = agent.ifEmpty { "main" }
         // The request has spoken: it is no longer waiting or thinking.
         settleOpenRequest()
-        liveText.value += chunk
+        // A fast model streams a token per frame; restating the whole bubble
+        // per token made the thread lag behind the answer. Coalesce into the
+        // flow on a short timer instead.
+        deltaBuffer.append(chunk)
+        scheduleDeltaFlush()
         liveChars += chunk.length
         // The clock for the rate starts here, not when the question was sent.
         val stats = turnStats.value
@@ -529,6 +574,33 @@ class ChatViewModel(
         }
         estimateTokens()
         busy.value = true
+    }
+
+    private val deltaBuffer = StringBuilder()
+    private var deltaFlushJob: Job? = null
+
+    private fun scheduleDeltaFlush() {
+        if (deltaFlushJob?.isActive == true) return
+        deltaFlushJob = viewModelScope.launch {
+            delay(120)
+            flushDeltas()
+        }
+    }
+
+    /** Puts every buffered token on screen at once. Safe to call any time. */
+    private fun flushDeltas() {
+        deltaFlushJob?.cancel()
+        deltaFlushJob = null
+        if (deltaBuffer.isEmpty()) return
+        liveText.value += deltaBuffer.toString()
+        deltaBuffer.setLength(0)
+    }
+
+    /** Drops buffered tokens the screen will never show — a cleared turn. */
+    private fun discardDeltas() {
+        deltaFlushJob?.cancel()
+        deltaFlushJob = null
+        deltaBuffer.setLength(0)
     }
 
     /**
@@ -558,6 +630,7 @@ class ChatViewModel(
         // A turn that never streamed still answered: close the open request so
         // its wait does not outlive the answer.
         settleOpenRequest()
+        discardDeltas()
         liveText.value = text
         liveThinkingMs.value = 0L
         reasoningActive.value = false
@@ -721,6 +794,7 @@ class ChatViewModel(
         else settleOpenRequest(now)
         liveThinkingMs.value = 0L
         // What came before this tool is its own turn, now and after.
+        flushDeltas()
         val said = liveText.value.trim()
         if (said.isNotEmpty()) {
             liveBlocks.value = liveBlocks.value +
@@ -746,8 +820,8 @@ class ChatViewModel(
             if (item is LiveBlock.Act && item.step.key == key) {
                 item.copy(
                     step = item.step.copy(
-                        args = block.args.ifBlank { known },
-                        result = block.result.take(160),
+                        args = humanToolArgs(block.args).ifBlank { known },
+                        result = block.result,
                         isError = block.isError,
                         done = true,
                         durationMs = block.durationMs,
@@ -760,7 +834,12 @@ class ChatViewModel(
         val note = if (block.isError) "${block.name} failed" else "${block.name} done"
         status.value = note
         traceNote(note)
+        if (isObjectiveTool(block.name)) refreshObjectives()
     }
+
+    /** True for the tools that change the goals card. */
+    private fun isObjectiveTool(name: String) =
+        name.startsWith("goal_") || name.startsWith("plan_")
 
     /**
      * A provider round finished: adopt the turn's running cost. The engine
@@ -785,6 +864,17 @@ class ChatViewModel(
         // cost. It moves the strip only, so it never touches the thread.
         if (f.stage == "usage") {
             onUsage(f)
+            return
+        }
+        // The engine trimmed the prompt. The marker lands where it happened in
+        // the thread; the digest says what fell out of the window.
+        if (f.stage == "compact") {
+            liveBlocks.value = liveBlocks.value + LiveBlock.Compact(
+                keptTurns = f.keptTurns,
+                droppedTurns = f.droppedTurns,
+                summary = f.compactSummary,
+                atMs = SystemClock.elapsedRealtime(),
+            )
             return
         }
         // The engine's display block, when the frame has one: it names the
@@ -826,6 +916,7 @@ class ChatViewModel(
                 settleOpenRequest()
                 liveThinkingMs.value = 0L
                 // What came before this tool is its own turn, now and after.
+                flushDeltas()
                 val said = liveText.value.trim()
                 if (said.isNotEmpty()) {
                     liveBlocks.value = liveBlocks.value +
@@ -835,7 +926,7 @@ class ChatViewModel(
                 liveBlocks.value = upsertStep(liveBlocks.value, ToolStep(
                         id = f.toolCall?.id.orEmpty(),
                         name = name,
-                        args = f.toolCall?.arguments.orEmpty(),
+                        args = humanToolArgs(f.toolCall?.arguments.orEmpty()),
                         durationMs = f.toolDurationMs,
                         startedAtMs = SystemClock.elapsedRealtime(),
                     ))
@@ -864,7 +955,7 @@ class ChatViewModel(
                         block.copy(
                             step = block.step.copy(
                                 args = f.toolCall?.arguments.orEmpty().ifBlank { known },
-                                result = result.take(160),
+                                result = result,
                                 isError = f.toolResult?.isError ?: false,
                                 done = true,
                                 durationMs = f.toolDurationMs,
@@ -876,6 +967,7 @@ class ChatViewModel(
                 }
                 status.value = if (f.toolResult?.isError == true) "$name failed" else "$name done"
                 traceNote(status.value)
+                if (isObjectiveTool(name)) refreshObjectives()
                 // The result goes back to the provider and the next request
                 // starts: a new "Sending request to provider…" for the next
                 // round, so each request's wait and thought is its own.
@@ -934,6 +1026,9 @@ class ChatViewModel(
             // it after the turn: the running total has just been released and
             // the engine's sum is what keeps the new turn on screen.
             runCatching { repo.syncSessions() }
+            // The turn may have moved goals and plans; the card shows the
+            // engine's list, not the phone's guess.
+            refreshObjectives(sid)
         }
     }
 
@@ -998,6 +1093,7 @@ class ChatViewModel(
         finishStats()
         turnBaseSeq = -1L
         liveText.value = ""
+        discardDeltas()
         // Nothing is in flight, so the silence watcher has nothing to judge.
         lastFrameAt = 0L
         turnHeard = false
@@ -1187,6 +1283,7 @@ class ChatViewModel(
                     if (ms > 0L) byCall[callId] = ms
                 }
                 is LiveBlock.Say -> Unit
+                is LiveBlock.Compact -> Unit
             }
         }
         val answer = blocks.drop(lastAct + 1)
@@ -1217,6 +1314,7 @@ class ChatViewModel(
         liveBlocks.value = emptyList()
         liveUsage.value = null
         liveText.value = ""
+        discardDeltas()
         liveReasoning.value = ""
         reasoningActive.value = false
         turnBaseSeq = -1L

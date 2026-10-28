@@ -9,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -210,7 +211,7 @@ fun MessageBlock(
                     // step is over; a call with no result yet is the one still
                     // running.
                     done = toolCardDone(m),
-                    failed = m.role == "tool_result" && m.text.startsWith("{\"error\""),
+                    failed = toolCardFailed(m, block),
                     onCopy = onCopy,
                     copyLabel = copyLabel,
                 )
@@ -1175,6 +1176,193 @@ private fun AttachmentChip(file: AttachmentRef) {
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 maxLines = 1,
             )
+        }
+    }
+}
+
+/**
+ * The chat's goals and plans, mirrored from the engine after every turn and
+ * every goal or plan tool. Collapsed it is one line — title and open count;
+ * expanded it is three sections that separate what is in progress from what
+ * succeeded and what was dropped.
+ */
+@Composable
+fun GoalsCard(page: com.tulipskun.aixodia.data.remote.ObjectivesPage) {
+    var expanded by remember { mutableStateOf(false) }
+    val open = (page.goals + page.plans).count { it.status == "open" }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    stringResource(R.string.goals_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    stringResource(R.string.goals_open_count, open),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                Column(Modifier.padding(bottom = 6.dp)) {
+                    GoalsSection(
+                        stringResource(R.string.goals_in_progress),
+                        page.goals.map { it to "goal" } + page.plans.map { it to "plan" },
+                        "open",
+                    )
+                    GoalsSection(
+                        stringResource(R.string.goals_completed),
+                        page.goals.map { it to "goal" } + page.plans.map { it to "plan" },
+                        "done",
+                    )
+                    GoalsSection(
+                        stringResource(R.string.goals_dropped),
+                        page.goals.map { it to "goal" } + page.plans.map { it to "plan" },
+                        "dropped",
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoalsSection(
+    title: String,
+    rows: List<Pair<com.tulipskun.aixodia.data.remote.ObjectiveRow, String>>,
+    status: String,
+) {
+    val inSection = rows.filter { it.first.status == status }
+    Text(
+        title,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 6.dp),
+    )
+    if (inSection.isEmpty()) {
+        Text(
+            stringResource(R.string.goals_none),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        )
+        return
+    }
+    inSection.forEach { (row, kind) ->
+        Row(
+            Modifier.padding(start = 4.dp, top = 1.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                when (status) {
+                    "done" -> "✓"
+                    "dropped" -> "✕"
+                    else -> "○"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                row.content,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    textDecoration = if (status == "dropped")
+                        androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                kind,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * The engine trimmed the prompt to make this request fit: whole older turns
+ * fell out of the context window. The marker says how many were kept and lets
+ * the reader see what the dropped turns were about.
+ */
+@Composable
+fun CompactMarker(keptTurns: Int, droppedTurns: Int, summary: List<String>) {
+    var expanded by remember { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(summary.isNotEmpty()) { expanded = !expanded }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (summary.isNotEmpty()) {
+                    Icon(
+                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.size(6.dp))
+                }
+                Text(
+                    stringResource(R.string.compact_marker, keptTurns, droppedTurns),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(
+                visible = expanded && summary.isNotEmpty(),
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                Column(Modifier.padding(bottom = 4.dp)) {
+                    summary.forEach { line ->
+                        Text(
+                            "· $line",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
     }
 }

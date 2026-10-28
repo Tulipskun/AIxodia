@@ -1,4 +1,32 @@
 GOAL:
+[COMPLETED] Goals on screen, compaction made visible, and the live thread
+            corrected (paired with engine v1.160):
+            - GoalsCard: the chat shows this session's goals and plans in three
+              sections — in progress ○, completed ✓, dropped ✕ (struck through).
+              HistoryApi.objectives reads the engine's new
+              GET /v1/sessions/:id/objectives; the ViewModel refreshes it on
+              open/switch, at turn end, and 400ms after any goal_/plan_ tool
+              result so the D1 write has landed. The collapsed card is one line
+              with the open count.
+            - CompactMarker: when the engine trims the prompt it now sends a
+              tool_event stage "compact" (kept_turns, dropped_turns, one digest
+              line per dropped turn). RunFrames maps it to a trace frame and the
+              live thread draws "Context trimmed — kept N turns, dropped M",
+              expandable to the list of what fell out.
+            - Stream lag: answer deltas no longer restate the bubble per token;
+              they coalesce on a 120ms timer (flushed before any tool card or
+              final message takes the text, discarded when the turn clears).
+            - Replay order: live items key by block/step id (atMs for prose)
+              instead of position, so a settling thread stops reshuffling;
+              mergeToolPairs now pairs call↔result by the call id the stored
+              block carries (positional fallback for pre-block rows), so two
+              parallel runs of one tool no longer merge crosswise.
+            - Tool cards: arguments render through humanToolArgs (the command,
+              not the raw JSON); failures read block.is_error instead of
+              sniffing the text for `{"error"`; result text is no longer cut at
+              160 chars.
+            assembleDebug + :app:testDebugUnitTest BUILD SUCCESSFUL on JDK17
+            (new ToolMergeTest cases for id pairing).
 [COMPLETED] Move the terminal's window title into the drawer, off the shell:
             the engine (v1.159) reports #{pane_title} per session in
             /v1/terminals; TerminalSocket.syncSessions folds it into

@@ -93,4 +93,13 @@
     <string name="terminal_failed">Terminal error: %1$s</string>
     <string name="terminal_copy">Copy</string>
     <string name="terminal_select_all">Select all</string>
+
+    <!-- Goals card and compact marker. -->
+    <string name="goals_title">Goals &amp; plans</string>
+    <string name="goals_open_count">%1$d open</string>
+    <string name="goals_in_progress">In progress</string>
+    <string name="goals_completed">Completed</string>
+    <string name="goals_dropped">Dropped</string>
+    <string name="goals_none">none</string>
+    <string name="compact_marker">Context trimmed — kept %1$d turns, dropped %2$d</string>
 </resources>

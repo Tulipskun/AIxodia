@@ -126,4 +126,37 @@ class ToolMergeTest {
         assertEquals("thought hard", merged[0].reasoningContent)
         assertEquals(1_500L, merged[0].thinkingMs)
     }
+
+    private fun blocked(seq: Long, role: String, callId: String, text: String = "", toolName: String = "") =
+        ChatMessage(
+            id = "s:$seq", sessionId = "s", seq = seq, role = role, text = text,
+            createdAt = seq * 1000, toolName = toolName,
+            block = """{"id":"$callId","type":"tool","state":"done","name":"$toolName"}""",
+        )
+
+    @Test fun resultsPairByCallIdNotPosition() {
+        // Two calls of the same tool ran side by side and answered out of
+        // order. Only the id says which output belongs to which command.
+        val merged = mergeToolPairs(listOf(
+            blocked(1, "tool_call", "c1", toolName = "bash", text = ""),
+            blocked(2, "tool_call", "c2", toolName = "bash", text = ""),
+            blocked(3, "tool_result", "c2", text = "second", toolName = "bash"),
+            blocked(4, "tool_result", "c1", text = "first", toolName = "bash"),
+        ))
+        assertEquals(2, merged.size)
+        assertEquals("first", merged[0].text)
+        assertEquals("second", merged[1].text)
+    }
+
+    @Test fun resultWithoutItsCallOnThePagePassesThrough() {
+        // The call sits above the loaded page; pairing it positionally to the
+        // only waiting call would glue two different steps together.
+        val merged = mergeToolPairs(listOf(
+            blocked(1, "tool_call", "c1", toolName = "bash"),
+            blocked(2, "tool_result", "c9", text = "orphan", toolName = "bash"),
+        ))
+        assertEquals(2, merged.size)
+        assertEquals("tool_call", merged[0].role)
+        assertEquals("tool_result", merged[1].role)
+    }
 }

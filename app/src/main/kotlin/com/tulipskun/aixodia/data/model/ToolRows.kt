@@ -64,28 +64,34 @@ fun humanToolArgs(rawArgs: String): String {
  */
 fun mergeToolPairs(messages: List<ChatMessage>): List<ChatMessage> {
     if (messages.isEmpty()) return messages
-    // Rows arrive parsed (raw call ids are gone), so pairing is positional:
-    // each result answers the earliest call still waiting. That keeps
-    // parallel calls paired correctly, while a result with no waiting call
-    // (its call sits outside the page) passes through untouched.
+    // Where the engine stored a block, its id is the call id both sides carry,
+    // so each result names the exact call it answers — the only safe pairing
+    // once a tool ran several times in one round. Rows without blocks (an
+    // older engine) fall back to position: each result answers the earliest
+    // call still waiting. A result whose call sits outside the loaded page
+    // passes through untouched either way.
+    data class Waiting(val index: Int, val id: String)
     val out = ArrayList<ChatMessage>(messages.size)
-    val waiting = ArrayList<Int>()
+    val waiting = ArrayList<Waiting>()
     for (m in messages) {
         when {
             m.role == "tool_call" -> {
                 out += m
-                waiting += out.lastIndex
+                waiting += Waiting(out.lastIndex, blockCallId(m.block))
             }
             m.role == "tool_result" -> {
-                val idx = waiting.removeFirstOrNull()
-                if (idx != null) {
-                    val call = out[idx]
+                val id = blockCallId(m.block)
+                val w = waiting.firstOrNull { it.id.isNotBlank() && it.id == id }
+                    ?: waiting.firstOrNull { it.id.isBlank() }
+                if (w != null) {
+                    waiting.remove(w)
+                    val call = out[w.index]
                     // Mid-round prose travels on the first call row; keep it
                     // above the output instead of dropping either side. The
                     // result text itself is never touched.
                     val prose = call.text.trim()
                     val body = if (prose.isNotEmpty()) prose + "\n\n" + m.text else m.text
-                    out[idx] = m.copy(
+                    out[w.index] = m.copy(
                         toolName = call.toolName.ifBlank { m.toolName },
                         toolArgs = call.toolArgs,
                         text = body,
@@ -105,3 +111,7 @@ fun mergeToolPairs(messages: List<ChatMessage>): List<ChatMessage> {
     }
     return out
 }
+
+/** The call id a stored row's block carries; "" for rows that predate blocks. */
+private fun blockCallId(raw: String): String =
+    if (raw.isBlank()) "" else runCatching { org.json.JSONObject(raw).optString("id") }.getOrDefault("")
