@@ -153,7 +153,11 @@ routing through the opencode CLI
             52-column screen), aCarriedSpaceIsNotDoubled and
             aListItemStartsANewLine; the two cases pinning the old margin rule
             were replaced. :app:testDebugUnitTest BUILD SUCCESSFUL, 225 tests,
-            Paparazzi included.
+            Paparazzi included. Shipped 258e2a5, scripts/release.sh cut the
+            rolling `latest` at 10:32:10Z (versionName 1.0.202610281032,
+            versionCode 1793183530, APK 20,802,664 bytes,
+            md5 39b15ef997949372993291f7f88b22ee, signature CN=AIxodia,
+            AIxodia-version.json commit == HEAD).
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
