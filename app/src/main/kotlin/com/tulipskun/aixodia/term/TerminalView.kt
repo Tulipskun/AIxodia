@@ -290,7 +290,7 @@ class TerminalView @JvmOverloads constructor(
      */
     private fun maxScrollPx(): Float {
         val em = emulator ?: return 0f
-        if (em.mouseReporting() || em.alternateScreen || em.fullScreenDetected) return 0f
+        if (em.mouseReporting() || em.alternateScreen) return 0f
         return em.buffer.scrollback.size * cellHeight
     }
 
@@ -946,9 +946,14 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val em = emulator ?: return false
-        // When the program wants the mouse — or is on the alternate screen, as
-        // full-screen apps are — a drag is a wheel, not a scroll of our history.
-        val wheelMode = em.mouseReporting() || em.alternateScreen || em.fullScreenDetected
+        // A drag moves the page unless the program has taken the viewport for
+        // itself: an explicit mouse mode, or the alternate screen, which has no
+        // history of ours to show anyway. The full-screen *guess* deliberately
+        // does not count — it is set by any program that parks the cursor a few
+        // times and is never cleared while an inline TUI runs, so trusting it
+        // here left a plain prompt unable to scroll for the rest of the session.
+        val panMode = !em.mouseReporting() && !em.alternateScreen
+        val wheelMode = !panMode
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 removeCallbacks(longPress)
@@ -1025,6 +1030,9 @@ class TerminalView @JvmOverloads constructor(
                     removeCallbacks(longPress)
                 }
                 lastTouchY = event.y
+                // A locked vertical drag belongs to the terminal: an ancestor
+                // that also watches drags (the drawer) must not take over.
+                if (verticalDrag) parent?.requestDisallowInterceptTouchEvent(true)
                 if (wheelMode && verticalDrag) {
                     wheelAccum += dy
                     dispatchWheel(em, event)
@@ -1056,17 +1064,14 @@ class TerminalView @JvmOverloads constructor(
                     return true
                 }
                 val quick = event.eventTime - downTime < 200
-                if (wheelMode) {
-                    // A tap is a click. A drag has already gone out as wheel
-                    // notches, so it must not also fire a click.
-                    // On the alternate screen with no mouse mode the program
-                    // deliberately did not ask for clicks; only the mid-stream
-                    // case is a guess.
-                    val guessedMouse = em.fullScreenDetected && !em.alternateScreen
-                    if (!dragging && quick && (em.mouseReporting() || guessedMouse)) {
-                        sendMouse(em, event, button = 0, release = false)
-                        sendMouse(em, event, button = 0, release = true)
-                    }
+                // A tap is a click. A drag has already gone out as wheel
+                // notches, so it must not also fire a click. On the alternate
+                // screen with no mouse mode the program deliberately did not ask
+                // for clicks; only the mid-stream case is a guess.
+                val guessedMouse = em.fullScreenDetected && !em.alternateScreen
+                if (!dragging && quick && (em.mouseReporting() || guessedMouse)) {
+                    sendMouse(em, event, button = 0, release = false)
+                    sendMouse(em, event, button = 0, release = true)
                 }
                 if (quick) {
                     // Full-screen programs (opencode) are exactly where typing
@@ -1137,12 +1142,6 @@ class TerminalView @JvmOverloads constructor(
             // is that the wheel arrives as an arrow key.
             val bytes = if (button == 65) "\u001b[B" else "\u001b[A"
             inputSink?.invoke(bytes.toByteArray(Charsets.US_ASCII))
-        } else if (em.fullScreenDetected) {
-            // The session was attached mid-stream and the mouse mode was in the
-            // part of the output the engine no longer had. Modern full-screen
-            // programs (opencode, the TUIs this terminal exists for) speak SGR,
-            // and one that never wanted the mouse ignores it.
-            inputSink?.invoke(em.wheelReport(button, col, row))
         }
     }
 

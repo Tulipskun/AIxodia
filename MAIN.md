@@ -37,6 +37,23 @@ routing through the opencode CLI
             signature CN=AIxodia, AIxodia-version.json commit == HEAD).
             History can be read but not copied: selection still addresses the
             live screen's rows, painted at the pan offset.
+[IN_PROCESS] terminal: scrolling STILL dead in the operator's hands after
+            1793174740, so the first round was wrong on device even though the
+            pan math was right. Cause: every drag decision was gated on
+            `fullScreenDetected`, a guess set by any program that parks the
+            cursor three times (AbsoluteCsiCount >= 3 in TerminalEmulator) and
+            cleared only by an alternate-screen exit or a reset — so after one
+            inline TUI (opencode) a plain prompt stayed frozen for the rest of
+            the session, and the drag went out as SGR wheel bytes nobody read.
+            Fix: panMode = !mouseReporting() && !alternateScreen; the guess no
+            longer gates the page and survives only as the tap->click guess; the
+            now-unreachable SGR wheel branch is gone; once a vertical drag locks
+            the view calls parent.requestDisallowInterceptTouchEvent so no
+            ancestor can steal it. New TerminalScrollTest moves a real finger
+            (MotionEvent) over a laid-out view: 7 tests, 0 failures, covering
+            drag up, drag back to the prompt, the top of the history, typing,
+            a mouse program getting the wheel, the guess not freezing a prompt,
+            and a tap still clicking for a guessed program.
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
