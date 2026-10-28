@@ -1,6 +1,7 @@
 package com.tulipskun.aixodia.ui.chat
 
 import com.tulipskun.aixodia.data.model.ChatMessage
+import com.tulipskun.aixodia.data.repo.MessageWindow
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -37,5 +38,32 @@ class ThreadRowsTest {
         // The first turn of a chat: the thread was empty when it was sent.
         val rows = listOf(row(1, "user"), row(2, "tool_call", "read"))
         assertEquals(listOf(rows[0]), threadRows(rows, 0L))
+    }
+
+    @Test fun anotherChatsRowsNeverPaintUnderThisHeader() {
+        // A switch changes the chat before the new chat's Room read has
+        // emitted, so the flow still holds the chat being left. Its rows are
+        // not this chat's history.
+        val rows = listOf(row(1, "user"), row(2, "model"))
+        assertEquals(emptyList<ChatMessage>(), threadRows(rows, -1L, sid = "other"))
+    }
+
+    @Test fun theSwitchFilterKeepsThisChatWhole() {
+        val rows = listOf(row(1, "user"), row(2, "model"), row(3, "model"))
+        assertEquals(rows, threadRows(rows, -1L, sid = "s"))
+        // It composes with the in-flight turn rule rather than replacing it.
+        assertEquals(listOf(rows[0]), threadRows(rows, 0L, sid = "s"))
+    }
+
+    @Test fun theWindowFloorIsTheOldestCachedRow() {
+        val rows = listOf(row(7, "user"), row(8, "model"))
+        assertEquals(7L, windowFloorFor(MessageWindow(rows, hasOlder = true)))
+    }
+
+    @Test fun anEmptyOrUnreadCacheKeepsTheWindowOpen() {
+        // A chat with no rows yet must still map the first send's row, so the
+        // window opens below every seq instead of closing.
+        assertEquals(Long.MIN_VALUE, windowFloorFor(MessageWindow(emptyList(), hasOlder = false)))
+        assertEquals(Long.MIN_VALUE, windowFloorFor(null))
     }
 }
