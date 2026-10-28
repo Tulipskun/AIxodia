@@ -129,7 +129,11 @@ routing through the opencode CLI
             break, the second is followed by an indented line and joins), and
             aLongestLineIsNotAWrapColumn plus alignedRowsAreNotAWrapColumn
             pin the two new guards. :app:testDebugUnitTest BUILD SUCCESSFUL,
-            224 tests, Paparazzi included.
+            224 tests, Paparazzi included. Shipped 5067f40, scripts/release.sh
+            cut the rolling `latest` at 09:56:19Z (versionName
+            1.0.202610280956, versionCode 1793181379, APK 20,802,668 bytes,
+            md5 85e4cec6b2df7c49aa7cbe1b4368536b, signature CN=AIxodia,
+            AIxodia-version.json commit == HEAD).
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer
