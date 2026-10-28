@@ -8,14 +8,6 @@ package com.tulipskun.aixodia.term
  */
 internal object TerminalSelection {
 
-    /**
-     * How close to the right edge a row must end before it may be taken as
-     * continuing into the next one. A soft-wrapped row is known to the
-     * emulator, but a full-screen program wraps its own text and draws every
-     * row separately; there the edge is the only evidence a line went on.
-     */
-    private const val CONTINUES_SLACK = 8
-
     fun firstTextCol(row: TerminalRow): Int {
         for (col in 0 until row.columns) if (row.hasGlyph(col)) return col
         return -1
@@ -35,10 +27,13 @@ internal object TerminalSelection {
      * A row that continues the one above joins it without a break. That is a
      * soft wrap the emulator saw — such a row keeps its full width, because its
      * last cell is real text, often the space a word was broken at — or a row
-     * a full-screen program wrapped itself: one that runs to the right edge and
-     * is followed by an indented line. The program's left padding is layout,
-     * not text, so it is dropped from those continuations; the first selected
-     * row tells how wide it is.
+     * a full-screen program wrapped itself. The program leaves no mark: its
+     * rows are hard breaks carrying the block's left padding. The right margin
+     * is read from the block itself — the column where at least two of its
+     * lines end, in a block that also ends in a shorter line — and a row
+     * ending there joins an indented row below. The padding is layout, not
+     * text, so it is dropped from those continuations; the first selected row
+     * tells how wide it is.
      */
     fun text(
         buffer: TerminalBuffer,
@@ -73,26 +68,42 @@ internal object TerminalSelection {
         // Does row r run on into r+1?
         val continues = BooleanArray(last - first + 1)
         for (r in first until last) {
-            val row = buffer.lines[r]
-            if (row.columns == 0) continue
-            if (row.wrapped) {
-                continues[r - first] = true
-                continue
+            if (buffer.lines[r].wrapped) continues[r - first] = true
+        }
+        // A program-wrapped row is only believed when the block is padded:
+        // full-bleed output is more likely a table or a long command line than
+        // a paragraph.
+        if (pad > 0) {
+            // Where the block's text area stops, read from the rows: a column
+            // where at least two of its lines end. One line ending there proves
+            // nothing — a heading is often the longest line of its block — and
+            // a block whose every line reaches the same column is aligned
+            // content, a table, not prose. So the margin only counts when some
+            // line ends short of it, the ragged last line of a paragraph.
+            val ends = HashMap<Int, Int>()
+            for (r in first..last) {
+                val row = buffer.lines[r]
+                if (row.columns == 0 || row.lastWritten < 0) continue
+                if (firstTextCol(row) < pad) continue
+                ends[row.lastWritten] = (ends[row.lastWritten] ?: 0) + 1
             }
-            // A program-wrapped row is only believed when the block is padded:
-            // full-bleed output that happens to reach the edge is more likely to
-            // be a table or a long command line than a paragraph.
-            if (pad == 0) continue
-            // A full line of the block ends one padding short of the edge, so
-            // the padding bounds how far from it the cut can fall.
-            val slack = maxOf(CONTINUES_SLACK, pad)
-            if (row.lastWritten < row.columns - 1 - slack) continue
-            val next = buffer.lines[r + 1]
-            if (next.columns == 0 || next.lastWritten < 0) continue
-            val end = endOf(r + 1)
-            var lead = 0
-            while (lead <= end && next.chars[lead] == TerminalRow.SPACE) lead++
-            if (lead in 1..end) continues[r - first] = true
+            var margin = -1
+            for ((end, count) in ends) if (count >= 2 && end > margin) margin = end
+            if (ends.keys.none { it < margin }) margin = -1
+            if (margin >= 0) {
+                for (r in first until last) {
+                    val row = buffer.lines[r]
+                    if (row.columns == 0 || row.wrapped) continue
+                    // The program cuts a line where its text area stops; one
+                    // that stops anywhere else ended by itself.
+                    if (row.lastWritten != margin) continue
+                    val next = buffer.lines[r + 1]
+                    if (next.columns == 0) continue
+                    val lead = firstTextCol(next)
+                    if (lead < pad || lead > endOf(r + 1)) continue
+                    continues[r - first] = true
+                }
+            }
         }
 
         val sb = StringBuilder()

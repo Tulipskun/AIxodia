@@ -113,6 +113,23 @@ routing through the opencode CLI
             1793179530, APK 20,802,664 bytes, md5
             ce4b1ec96db1a75f242cf567c315d061, signature CN=AIxodia,
             AIxodia-version.json commit == HEAD).
+[COMPLETED] terminal: the copy reflow no longer guesses with a fixed
+            eight-column allowance. The block's right margin is read from the
+            rows themselves: the column where at least two of its lines end —
+            one line ending there proves nothing, a heading is often the
+            longest line of its block. It only counts when some line ends
+            short of it (the ragged last line of a paragraph), so a block
+            whose every line reaches the same column — a table, an aligned
+            list — is not treated as prose. A row ending exactly at the
+            learned margin joins an indented row below; a soft-wrapped row is
+            untouched and a block with no left padding is never reflowed. The
+            operator's Thai paragraph still copies as one line. The old
+            edge-case test was re-aimed at the learned margin (two rows end at
+            19, the first cut is followed by column-0 text and keeps its
+            break, the second is followed by an indented line and joins), and
+            aLongestLineIsNotAWrapColumn plus alignedRowsAreNotAWrapColumn
+            pin the two new guards. :app:testDebugUnitTest BUILD SUCCESSFUL,
+            224 tests, Paparazzi included.
 
 PLAN:
 [COMPLETED] TerminalSocket.open() waits for the engine's /v1/terminals answer

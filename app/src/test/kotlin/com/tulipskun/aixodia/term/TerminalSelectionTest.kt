@@ -84,14 +84,50 @@ class TerminalSelectionTest {
         )
     }
 
+    /**
+     * Two rows end at column 19, so that is the block's margin, and a shorter
+     * line ends below it. The first cut row is followed by text at column 0:
+     * not a line of the block, so the break stays. The second cut row is
+     * followed by an indented line, which does join.
+     */
     @Test
-    fun aRowAtTheEdgeIsNotJoinedToAnUnindentedOne() {
-        val buffer = buffer(2, cols = 64)
-        buffer.put(0, 0, "   " + "y".repeat(61))
+    fun aRowAtTheMarginIsNotJoinedToAnUnindentedOne() {
+        val buffer = buffer(4, cols = 20)
+        buffer.put(0, 0, "  " + "y".repeat(18))
         buffer.put(1, 0, "next")
+        buffer.put(2, 0, "  " + "z".repeat(18))
+        buffer.put(3, 0, "   tail")
 
         assertEquals(
-            "y".repeat(61) + "\nnext",
+            "y".repeat(18) + "\nnext\n  " + "z".repeat(18) + " tail",
+            TerminalSelection.text(buffer, 0, 2, 3, buffer.columns - 1),
+        )
+    }
+
+    @Test
+    fun aLongestLineIsNotAWrapColumn() {
+        val buffer = buffer(2, cols = 64)
+        buffer.put(0, 0, "   the longest line here")
+        buffer.put(1, 0, "   body")
+
+        assertEquals(
+            "the longest line here\n   body",
+            TerminalSelection.text(buffer, 0, 3, 1, buffer.columns - 1),
+        )
+    }
+
+    /**
+     * Every line ending at the same column, with none shorter, is a table or
+     * a column-aligned list; prose always ends in a ragged line.
+     */
+    @Test
+    fun alignedRowsAreNotAWrapColumn() {
+        val buffer = buffer(2, cols = 64)
+        buffer.put(0, 0, "   one  x")
+        buffer.put(1, 0, "   two  y")
+
+        assertEquals(
+            "one  x\n   two  y",
             TerminalSelection.text(buffer, 0, 3, 1, buffer.columns - 1),
         )
     }
