@@ -58,9 +58,8 @@ credential too.
 
 One credential, three paths:
 
-- **Run SSE** — `RunSocket` POSTs a turn, reads numbered events, reconnects with
-  `Last-Event-ID`, and answers approval requests. The agent runs on the engine,
-  not in the app.
+- **Run SSE** — `RunSocket` POSTs a turn, reads numbered events, and reconnects with
+  `Last-Event-ID`. The agent runs on the engine, not in the app.
 - **HTTP over the tunnel** — history paging, session create/rename/delete, the
   provider catalogue, provider health, per-chat model pins, run control and
   terminal tickets (`HistoryApi`).

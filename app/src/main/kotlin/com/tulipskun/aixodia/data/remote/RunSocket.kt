@@ -6,7 +6,6 @@ import android.util.Log
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.AttachmentRef
-import com.tulipskun.aixodia.data.model.Block
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,9 +54,6 @@ class RunSocket(
 
     private val _frames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 256)
     override val frames: SharedFlow<AiOutput> = _frames.asSharedFlow()
-
-    private val _approval = MutableStateFlow<ApprovalRequest?>(null)
-    override val approval: StateFlow<ApprovalRequest?> = _approval.asStateFlow()
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -126,7 +122,6 @@ class RunSocket(
         runSession = ""
         lastSeq = 0
         terminal = false
-        _approval.value = null
     }
 
     override fun cancel(sessionId: String): Boolean {
@@ -192,38 +187,6 @@ class RunSocket(
         attachments: List<AttachmentRef>,
     ): Boolean {
         start(sessionId, text, clientMsgId, retry = false, attachments = attachments)
-        return true
-    }
-
-    override fun approve(runId: String, callId: String, allow: Boolean, reason: String): Boolean {
-        val current = _approval.value
-        if (current == null || current.runId != runId || current.callId != callId) return false
-        _approval.value = null
-        scope.launch {
-            val cfg = config() ?: return@launch
-            runCatching {
-                val body = JSONObject()
-                    .put("call_id", callId)
-                    .put("decision", if (allow) "approve" else "deny")
-                    .put("reason", reason)
-                    .toString()
-                val req = Request.Builder()
-                    .url("${cfg.base}/v1/runs/$runId/approve")
-                    .header("Authorization", "Bearer ${cfg.token}")
-                    .header("Content-Type", "application/json")
-                    .post(body.toRequestBody(JSON))
-                    .build()
-                http.newCall(req).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        _approval.value = current
-                        emitError(current.sessionId, "approval failed: HTTP ${response.code}")
-                    }
-                }
-            }.onFailure {
-                _approval.value = current
-                emitError(current.sessionId, "approval failed: ${it.message}")
-            }
-        }
         return true
     }
 
@@ -462,46 +425,11 @@ class RunSocket(
         if (seq > lastSeq) lastSeq = seq
         val kind = env.optString("kind").ifBlank { event }
         val data = env.opt("data")
-        if (kind == "approval") {
-            handleApproval(run, data)
-            return
-        }
         if (kind == "user") return
         val frame = RunFrames.map(kind, data, frameSession()) ?: return
         emit(frame)
         if (kind == "status" && RunFrames.terminal((data as? JSONObject)?.optString("status").orEmpty())) {
             clearRun()
-        }
-    }
-
-    private fun handleApproval(run: String, data: Any?) {
-        val obj = data as? JSONObject ?: return
-        if (obj.optString("status") == "waiting") {
-            val callId = obj.optString("call_id")
-            _approval.value = ApprovalRequest(
-                runId = run,
-                sessionId = frameSession(),
-                callId = callId,
-                name = obj.optString("name"),
-                arguments = obj.optString("arguments"),
-            )
-            emit(
-                AiOutput(
-                    sessionId = frameSession(),
-                    kind = "trace",
-                    stage = "approval",
-                    block = Block(
-                        id = "approval:$callId",
-                        type = Block.STATUS,
-                        state = "waiting",
-                        text = "Waiting for approval: ${obj.optString("name")}",
-                        name = obj.optString("name"),
-                        args = obj.optString("arguments"),
-                    ),
-                )
-            )
-        } else {
-            _approval.value = null
         }
     }
 
@@ -558,7 +486,7 @@ class RunSocket(
         } catch (e: Exception) {
             return
         }
-        if (status == "running" || status == "waiting_approval") {
+        if (status == "running") {
             runId = id
             runSession = sessionId
             lastSeq = 0
@@ -577,7 +505,6 @@ class RunSocket(
     private fun clearRun() {
         terminal = true
         runId = null
-        _approval.value = null
         forget(runSession.ifBlank { session })
         // The daemon removes a finished run from its active set just after the
         // terminal event. A short pause avoids racing that cleanup with the

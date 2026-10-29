@@ -20,9 +20,6 @@ interface ChatTransport {
     val lastError: StateFlow<Int>
     val frames: SharedFlow<AiOutput>
 
-    /** The tool call waiting for a human decision, if any. */
-    val approval: StateFlow<ApprovalRequest?>
-
     fun open(sessionId: String, fromSeq: Long)
     fun switchSession(sessionId: String)
     fun cancel(sessionId: String): Boolean
@@ -35,16 +32,4 @@ interface ChatTransport {
         clientMsgId: String,
         attachments: List<AttachmentRef> = emptyList(),
     ): Boolean
-
-    /** Answers the pending call. False means it was already answered or gone. */
-    fun approve(runId: String, callId: String, allow: Boolean, reason: String = ""): Boolean
 }
-
-/** One mutating tool waiting for the user. */
-data class ApprovalRequest(
-    val runId: String,
-    val sessionId: String,
-    val callId: String,
-    val name: String,
-    val arguments: String,
-)

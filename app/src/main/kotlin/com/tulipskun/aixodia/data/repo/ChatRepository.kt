@@ -13,7 +13,6 @@ import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.ChatSession
-import com.tulipskun.aixodia.data.remote.ApprovalRequest
 import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.HistoryApi
@@ -49,7 +48,6 @@ class ChatRepository(
     val connState: StateFlow<ConnState> = socket.state
     /** A string resource id (0 = nothing wrong). */
     val socketError: StateFlow<Int> = socket.lastError
-    val approval: StateFlow<ApprovalRequest?> = socket.approval
     // UI sees the closing frame only after its authoritative rows reach Room.
     private val processedFrames = MutableSharedFlow<AiOutput>(extraBufferCapacity = 64)
     val liveFrames = processedFrames.asSharedFlow()
@@ -861,9 +859,6 @@ class ChatRepository(
         block = block,
         )
     }
-
-    fun approve(runId: String, callId: String, allow: Boolean, reason: String = ""): Boolean =
-        socket.approve(runId, callId, allow, reason)
 
     fun close() = socket.close()
 

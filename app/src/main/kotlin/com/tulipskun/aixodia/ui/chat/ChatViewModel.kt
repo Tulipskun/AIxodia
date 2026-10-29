@@ -13,7 +13,6 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.model.ToolStep
 import com.tulipskun.aixodia.data.model.humanToolArgs
-import com.tulipskun.aixodia.data.remote.ApprovalRequest
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.repo.CHAT_PAGE
 import com.tulipskun.aixodia.data.repo.ChatRepository
@@ -295,7 +294,6 @@ class ChatViewModel(
 
     /** Why the socket is down, straight from the daemon's HTTP answer. */
     val socketError = repo.socketError
-    val approval = repo.approval
 
     /**
      * The footer's field list for the provider in use. Switched on the endpoint
@@ -1042,11 +1040,6 @@ class ChatViewModel(
             "provider_ready" -> traceNote("Provider accepted, processing")
             else -> traceNote(f.text.ifEmpty { f.stage })
         }
-    }
-
-    /** Answers the run's pending mutating tool. */
-    fun approve(runId: String, callId: String, allow: Boolean, reason: String = "") {
-        repo.approve(runId, callId, allow, reason)
     }
 
     private fun onTurnDone(frame: AiOutput) {

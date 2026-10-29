@@ -281,7 +281,6 @@ fun ChatScreen(
     val conn by vm.conn.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
     var showOfflineCard by remember { mutableStateOf(false) }
     val socketErr by vm.socketError.collectAsStateWithLifecycle(initialValue = 0)
-    val approval by vm.approval.collectAsStateWithLifecycle(initialValue = null)
     val status by vm.status.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -559,29 +558,6 @@ fun ChatScreen(
             onDismiss = { renameTarget = null },
         )
     }
-    approval?.let { pending ->
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("Approve ${pending.name}?") },
-            text = {
-                Text(
-                    pending.arguments.take(1200).ifBlank { "The agent wants to run this tool." },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.approve(pending.runId, pending.callId, true)
-                }) { Text("Allow") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    vm.approve(pending.runId, pending.callId, false, "denied in app")
-                }) { Text("Deny") }
-            },
-        )
-    }
-
     if (showPushNowDialog) {
         AlertDialog(
             onDismissRequest = { if (!pushNowBusy) showPushNowDialog = false },
