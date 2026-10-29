@@ -128,12 +128,18 @@ without approval; the daemon owns no credential of its own.
 
 ## Releasing
 
-There is no CI. `scripts/release.sh` builds here — a cold build is minutes and
-a warm one seconds — and publishes the APK it just signed and verified:
+Every push to `main` runs `.github/workflows/release.yml`, which runs
+`scripts/release.sh` on a GitHub runner (it can also be started by hand from
+the Actions tab or with `gh workflow run "Release APK"`). The same script works
+on a machine with an Android SDK, where a cold build is minutes and a warm one
+seconds:
 
     scripts/release.sh
 
-It refuses a dirty tree, pushes the current branch (the release is created
+In CI the key comes from the `AIXODIA_KEYSTORE_B64` repository secret
+(`base64 -w0 app/aixodia-debug.keystore | gh secret set AIXODIA_KEYSTORE_B64`);
+without it the job fails instead of signing with another key. Locally the
+script refuses a dirty tree, pushes the current branch (the release is created
 against that commit), signs with the stable key (`app/aixodia-debug.keystore`),
 checks the signature really is that key, and updates the single rolling
 `latest` GitHub Release. The tag never changes; the APK and

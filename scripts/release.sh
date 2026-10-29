@@ -18,6 +18,13 @@
 #
 #   scripts/release.sh
 #
+# The same script runs in GitHub Actions (.github/workflows/release.yml). There
+# the runner provides the SDK, JDK and an authenticated gh (GH_TOKEN), the key
+# comes from the AIXODIA_KEYSTORE_B64 repository secret instead of
+# Tulipskun/aixodia-keys, the checkout is already the commit being released so
+# nothing is pushed, and the project's ./gradlew is used so the Gradle version
+# is the one the project pins.
+#
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -36,7 +43,9 @@ if ! command -v gradle >/dev/null 2>&1; then
     if [ -x "$g/gradle" ]; then export PATH="$g:$PATH"; break; fi
   done
 fi
-if command -v gradle >/dev/null 2>&1; then
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ -x ./gradlew ]; then
+  GRADLE=./gradlew
+elif command -v gradle >/dev/null 2>&1; then
   GRADLE=gradle
 elif [ -x ./gradlew ]; then
   GRADLE=./gradlew
@@ -55,12 +64,23 @@ command -v gh >/dev/null 2>&1 || { echo "error: gh is not on PATH" >&2; exit 1; 
 
 KEYSTORE="app/aixodia-debug.keystore"
 if [ ! -f "$KEYSTORE" ]; then
-  # The stable key is not in this repo (it is gitignored here); it lives in the
-  # private Tulipskun/aixodia-keys repo. Fetch it there so a release machine can
-  # go straight from clone to build instead of someone copying the file by hand.
-  echo "no $KEYSTORE found; fetching the stable key from Tulipskun/aixodia-keys"
-  gh api "repos/Tulipskun/aixodia-keys/contents/aixodia-debug.keystore" --jq .content \
-    | base64 -d > "$KEYSTORE"
+  # The stable key is not in this repo (it is gitignored here).
+  if [ -n "${AIXODIA_KEYSTORE_B64:-}" ]; then
+    # CI: the key arrives as a repository secret.
+    echo "writing $KEYSTORE from AIXODIA_KEYSTORE_B64"
+    printf '%s' "$AIXODIA_KEYSTORE_B64" | base64 -d > "$KEYSTORE"
+  elif [ -n "${GITHUB_ACTIONS:-}" ]; then
+    echo "error: the AIXODIA_KEYSTORE_B64 repository secret is not set; refusing to sign with another key" >&2
+    echo "       set it with: base64 -w0 app/aixodia-debug.keystore | gh secret set AIXODIA_KEYSTORE_B64" >&2
+    exit 1
+  else
+    # A release machine: it lives in the private Tulipskun/aixodia-keys repo.
+    # Fetch it there so a release machine can go straight from clone to build
+    # instead of someone copying the file by hand.
+    echo "no $KEYSTORE found; fetching the stable key from Tulipskun/aixodia-keys"
+    gh api "repos/Tulipskun/aixodia-keys/contents/aixodia-debug.keystore" --jq .content \
+      | base64 -d > "$KEYSTORE"
+  fi
   got=$(md5sum "$KEYSTORE" | cut -d' ' -f1)
   if [ "$got" != "30b3cd5702f8bac4139efeb414cd20c8" ]; then
     rm -f "$KEYSTORE"
@@ -83,18 +103,23 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-branch=$(git rev-parse --abbrev-ref HEAD)
-if [ "$branch" = "HEAD" ]; then
-  echo "error: HEAD is detached; check out a branch before releasing" >&2
-  exit 1
-fi
-if [ "$branch" != "main" ]; then
-  echo "warning: releasing from '$branch', not main" >&2
-fi
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  # The runner checked out a commit that is already on the remote.
+  echo "releasing $(git rev-parse --short HEAD) from CI"
+else
+  branch=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$branch" = "HEAD" ]; then
+    echo "error: HEAD is detached; check out a branch before releasing" >&2
+    exit 1
+  fi
+  if [ "$branch" != "main" ]; then
+    echo "warning: releasing from '$branch', not main" >&2
+  fi
 
-# The release is created against this commit, so it has to exist on the remote.
-echo "pushing $branch"
-git push origin "HEAD:refs/heads/$branch"
+  # The release is created against this commit, so it has to exist on the remote.
+  echo "pushing $branch"
+  git push origin "HEAD:refs/heads/$branch"
+fi
 
 # One rolling release, like the engine's engine-latest: the tag never changes,
 # the asset is replaced in place. The version code still moves forward on every
