@@ -66,7 +66,7 @@ private val RE_RULE = Regex("^\\s*([-*_])\\s*(\\1\\s*){2,}$")
 private val RE_BULLET = Regex("^\\s*[-*+]\\s+(.*)$")
 private val RE_ORDERED = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
 private val RE_QUOTE = Regex("^\\s*>\\s?(.*)$")
-private val RE_FENCE = Regex("^\\s*(?:```|~~~)\\s*(\\S*)")
+private val RE_FENCE = Regex("^ {0,3}(`{3,}|~{3,})(.*)$")
 
 /**
  * Splits an answer into blocks. A fence that is still open at the end of the text
@@ -74,7 +74,7 @@ private val RE_FENCE = Regex("^\\s*(?:```|~~~)\\s*(\\S*)")
  * so the tests drive it directly instead of rendering a screen.
  */
 internal fun blocks(text: String): List<Block> {
-    val lines = text.split('\n')
+    val lines = text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
     val out = ArrayList<Block>()
     var i = 0
     val paragraph = StringBuilder()
@@ -111,26 +111,31 @@ internal fun blocks(text: String): List<Block> {
     }
 
     while (i < lines.size) {
-        val line = lines[i].replace('\r', ' ')
-        val fence = RE_FENCE.find(line)
+        val line = lines[i]
+        val fence = RE_FENCE.matchEntire(line)?.takeIf {
+            // Backtick fences cannot contain backticks in their info string.
+            // A literal inline run must stay prose, not disappear as a fence.
+            it.groupValues[1].first() != '`' || !it.groupValues[2].contains('`')
+        }
         if (fence != null) {
             flushAll()
-            val language = fence.groupValues[1]
-            val body = StringBuilder()
+            val marker = fence.groupValues[1]
+            val language = fence.groupValues[2].trim().takeWhile { !it.isWhitespace() }
+            val body = ArrayList<String>()
             i++
-            var closed = false
             while (i < lines.size) {
-                val next = lines[i].replace('\r', ' ')
-                if (RE_FENCE.matches(next) && next.trimStart().startsWith(fence.value.trimStart().take(2))) {
-                    closed = true
+                val next = lines[i]
+                val closing = RE_FENCE.matchEntire(next)
+                if (closing != null && closing.groupValues[1].first() == marker.first() &&
+                    closing.groupValues[1].length >= marker.length && closing.groupValues[2].isBlank()
+                ) {
                     i++
                     break
                 }
-                if (body.isNotEmpty()) body.append('\n')
-                body.append(next)
+                body.add(next)
                 i++
             }
-            out.add(Block.Code(body.toString().trimEnd('\n'), language))
+            out.add(Block.Code(body.joinToString("\n"), language))
             continue
         }
         if (line.isBlank()) {
@@ -154,10 +159,6 @@ internal fun blocks(text: String): List<Block> {
         if (heading != null) {
             flushAll()
             out.add(Block.Heading(heading.groupValues[1].length, heading.groupValues[2]))
-            i++
-            continue
-        }
-        if (line.startsWith("```") || line.startsWith("~~~")) {
             i++
             continue
         }
@@ -206,7 +207,7 @@ internal fun blocks(text: String): List<Block> {
             val rows = mutableListOf<String>()
             var scanned = i + 1
             while (scanned < lines.size) {
-                val next = lines[scanned].replace('\r', ' ')
+                val next = lines[scanned]
                 if (next.isBlank() || !next.contains('|') || isTableDivider(next)) break
                 rows.add(next)
                 scanned++
@@ -254,10 +255,27 @@ private fun isTableDivider(line: String): Boolean {
 
 private val RE_CELL_ALIGN = Regex("^:?-{1,}:?$")
 
-/** Splits a row on pipes, ignoring the empty cells an outer pipe leaves. */
+/** Only unescaped pipes split cells or count as an outer table border. */
 private fun splitTableRow(row: String): List<String> {
-    val trimmed = row.trim().removePrefix("|").removeSuffix("|")
-    return trimmed.split('|').map { it.trim() }
+    val trimmed = row.trim()
+    val cells = ArrayList<String>()
+    val cell = StringBuilder()
+    var backslashes = 0
+    var endsWithSeparator = false
+    for (char in trimmed) {
+        endsWithSeparator = char == '|' && backslashes % 2 == 0
+        if (endsWithSeparator) {
+            cells.add(cell.toString().trim())
+            cell.setLength(0)
+        } else {
+            cell.append(char)
+        }
+        backslashes = if (char == '\\') backslashes + 1 else 0
+    }
+    cells.add(cell.toString().trim())
+    if (trimmed.startsWith('|')) cells.removeAt(0)
+    if (endsWithSeparator && cells.isNotEmpty()) cells.removeAt(cells.lastIndex)
+    return cells
 }
 
 /** The `| :-- | :-: | --: |` row carries the per-column alignment. */
@@ -532,14 +550,14 @@ private fun TableBlock(
         // column is unreadable.
         (longest.coerceAtLeast(4).coerceAtMost(28) * 8).dp
     }
-    // Dp is a value class over Float with no Sum, so the total is folded by hand.
-    val natural = widths.fold(cellGap) { acc, w -> acc + w }
+    val sidePadding = 10.dp
+    val natural = tableNaturalWidth(widths, cellGap, sidePadding)
     BoxWithConstraints(if (fillWidth) Modifier.fillMaxWidth() else Modifier) {
         val available = maxWidth
         val scroll = natural > available
-        Column(
+        Box(
             Modifier
-                .width(natural)
+                .width(minOf(natural, available))
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
                 // Sideways only, and only when the table genuinely cannot fit:
@@ -547,33 +565,44 @@ private fun TableBlock(
                 // nothing. There is deliberately no verticalScroll here — the
                 // thread is already the vertical scroller, and nesting one
                 // inside the other crashes the app on the first frame.
-                .then(if (scroll) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+                .horizontalScroll(rememberScrollState(), enabled = scroll),
         ) {
-            TableRow(
-                cells = table.headerRow,
-                widths = widths,
-                cellGap = cellGap,
-                aligns = table.aligns,
-                codeStyle = codeStyle,
-                linkStyle = linkStyle,
-                color = color,
-                header = true,
-            )
-            table.rows.forEach { row ->
+            // Width belongs inside the scrolling viewport. Constraining this
+            // content to the screen first clipped the final columns permanently.
+            Column(Modifier.width(natural)) {
                 TableRow(
-                    cells = row,
+                    cells = table.headerRow,
                     widths = widths,
                     cellGap = cellGap,
+                    sidePadding = sidePadding,
                     aligns = table.aligns,
                     codeStyle = codeStyle,
                     linkStyle = linkStyle,
                     color = color,
-                    header = false,
+                    header = true,
                 )
+                table.rows.forEach { row ->
+                    TableRow(
+                        cells = row,
+                        widths = widths,
+                        cellGap = cellGap,
+                        sidePadding = sidePadding,
+                        aligns = table.aligns,
+                        codeStyle = codeStyle,
+                        linkStyle = linkStyle,
+                        color = color,
+                        header = false,
+                    )
+                }
             }
         }
     }
 }
+
+/** The content width includes both borders and every inter-column gap. */
+internal fun tableNaturalWidth(widths: List<Dp>, cellGap: Dp, sidePadding: Dp): Dp =
+    if (widths.isEmpty()) 0.dp else
+        widths.fold(sidePadding * 2) { total, width -> total + width } + cellGap * (widths.size - 1)
 
 /** One line of the grid: the header on a raised background, a rule under each row. */
 @Composable
@@ -581,6 +610,7 @@ private fun TableRow(
     cells: List<String>,
     widths: List<Dp>,
     cellGap: Dp,
+    sidePadding: Dp,
     aligns: List<TableAlign>,
     codeStyle: SpanStyle,
     linkStyle: SpanStyle,
@@ -594,7 +624,7 @@ private fun TableRow(
                 if (header) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 else Modifier,
             )
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = sidePadding, vertical = 6.dp),
     ) {
         widths.forEachIndexed { index, width ->
             val align = aligns.getOrElse(index) { TableAlign.Start }

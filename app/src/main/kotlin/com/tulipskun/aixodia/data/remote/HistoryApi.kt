@@ -8,6 +8,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.runCatchingCancellable
 import com.tulipskun.aixodia.data.model.AgentSettings
 import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.model.SettingsView
@@ -230,21 +231,23 @@ internal fun pageTurns(rows: List<TurnRow>, beforeSeq: Long, limit: Int): List<T
     return if (limit <= 0) before else before.takeLast(limit)
 }
 
-class HistoryApi(private val settings: SettingsStore) {
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    // History is Cloudflare D1 read directly; everything in this class that
-    // talks to the daemon calls the tunnel URL over ordinary HTTP.
-    private val d1 = D1Api(settings)
-    // The settings calls are not all instant: asking the daemon to re-check its
-    // providers means waiting for the gateways to answer, through a connection
-    // that can take seconds per round trip. The default 10s read timeout cut
-    // those calls off halfway and left the screen with nothing to show.
-    private val client = OkHttpClient.Builder()
+class HistoryApi(
+    private val settings: SettingsStore,
+    private val d1: D1Api = D1Api(settings),
+    private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(150, TimeUnit.SECONDS)
-        .build()
+        .build(),
+) {
+    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    // History is Cloudflare D1 read directly; everything in this class that
+    // talks to the daemon calls the tunnel URL over ordinary HTTP.
+    // The settings calls are not all instant: asking the daemon to re-check its
+    // providers means waiting for the gateways to answer, through a connection
+    // that can take seconds per round trip. The default 10s read timeout cut
+    // those calls off halfway and left the screen with nothing to show.
     private val modelsAdapter = moshi.adapter(ModelsPage::class.java)
     private val providersAdapter = moshi.adapter(ProvidersPage::class.java)
     private val providerListAdapter = moshi.adapter<List<ProviderStatus>>(Types.newParameterizedType(List::class.java, ProviderStatus::class.java))
@@ -325,12 +328,13 @@ class HistoryApi(private val settings: SettingsStore) {
     private suspend fun daemonSessions(): List<SessionRow>? = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
-        runCatching {
+        runCatchingCancellable {
             val req = Request.Builder().url("$base/v1/sessions")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use null
                 val text = r.body?.string().orEmpty()
                 val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use null
                 // A reply without the field is not "the engine has no chats".
@@ -355,7 +359,7 @@ class HistoryApi(private val settings: SettingsStore) {
 
     /** The direct D1 read of the chat list. Null when D1 cannot be read. */
     private suspend fun d1Sessions(): List<SessionRow>? = withContext(Dispatchers.IO) {
-        runCatching { d1.chatSessions().map(::d1SessionRow) }.getOrNull()
+        runCatchingCancellable { d1.chatSessions().map(::d1SessionRow) }.getOrNull()
     }
 
     /**
@@ -367,7 +371,7 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun createSession(id: String, title: String): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext ""
-        runCatching {
+        runCatchingCancellable {
             val body = JSONObject().put("title", title)
             if (id.isNotBlank()) body.put("id", id)
             val request = body.toString()
@@ -431,9 +435,10 @@ class HistoryApi(private val settings: SettingsStore) {
      */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {
+            // A failed fallback is not an authoritative empty page. Let paging
+            // retain its older-history marker and offer another attempt.
             val rows = daemonTurns(sessionId, beforeSeq, limit)
-                ?: runCatching { d1.chatTurns(sessionId, beforeSeq, limit).map(::d1TurnRow) }
-                    .getOrDefault(emptyList())
+                ?: d1.chatTurns(sessionId, beforeSeq, limit).map(::d1TurnRow)
             pageTurns(rows, beforeSeq, limit)
         }
 
@@ -456,12 +461,13 @@ class HistoryApi(private val settings: SettingsStore) {
                 }
             }
             val url = "$base/v1/sessions/$sessionId/turns" + if (query.isEmpty()) "" else "?$query"
-            runCatching {
+            runCatchingCancellable {
                 val req = Request.Builder().url(url)
                     .header("Authorization", "Bearer ${c.token}")
                     .header("Accept", "application/json")
                     .get().build()
                 client.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) return@use null
                     val text = r.body?.string().orEmpty()
                     val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use null
                     val arr = env.optJSONArray("turns") ?: return@use null
@@ -516,7 +522,7 @@ class HistoryApi(private val settings: SettingsStore) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         val body = JSONObject().put("provider", provider).put("model", model).toString()
-        runCatching {
+        runCatchingCancellable {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
@@ -535,7 +541,7 @@ class HistoryApi(private val settings: SettingsStore) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         val body = JSONObject().put("clear_model", true).toString()
-        runCatching {
+        runCatchingCancellable {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
@@ -868,7 +874,7 @@ class HistoryApi(private val settings: SettingsStore) {
     suspend fun objectives(sessionId: String): ObjectivesPage? = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
-        runCatching {
+        runCatchingCancellable {
             val req = Request.Builder().url("$base/v1/sessions/$sessionId/objectives")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Accept", "application/json")

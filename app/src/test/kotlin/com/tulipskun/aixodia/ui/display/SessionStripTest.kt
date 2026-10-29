@@ -253,4 +253,10 @@ class SessionStripTest {
         assertEquals("tool_call", normalizedRole("tool_call"))
         assertEquals("tool_result", normalizedRole("tool_result"))
     }
+
+    @Test
+    fun `large cache totals do not overflow the percentage calculation`() {
+        assertEquals(80, SessionTotals(promptTokens = 40_000_000, cacheRead = 32_000_000).cachePercent)
+        assertEquals(100, SessionTotals(promptTokens = Int.MAX_VALUE, cacheRead = Int.MAX_VALUE).cachePercent)
+    }
 }

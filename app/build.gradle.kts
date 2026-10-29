@@ -92,6 +92,8 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     // Android stubs org.json in local unit tests; the real one is needed to
     // exercise the run-event mapper without a device.
     testImplementation("org.json:json:20240303")

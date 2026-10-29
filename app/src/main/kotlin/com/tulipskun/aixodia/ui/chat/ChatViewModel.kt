@@ -1,9 +1,11 @@
 package com.tulipskun.aixodia.ui.chat
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import android.os.SystemClock
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.runCatchingCancellable
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.Block
@@ -22,7 +24,10 @@ import com.tulipskun.aixodia.ui.display.ThinkPhase
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.ui.display.toolStepFor
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -74,7 +79,7 @@ data class TurnStats(
 
     /** The prompt that was not served from cache, under the provider's convention. */
     fun freshInputTokens(): Int =
-        if (inputIncludesCache) (inputTokens - cacheRead).coerceAtLeast(0) else inputTokens
+        if (inputIncludesCache) (inputTokens - cacheRead).coerceAtLeast(0) else inputTokens + cacheWrite
 
     /** The whole prompt however the provider chose to split it. */
     fun totalInputTokens(): Int =
@@ -103,12 +108,14 @@ data class TurnStats(
  */
 private const val TURN_SILENCE_MS = 45_000L
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(
     private val repo: ChatRepository,
     private val settings: SettingsStore,
     initialSession: String,
     // The application context only, to open a picked file's stream for upload.
     private val appContext: android.content.Context? = null,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
     /** One thing a live turn said or did, in the order it happened. */
     sealed interface LiveBlock {
@@ -168,9 +175,14 @@ class ChatViewModel(
      */
     private val liveBlocksMutex = Mutex()
 
-    private suspend fun mutateLiveBlocks(block: (List<LiveBlock>) -> List<LiveBlock>) {
-        liveBlocksMutex.withLock {
-            liveBlocks.value = block(liveBlocks.value)
+    private fun mutateLiveBlocks(block: (List<LiveBlock>) -> List<LiveBlock>) {
+        val owner = turnOwner()
+        viewModelScope.launch {
+            liveBlocksMutex.withLock {
+                // A queued frame must not re-add a block after a clear, switch,
+                // or a newer turn, even on a later visit to the same chat.
+                if (owns(owner)) liveBlocks.value = block(liveBlocks.value)
+            }
         }
     }
 
@@ -193,18 +205,13 @@ class ChatViewModel(
      * keeps sinking to the bottom.
      */
     private fun beginRequest(now: Long = SystemClock.elapsedRealtime()) {
-        viewModelScope.launch {
-            mutateLiveBlocks { blocks ->
-                // The next request only starts once every tool of the round has
-                // finished: a result that lands while a parallel call is still running
-                // must not open the next request early.
-                if (blocks.any { it is LiveBlock.Act && !it.step.done }) return@mutateLiveBlocks blocks
-                // One open wait per request: parallel results that all arrive late must
-                // not stack a second "Sending request to provider…" onto the same one.
-                val last = blocks.lastOrNull()
-                if (last is LiveBlock.Think && last.phase == ThinkPhase.WAITING) return@mutateLiveBlocks blocks
-                blocks + LiveBlock.Think(phase = ThinkPhase.WAITING, startedAtMs = now)
-            }
+        mutateLiveBlocks { blocks ->
+            // The next request only starts once every tool of the round has
+            // finished: parallel results must not open it early or twice.
+            if (blocks.any { it is LiveBlock.Act && !it.step.done }) return@mutateLiveBlocks blocks
+            val last = blocks.lastOrNull()
+            if (last is LiveBlock.Think && last.phase == ThinkPhase.WAITING) return@mutateLiveBlocks blocks
+            blocks + LiveBlock.Think(phase = ThinkPhase.WAITING, startedAtMs = now)
         }
     }
 
@@ -215,20 +222,18 @@ class ChatViewModel(
      * rather than left as a "Thought" over an empty body.
      */
     private fun settleOpenRequest(now: Long = SystemClock.elapsedRealtime()) {
-        viewModelScope.launch {
-            mutateLiveBlocks { blocks ->
-                val at = blocks.indexOfLast { it is LiveBlock.Think }
-                if (at < 0) return@mutateLiveBlocks blocks
-                val think = blocks[at] as LiveBlock.Think
-                if (think.phase == ThinkPhase.DONE) return@mutateLiveBlocks blocks
-                val out = blocks.toMutableList()
-                if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
-                    out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
-                } else {
-                    out.removeAt(at)
-                }
-                out
+        mutateLiveBlocks { blocks ->
+            val at = blocks.indexOfLast { it is LiveBlock.Think }
+            if (at < 0) return@mutateLiveBlocks blocks
+            val think = blocks[at] as LiveBlock.Think
+            if (think.phase == ThinkPhase.DONE) return@mutateLiveBlocks blocks
+            val out = blocks.toMutableList()
+            if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
+                out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
+            } else {
+                out.removeAt(at)
             }
+            out
         }
     }
 
@@ -241,9 +246,19 @@ class ChatViewModel(
      * cancelled. One state flow makes the swap a single emission with nothing
      * in between.
      */
-    private data class ChatWindow(val sid: String, val floor: Long?)
+    private data class ChatWindow(val sid: String, val floor: Long?, val visit: Long = 0L)
+    private data class ChatOwner(val sid: String, val visit: Long)
+    private data class TurnOwner(val chat: ChatOwner, val turn: Long)
+    private data class StoredPage(val owner: ChatOwner, val rows: List<ChatMessage>)
 
     private val window = MutableStateFlow(ChatWindow(initialSession, null))
+    private var nextVisit = 0L
+    private var turnVersion = 0L
+
+    private fun chatOwner(): ChatOwner = window.value.let { ChatOwner(it.sid, it.visit) }
+    private fun turnOwner(): TurnOwner = TurnOwner(chatOwner(), turnVersion)
+    private fun owns(owner: ChatOwner): Boolean = owner == chatOwner()
+    private fun owns(owner: TurnOwner): Boolean = owns(owner.chat) && owner.turn == turnVersion
 
     /**
      * The open chat as a flow. The screen resets its scroll state when this
@@ -278,10 +293,11 @@ class ChatViewModel(
     private val _turnBaseSeq = MutableStateFlow(-1L)
 
     /** The stored rows of this chat's window, exactly as the repository has them. */
-    private val storedRows: Flow<List<ChatMessage>> =
+    private val storedPages: Flow<StoredPage> =
         window.flatMapLatest { w ->
-            val from = w.floor ?: return@flatMapLatest flowOf(emptyList())
-            repo.observeMessages(w.sid, from)
+            val owner = ChatOwner(w.sid, w.visit)
+            val from = w.floor ?: return@flatMapLatest flowOf(StoredPage(owner, emptyList()))
+            repo.observeMessages(w.sid, from).map { StoredPage(owner, it) }
         }
 
     /**
@@ -294,8 +310,9 @@ class ChatViewModel(
      * pressed send.
      */
     val messages: Flow<List<ChatMessage>> =
-        combine(storedRows, _turnBaseSeq, window.map { it.sid }.distinctUntilChanged()) { rows, base, sid ->
-            threadRows(rows, base, sid)
+        combine(storedPages, _turnBaseSeq, window) { page, base, w ->
+            if (page.owner != ChatOwner(w.sid, w.visit)) emptyList()
+            else threadRows(page.rows, base, w.sid)
         }.distinctUntilChanged()
 
     /**
@@ -311,6 +328,8 @@ class ChatViewModel(
     val loadingOlder = MutableStateFlow(false)
     /** True once the server has said there is nothing above this chat. */
     private var olderExhausted = false
+    private var olderRequest = 0L
+    private var olderJob: Job? = null
 
     val sessions = repo.observeSessions()
     val conn: StateFlow<ConnState> = repo.connState
@@ -330,6 +349,27 @@ class ChatViewModel(
     val status = MutableStateFlow("")
     val busy = MutableStateFlow(false)
     val notice = MutableStateFlow("")
+
+    /** Draft text belongs to a chat and survives rotation/process restoration. */
+    val drafts: StateFlow<Map<String, String>> = savedStateHandle.getStateFlow("chat_drafts", emptyMap())
+    private val draftRevisions = mutableMapOf<String, Long>()
+
+    fun changeDraft(text: String, sid: String = sessionId) {
+        draftRevisions[sid] = (draftRevisions[sid] ?: 0L) + 1L
+        val next = HashMap(drafts.value)
+        if (text.isEmpty()) next.remove(sid) else next[sid] = text
+        savedStateHandle["chat_drafts"] = next
+    }
+
+    fun sendDraft() {
+        val sid = sessionId
+        val revision = draftRevisions[sid] ?: 0L
+        send(drafts.value[sid].orEmpty()) {
+            // Acceptance may arrive after switching chats or after further edits.
+            // Clear only the exact draft that was submitted, never its successor.
+            if ((draftRevisions[sid] ?: 0L) == revision) changeDraft("", sid)
+        }
+    }
 
     /**
      * Deltas stay UI-only; committed WS rows replace them when the turn closes.
@@ -379,17 +419,20 @@ class ChatViewModel(
      */
     val objectives = MutableStateFlow<com.tulipskun.aixodia.data.remote.ObjectivesPage?>(null)
     private var objectivesJob: Job? = null
+    private var objectivesRequest = 0L
 
     /** Re-reads the goals card. The newest request wins; stale reads are cut. */
     private fun refreshObjectives(sid: String = sessionId) {
-        if (sid.isBlank()) return
+        val owner = chatOwner()
+        if (sid.isBlank() || sid != owner.sid) return
+        val request = ++objectivesRequest
         objectivesJob?.cancel()
         objectivesJob = viewModelScope.launch {
             // The engine writes D1 right after the tool result frame; a moment's
             // delay keeps the card from re-reading the list before the write lands.
             delay(400)
-            val page = repo.objectives(sid)
-            if (sid == sessionId && page != null) objectives.value = page
+            val page = runCatchingCancellable { repo.objectives(sid) }.getOrNull()
+            if (owns(owner) && request == objectivesRequest && page != null) objectives.value = page
         }
     }
     /**
@@ -421,7 +464,12 @@ class ChatViewModel(
      * route back to the chat the reader already left.
      */
     private var switchJob: Job? = null
-    private var lastRecoveryRetry = 0L
+    private var startupJob: Job? = null
+    private var navigationVersion = 0L
+    private val navigationMutex = Mutex()
+    private val lastRecoveryRetries = mutableMapOf<String, Long>()
+    private var persistedSelection = initialSession
+    private val selectionEchoes = mutableListOf<String>()
     /**
      * When the daemon last said anything about the turn in flight, and whether
      * it has said anything at all. A turn whose message never reaches the
@@ -437,36 +485,43 @@ class ChatViewModel(
     /** Whether the open chat has a stored pin, as opposed to a draft selection. */
     val hasStoredRoute = MutableStateFlow(false)
     /** A route chosen for a New chat, saved to the daemon with its first send. */
-    private var draftRoute: Pair<String, String>? = null
+    private val draftRoutes = mutableMapOf<String, Pair<String, String>>()
+    private var routeVersion = 0L
+    private val routeMutex = Mutex()
+    private var catalogueRequest = 0L
+    private var uploadRequest = 0L
 
     init {
         // A fresh install has no settings yet, and every call here is network
         // facing: failures belong in [notice], never as an uncaught exception
         // (an uncaught one in viewModelScope takes the whole process down).
-        viewModelScope.launch {
+        val startupRequest = navigationVersion
+        startupJob = viewModelScope.launch {
             // Cache first: the stored chat's newest page is on screen before
             // any network read. ensureSession below may then open the same
             // chat again (and refresh its tail); the second window is only a
             // re-anchor, not what makes the first frame appear.
-            if (initialSession.isNotBlank()) switchChat(initialSession)
-            runCatching {
+            runCatchingCancellable {
+                val preferred = if (initialSession.isNotBlank()) initialSession
+                    else settings.sessionFlow.first()
+                if (preferred.isNotBlank() && !switchChat(preferred, startupRequest)) return@launch
                 repo.syncSessions()
+                currentCoroutineContext().ensureActive()
+                if (startupRequest != navigationVersion) return@launch
                 // No session id to type: open the last chat, or start one.
-                val id = repo.ensureSession(initialSession)
-                if (id != sessionId) switchChat(id)
-                settings.saveSession(id)
+                val id = repo.ensureSession(preferred)
+                currentCoroutineContext().ensureActive()
+                if (startupRequest != navigationVersion) return@launch
+                if ((id != sessionId || windowFloor == null) && !switchChat(id, startupRequest)) return@launch
+                if (!completeSelection(id, startupRequest)) return@launch
+                val owner = chatOwner()
+                readRoute(owner, routeVersion)
+                if (owns(owner) && startupRequest == navigationVersion) recoverInterruptedTurn()
             }.onFailure { err ->
-                notice.value = "Cannot connect: ${err.message ?: err::class.simpleName}"
+                if (startupRequest == navigationVersion) {
+                    notice.value = "Cannot connect: ${err.message ?: err::class.simpleName}"
+                }
             }
-            // The header shows the route this chat actually uses.
-            runCatching { repo.sessionRoute(sessionId) }.getOrNull()?.let { (provider, model) ->
-                selectedProvider.value = provider
-                selectedModel.value = model
-                hasStoredRoute.value = true
-            }
-            // A cold start can already have an online socket, so the
-            // connection collector never sees an OFFLINE -> ONLINE edge.
-            recoverInterruptedTurn()
         }
         // The start time comes from the daemon's D1 row, read once (and again
         // whenever the socket comes back). Uptime is then counted on the phone,
@@ -474,18 +529,10 @@ class ChatViewModel(
         // one is kept, so a header that starts blank for the length of one query
         // still shows a number the moment the app opens; the query corrects it.
         viewModelScope.launch {
-            settings.daemonStartedAtFlow.first().let { cached ->
+            runCatchingCancellable { settings.daemonStartedAtFlow.first() }.getOrDefault(0L).let { cached ->
                 if (cached > 0L) daemonStartedAt.value = cached
             }
             refreshDaemonStart()
-        }
-        viewModelScope.launch {
-            // Opening or switching a chat re-reads its goals card; the card
-            // belongs to the chat on screen, never to the one left behind.
-            activeSession.collect { sid ->
-                if (sid.isNotBlank()) objectives.value = null
-                if (sid.isNotBlank()) refreshObjectives(sid)
-            }
         }
         viewModelScope.launch {
             var wasOnline = repo.connState.value == ConnState.ONLINE
@@ -502,20 +549,29 @@ class ChatViewModel(
         // A reconnect does not replay the daemon's `done` frame, so the live
         // bubble would stay busy forever even after the answer is in D1. The
         // committed answer after the last question is the signal to hand over.
-        // It reads the stored rows and not [messages], because while a turn
+        // It reads the stored page and not [messages], because while a turn
         // runs the thread's own list withholds exactly the rows being watched:
         // watching that would mean the hand-over never happened and the live
         // turn would sit there forever after the daemon had finished it.
         viewModelScope.launch {
-            storedRows.collect { rows ->
-                if (!busy.value) return@collect
+            storedPages.collect { page ->
+                if (!owns(page.owner)) return@collect
+                val rows = page.rows.filter { it.sessionId == page.owner.sid }
+                // An uncached chat initially opens below every seq. Its first
+                // server-backed rows establish a real floor and paging marker.
+                if (windowFloor == Long.MIN_VALUE && rows.isNotEmpty()) {
+                    val floor = rows.first().seq
+                    window.value = window.value.copy(floor = floor)
+                    if (!olderExhausted) hasOlder.value = floor > 1L
+                }
+                if (!busy.value || turnBaseSeq < 0L) return@collect
                 val lastUser = rows.indexOfLast { it.role == "user" }
                 if (lastUser < 0) return@collect
                 // Narration before a tool round is stored as an assistant row
                 // too. Only the closing answer carries usage, duration, or the
                 // engine's `answer` block id.
                 val answered = rows.drop(lastUser + 1).any {
-                    (it.role == "model" || it.role == "assistant") &&
+                    it.seq > turnBaseSeq && (it.role == "model" || it.role == "assistant") &&
                         (it.model.isNotBlank() || it.durationMs > 0L ||
                             it.tokensIn > 0 || it.tokensOut > 0 ||
                             it.block.contains("\"id\":\"answer\"") ||
@@ -561,17 +617,7 @@ class ChatViewModel(
                         val spans = liveThinkingSpans()
                         val sid = f.sessionId.ifBlank { sessionId }
                         val baseSeq = turnBaseSeq
-                        status.value = ""
-                        liveText.value = ""
-                        discardDeltas()
-                        // Clear through the mutex so a frame still queued behind
-                        // it cannot re-add a block to a turn just torn down.
-                        viewModelScope.launch { mutateLiveBlocks { emptyList() } }
-                        liveThinkingMs.value = 0L
-                        liveReasoning.value = ""
-                        reasoningActive.value = false
-                        turnBaseSeq = -1L
-                        busy.value = false
+                        clearLiveTurn()
                         liveUsage.value = null
                         // Raw daemon text is logged by the daemon; the user sees
                         // this app's wording. A failure the daemon can retry gets
@@ -590,7 +636,7 @@ class ChatViewModel(
                         finishStats()
                         if (baseSeq >= 0L) {
                             viewModelScope.launch {
-                                runCatching {
+                                runCatchingCancellable {
                                     repo.stampThinking(sid, baseSeq, spans.answerMs, spans.byCall)
                                 }
                             }
@@ -647,9 +693,10 @@ class ChatViewModel(
 
     private fun scheduleDeltaFlush() {
         if (deltaFlushJob?.isActive == true) return
+        val owner = turnOwner()
         deltaFlushJob = viewModelScope.launch {
             delay(120)
-            flushDeltas()
+            if (owns(owner)) flushDeltas()
         }
     }
 
@@ -771,26 +818,24 @@ class ChatViewModel(
                 reasoningActive.value = true
                 // The reasoning belongs to the request named on the block, not
                 // to the turn as a whole: it grows that request's own block.
-                viewModelScope.launch {
-                    mutateLiveBlocks { blocks ->
-                        val at = blocks.indexOfFirst { it is LiveBlock.Think && it.id == block.id }
-                        if (at >= 0) {
-                            val think = blocks[at] as LiveBlock.Think
-                            val out = blocks.toMutableList()
-                            out[at] = think.copy(
-                                phase = ThinkPhase.THINKING,
-                                reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
-                                startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
-                            )
-                            out
-                        } else {
-                            blocks + LiveBlock.Think(
-                                id = block.id,
-                                phase = ThinkPhase.THINKING,
-                                reasoning = chunk.takeLast(32 * 1024),
-                                startedAtMs = now,
-                            )
-                        }
+                mutateLiveBlocks { blocks ->
+                    val at = blocks.indexOfFirst { it is LiveBlock.Think && it.id == block.id }
+                    if (at >= 0) {
+                        val think = blocks[at] as LiveBlock.Think
+                        val out = blocks.toMutableList()
+                        out[at] = think.copy(
+                            phase = ThinkPhase.THINKING,
+                            reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
+                            startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
+                        )
+                        out
+                    } else {
+                        blocks + LiveBlock.Think(
+                            id = block.id,
+                            phase = ThinkPhase.THINKING,
+                            reasoning = chunk.takeLast(32 * 1024),
+                            startedAtMs = now,
+                        )
                     }
                 }
             }
@@ -804,16 +849,14 @@ class ChatViewModel(
                     // restates its block replaces it in place. Appending would
                     // leave the same words on screen twice, and the second copy
                     // is the one the thread scrolls to.
-                    viewModelScope.launch {
-                        mutateLiveBlocks { blocks ->
-                            val at = if (block.id.isBlank()) -1 else
-                                blocks.indexOfFirst { it is LiveBlock.Say && it.id == block.id }
-                            if (at >= 0) {
-                                val said = blocks[at] as LiveBlock.Say
-                                blocks.toMutableList().also { it[at] = said.copy(text = block.text) }
-                            } else {
-                                blocks + LiveBlock.Say(block.text, System.currentTimeMillis(), block.id)
-                            }
+                    mutateLiveBlocks { blocks ->
+                        val at = if (block.id.isBlank()) -1 else
+                            blocks.indexOfFirst { it is LiveBlock.Say && it.id == block.id }
+                        if (at >= 0) {
+                            val said = blocks[at] as LiveBlock.Say
+                            blocks.toMutableList().also { it[at] = said.copy(text = block.text) }
+                        } else {
+                            blocks + LiveBlock.Say(block.text, System.currentTimeMillis(), block.id)
                         }
                     }
                 }
@@ -831,33 +874,24 @@ class ChatViewModel(
      * of position. The optimistic block send invented is adopted, not doubled.
      */
     private fun openRequest(id: String, now: Long) {
-        viewModelScope.launch {
-            mutateLiveBlocks { blocks ->
-                if (blocks.any { it is LiveBlock.Act && !it.step.done }) return@mutateLiveBlocks blocks
-                val waiting = blocks.indexOfLast { it is LiveBlock.Think && it.phase == ThinkPhase.WAITING }
-                if (waiting >= 0) {
-                    val think = blocks[waiting] as LiveBlock.Think
-                    if (think.id == id) return@mutateLiveBlocks blocks
-                    if (think.id.isBlank()) {
-                        val out = blocks.toMutableList()
-                        out[waiting] = think.copy(id = id, startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now)
-                        return@mutateLiveBlocks out
-                    }
-                    // The round on screen is a different request that already
-                    // spoke: close it before this one opens its own wait.
-                    val settled = blocks.toMutableList()
-                    val t = settled[waiting] as LiveBlock.Think
-                    if (t.phase == ThinkPhase.THINKING && t.reasoning.isNotBlank()) {
-                        settled[waiting] = t.copy(phase = ThinkPhase.DONE, endedAtMs = now)
-                    } else {
-                        settled.removeAt(waiting)
-                    }
-                    return@mutateLiveBlocks settled + LiveBlock.Think(
-                        id = id, phase = ThinkPhase.WAITING, startedAtMs = now,
-                    )
+        mutateLiveBlocks { blocks ->
+            if (blocks.any { it is LiveBlock.Act && !it.step.done }) return@mutateLiveBlocks blocks
+            val waiting = blocks.indexOfLast { it is LiveBlock.Think && it.phase == ThinkPhase.WAITING }
+            if (waiting >= 0) {
+                val think = blocks[waiting] as LiveBlock.Think
+                if (think.id == id) return@mutateLiveBlocks blocks
+                if (think.id.isBlank()) {
+                    val out = blocks.toMutableList()
+                    out[waiting] = think.copy(id = id, startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now)
+                    return@mutateLiveBlocks out
                 }
-                blocks + LiveBlock.Think(id = id, phase = ThinkPhase.WAITING, startedAtMs = now)
+                // A different waiting round is replaced, not stacked.
+                val settled = blocks.toMutableList().also { it.removeAt(waiting) }
+                return@mutateLiveBlocks settled + LiveBlock.Think(
+                    id = id, phase = ThinkPhase.WAITING, startedAtMs = now,
+                )
             }
+            blocks + LiveBlock.Think(id = id, phase = ThinkPhase.WAITING, startedAtMs = now)
         }
     }
 
@@ -868,20 +902,18 @@ class ChatViewModel(
      * dropped rather than left as a thought over an empty body.
      */
     private fun settleRequest(id: String, now: Long = SystemClock.elapsedRealtime()) {
-        viewModelScope.launch {
-            mutateLiveBlocks { blocks ->
-                val at = blocks.indexOfLast { it is LiveBlock.Think && (it.id == id || it.id.isBlank()) }
-                if (at < 0) return@mutateLiveBlocks blocks
-                val think = blocks[at] as LiveBlock.Think
-                if (think.phase == ThinkPhase.DONE) return@mutateLiveBlocks blocks
-                val out = blocks.toMutableList()
-                if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
-                    out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
-                } else {
-                    out.removeAt(at)
-                }
-                out
+        mutateLiveBlocks { blocks ->
+            val at = blocks.indexOfLast { it is LiveBlock.Think && (it.id == id || it.id.isBlank()) }
+            if (at < 0) return@mutateLiveBlocks blocks
+            val think = blocks[at] as LiveBlock.Think
+            if (think.phase == ThinkPhase.DONE) return@mutateLiveBlocks blocks
+            val out = blocks.toMutableList()
+            if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
+                out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
+            } else {
+                out.removeAt(at)
             }
+            out
         }
     }
 
@@ -896,13 +928,11 @@ class ChatViewModel(
         flushDeltas()
         val said = liveText.value.trim()
         liveText.value = ""
-        viewModelScope.launch {
-            mutateLiveBlocks { blocks ->
-                val withSay = if (said.isNotEmpty()) {
-                    blocks + LiveBlock.Say(said, System.currentTimeMillis())
-                } else blocks
-                upsertStep(withSay, toolStepFor(block, "", now))
-            }
+        mutateLiveBlocks { blocks ->
+            val withSay = if (said.isNotEmpty()) {
+                blocks + LiveBlock.Say(said, System.currentTimeMillis())
+            } else blocks
+            upsertStep(withSay, toolStepFor(block, "", now))
         }
         traceNote("${block.name}…")
     }
@@ -916,24 +946,22 @@ class ChatViewModel(
     private fun completeLiveTool(block: Block) {
         liveThinkingMs.value = 0L
         val key = block.id.ifBlank { block.name }
-        viewModelScope.launch {
-            mutateLiveBlocks { blocks ->
-                val known = blocks.filterIsInstance<LiveBlock.Act>()
-                    .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
-                blocks.map { item ->
-                    if (item is LiveBlock.Act && item.step.key == key) {
-                        item.copy(
-                            step = item.step.copy(
-                                args = humanToolArgs(block.args).ifBlank { known },
-                                result = block.result,
-                                isError = block.isError,
-                                done = true,
-                                durationMs = block.durationMs,
-                            ),
-                        )
-                    } else {
-                        item
-                    }
+        mutateLiveBlocks { blocks ->
+            val known = blocks.filterIsInstance<LiveBlock.Act>()
+                .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
+            blocks.map { item ->
+                if (item is LiveBlock.Act && item.step.key == key) {
+                    item.copy(
+                        step = item.step.copy(
+                            args = humanToolArgs(block.args).ifBlank { known },
+                            result = block.result,
+                            isError = block.isError,
+                            done = true,
+                            durationMs = block.durationMs,
+                        ),
+                    )
+                } else {
+                    item
                 }
             }
         }
@@ -975,15 +1003,13 @@ class ChatViewModel(
         // The engine trimmed the prompt. The marker lands where it happened in
         // the thread; the digest says what fell out of the window.
         if (f.stage == "compact") {
-            viewModelScope.launch {
-                mutateLiveBlocks { blocks ->
-                    blocks + LiveBlock.Compact(
-                        keptTurns = f.keptTurns,
-                        droppedTurns = f.droppedTurns,
-                        summary = f.compactSummary,
-                        atMs = SystemClock.elapsedRealtime(),
-                    )
-                }
+            mutateLiveBlocks { blocks ->
+                blocks + LiveBlock.Compact(
+                    keptTurns = f.keptTurns,
+                    droppedTurns = f.droppedTurns,
+                    summary = f.compactSummary,
+                    atMs = SystemClock.elapsedRealtime(),
+                )
             }
             return
         }
@@ -1001,25 +1027,23 @@ class ChatViewModel(
                 // the turn as a whole: it grows that request's own block, and a
                 // new request opens a new block.
                 val now = SystemClock.elapsedRealtime()
-                viewModelScope.launch {
-                    mutateLiveBlocks { blocks ->
-                        val at = blocks.indexOfLast { it is LiveBlock.Think }
-                        if (at >= 0) {
-                            val think = blocks[at] as LiveBlock.Think
-                            val out = blocks.toMutableList()
-                            out[at] = think.copy(
-                                phase = ThinkPhase.THINKING,
-                                reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
-                                startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
-                            )
-                            out
-                        } else {
-                            blocks + LiveBlock.Think(
-                                phase = ThinkPhase.THINKING,
-                                reasoning = chunk.takeLast(32 * 1024),
-                                startedAtMs = now,
-                            )
-                        }
+                mutateLiveBlocks { blocks ->
+                    val at = blocks.indexOfLast { it is LiveBlock.Think }
+                    if (at >= 0) {
+                        val think = blocks[at] as LiveBlock.Think
+                        val out = blocks.toMutableList()
+                        out[at] = think.copy(
+                            phase = ThinkPhase.THINKING,
+                            reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
+                            startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
+                        )
+                        out
+                    } else {
+                        blocks + LiveBlock.Think(
+                            phase = ThinkPhase.THINKING,
+                            reasoning = chunk.takeLast(32 * 1024),
+                            startedAtMs = now,
+                        )
                     }
                 }
             }
@@ -1032,19 +1056,17 @@ class ChatViewModel(
                 flushDeltas()
                 val said = liveText.value.trim()
                 liveText.value = ""
-                viewModelScope.launch {
-                    mutateLiveBlocks { blocks ->
-                        val withSay = if (said.isNotEmpty()) {
-                            blocks + LiveBlock.Say(said, System.currentTimeMillis())
-                        } else blocks
-                        upsertStep(withSay, ToolStep(
-                            id = f.toolCall?.id.orEmpty(),
-                            name = name,
-                            args = humanToolArgs(f.toolCall?.arguments.orEmpty()),
-                            durationMs = f.toolDurationMs,
-                            startedAtMs = SystemClock.elapsedRealtime(),
-                        ))
-                    }
+                mutateLiveBlocks { blocks ->
+                    val withSay = if (said.isNotEmpty()) {
+                        blocks + LiveBlock.Say(said, System.currentTimeMillis())
+                    } else blocks
+                    upsertStep(withSay, ToolStep(
+                        id = f.toolCall?.id.orEmpty(),
+                        name = name,
+                        args = humanToolArgs(f.toolCall?.arguments.orEmpty()),
+                        durationMs = f.toolDurationMs,
+                        startedAtMs = SystemClock.elapsedRealtime(),
+                    ))
                 }
                 traceNote("$name…")
             }
@@ -1064,24 +1086,22 @@ class ChatViewModel(
                 // Rebuilding it from the frame alone is how a live step lost the
                 // command it was running and showed a bare "bash · 2.6s" while
                 // the same step in the stored thread showed the whole line.
-                viewModelScope.launch {
-                    mutateLiveBlocks { blocks ->
-                        val known = blocks.filterIsInstance<LiveBlock.Act>()
-                            .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
-                        blocks.map { block ->
-                            if (block is LiveBlock.Act && block.step.key == key) {
-                                block.copy(
-                                    step = block.step.copy(
-                                        args = f.toolCall?.arguments.orEmpty().ifBlank { known },
-                                        result = result,
-                                        isError = f.toolResult?.isError ?: false,
-                                        done = true,
-                                        durationMs = f.toolDurationMs,
-                                    )
+                mutateLiveBlocks { blocks ->
+                    val known = blocks.filterIsInstance<LiveBlock.Act>()
+                        .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
+                    blocks.map { block ->
+                        if (block is LiveBlock.Act && block.step.key == key) {
+                            block.copy(
+                                step = block.step.copy(
+                                    args = f.toolCall?.arguments.orEmpty().ifBlank { known },
+                                    result = result,
+                                    isError = f.toolResult?.isError ?: false,
+                                    done = true,
+                                    durationMs = f.toolDurationMs,
                                 )
-                            } else {
-                                block
-                            }
+                            )
+                        } else {
+                            block
                         }
                     }
                 }
@@ -1122,6 +1142,7 @@ class ChatViewModel(
         // and call ids are known: the answer gets the last request's time and
         // every tool row gets the time of the request that produced it.
         val sid = frame.sessionId.ifBlank { sessionId }
+        val chat = chatOwner()
         val baseSeq = turnBaseSeq
         val spans = liveThinkingSpans()
         clearLiveTurn()
@@ -1130,20 +1151,21 @@ class ChatViewModel(
         // carries the same figures (and the turn's duration, which a running
         // total has no way to report), so the strip hands over to the thread.
         liveUsage.value = null
+        val completedTurn = turnVersion
         // Repository has already committed the WS rows. A D1 read is only a
         // compatibility/recovery fallback for a daemon without a complete batch.
         viewModelScope.launch {
-            if (!frame.turnsSynced) runCatching { repo.refreshLatest(sid) }
+            if (!frame.turnsSynced) runCatchingCancellable { repo.refreshLatest(sid) }
             if (baseSeq >= 0L) {
-                runCatching { repo.stampThinking(sid, baseSeq, spans.answerMs, spans.byCall) }
+                runCatchingCancellable { repo.stampThinking(sid, baseSeq, spans.answerMs, spans.byCall) }
             }
             // The cost strip now comes from the session metadata, so refresh
             // it after the turn: the running total has just been released and
             // the engine's sum is what keeps the new turn on screen.
-            runCatching { repo.syncSessions() }
+            runCatchingCancellable { repo.syncSessions() }
             // The turn may have moved goals and plans; the card shows the
             // engine's list, not the phone's guess.
-            refreshObjectives(sid)
+            if (owns(chat) && turnVersion == completedTurn) refreshObjectives(sid)
         }
     }
 
@@ -1156,36 +1178,57 @@ class ChatViewModel(
      */
     private fun recoverInterruptedTurn() {
         if (sessionId.isBlank() || recoveryJob?.isActive == true) return
+        var owner = turnOwner()
+        val sid = owner.chat.sid
         recoveryJob = viewModelScope.launch {
             var attempts = 0
             // Give the socket's own refresh/verify a moment to land an answer
             // that was written while the phone was away.
             delay(4_000)
             repeat(72) { // six minutes at five-second intervals
-                val sid = sessionId
-                if (sid.isBlank() || repo.isDraft(sid)) return@launch
-                runCatching { repo.refreshLatest(sid) }
-                if (!repo.hasUnfinishedTurn(sid)) {
-                    if (busy.value) {
-                        errorCard.value = ""
-                        clearLiveTurn()
-                    }
-                    return@launch
-                }
-                val now = System.currentTimeMillis()
-                val age = now - repo.lastUserCreatedAt(sid)
-                if (age >= 15_000L && attempts < 3 && now - lastRecoveryRetry >= 45_000L) {
-                    attempts++
-                    lastRecoveryRetry = now
-                    if (busy.value) clearLiveTurn()
-                    beginLiveTurn()
-                    turnBaseSeq = repo.maxSeq(sid)
-                    notice.value = "Retrying the unfinished message…"
-                    if (!repo.retryTurn(sid)) {
-                        clearLiveTurn()
-                        notice.value = "Could not retry — the daemon is offline"
+                if (!owns(owner)) return@launch
+                try {
+                    if (repo.isDraft(sid)) return@launch
+                    if (!owns(owner)) return@launch
+                    // Only a successful refresh may judge whether the answer
+                    // finished. A failed query leaves the live turn untouched.
+                    repo.refreshLatest(sid)
+                    if (!owns(owner)) return@launch
+                    val unfinished = repo.hasUnfinishedTurn(sid)
+                    if (!owns(owner)) return@launch
+                    if (!unfinished) {
+                        if (busy.value) {
+                            errorCard.value = ""
+                            clearLiveTurn()
+                        }
                         return@launch
                     }
+                    val createdAt = repo.lastUserCreatedAt(sid)
+                    if (!owns(owner)) return@launch
+                    val now = System.currentTimeMillis()
+                    val age = now - createdAt
+                    if (createdAt > 0L && age >= 15_000L && attempts < 3 &&
+                        now - (lastRecoveryRetries[sid] ?: 0L) >= 45_000L
+                    ) {
+                        val base = repo.maxSeq(sid)
+                        if (!owns(owner)) return@launch
+                        attempts++
+                        lastRecoveryRetries[sid] = now
+                        owner = beginLiveTurn()
+                        turnBaseSeq = base
+                        notice.value = "Retrying the unfinished message…"
+                        if (!repo.retryTurn(sid)) {
+                            clearLiveTurn()
+                            notice.value = "Could not retry — the daemon is offline"
+                            return@launch
+                        }
+                    }
+                } catch (err: CancellationException) {
+                    throw err
+                } catch (_: Exception) {
+                    // History/cache outages are retryable, not process crashes
+                    // and not evidence that this or another chat's turn ended.
+                    if (!owns(owner)) return@launch
                 }
                 delay(5_000)
             }
@@ -1199,6 +1242,7 @@ class ChatViewModel(
      * whether the daemon confirmed the end or the screen is being unstuck.
      */
     private fun clearLiveTurn() {
+        turnVersion++
         status.value = ""
         liveBlocks.value = emptyList()
         liveThinkingMs.value = 0L
@@ -1208,6 +1252,7 @@ class ChatViewModel(
         finishStats()
         turnBaseSeq = -1L
         liveText.value = ""
+        liveUsage.value = null
         discardDeltas()
         // Nothing is in flight, so the silence watcher has nothing to judge.
         lastFrameAt = 0L
@@ -1232,6 +1277,8 @@ class ChatViewModel(
      * stuck busy forever.
      */
     fun stop() {
+        recoveryJob?.cancel()
+        recoveryJob = null
         val sent = repo.stopTurn(sessionId)
         clearLiveTurn()
         answerSettled = true
@@ -1240,20 +1287,19 @@ class ChatViewModel(
 
     /** Loads the catalogue the picker offers, once the daemon is online. */
     fun loadProviders() {
+        val owner = chatOwner()
+        val version = routeVersion
+        val request = ++catalogueRequest
         viewModelScope.launch {
-            val list = runCatching { repo.models() }.getOrDefault(emptyList())
+            val list = runCatchingCancellable { repo.models() }.getOrDefault(emptyList())
+            val statuses = runCatchingCancellable { repo.providerStatuses() }.getOrDefault(emptyList())
+            if (request != catalogueRequest) return@launch
             providers.value = list
-            providerStatuses.value = runCatching { repo.providerStatuses() }.getOrDefault(emptyList())
+            providerStatuses.value = statuses
             // Start from what this chat already uses: the picker must not look
             // like a pending change just because it was opened.
-            if (selectedProvider.value.isBlank()) {
-                runCatching { repo.sessionRoute(sessionId) }.getOrNull()?.let { (provider, model) ->
-                    val view = list.firstOrNull { it.id == provider }
-                    selectedProvider.value = provider
-                    selectedModel.value = model.takeIf { m -> view?.models?.any { it.id == m } == true }
-                        ?: view?.defaultModel.orEmpty()
-                    hasStoredRoute.value = true
-                }
+            if (owns(owner) && version == routeVersion && selectedProvider.value.isBlank()) {
+                readRoute(owner, version)
             }
 
             // No stored route means this chat follows the daemon's agent default:
@@ -1269,29 +1315,50 @@ class ChatViewModel(
     }
 
     fun chooseProvider(id: String) {
-        providers.value.firstOrNull { it.id == id }?.let { pick(it) }
+        providers.value.firstOrNull { it.id == id }?.let {
+            routeVersion++
+            pick(it)
+        }
     }
 
-    fun chooseModel(id: String) { selectedModel.value = id }
+    fun chooseModel(id: String) {
+        routeVersion++
+        selectedModel.value = id
+    }
+
+    private suspend fun readRoute(owner: ChatOwner, version: Long) {
+        val route = draftRoutes[owner.sid]
+            ?: runCatchingCancellable { repo.sessionRoute(owner.sid) }.getOrNull()
+        if (!owns(owner) || version != routeVersion) return
+        selectedProvider.value = route?.first.orEmpty()
+        selectedModel.value = route?.second.orEmpty()
+        hasStoredRoute.value = route != null
+    }
 
     /** Saves the chosen provider/model for the open chat. */
     fun saveModel() {
+        val owner = chatOwner()
         val provider = selectedProvider.value
         val model = selectedModel.value
         if (provider.isBlank() || model.isBlank()) {
             notice.value = "Select a provider and model first"
             return
         }
+        val version = ++routeVersion
         viewModelScope.launch {
             // A New chat has no server row yet. Keep the choice here; send
             // pins it in the same breath as creating the row.
-            if (repo.isDraft(sessionId)) {
-                draftRoute = provider to model
-                hasStoredRoute.value = true
-                notice.value = "Using $provider / $model for this chat"
-                return@launch
-            }
-            val ok = runCatching { repo.setSessionModel(sessionId, provider, model) }.getOrDefault(false)
+            val ok = runCatchingCancellable {
+                // Serialize saves/clears so the last requested pin is also the
+                // last one written, not merely the last one shown on screen.
+                routeMutex.withLock {
+                    if (repo.isDraft(owner.sid)) {
+                        draftRoutes[owner.sid] = provider to model
+                        true
+                    } else repo.setSessionModel(owner.sid, provider, model)
+                }
+            }.getOrDefault(false)
+            if (!owns(owner) || version != routeVersion) return@launch
             if (ok) {
                 hasStoredRoute.value = true
                 notice.value = "Using $provider / $model for this chat"
@@ -1303,20 +1370,22 @@ class ChatViewModel(
 
     /** Returns the open chat to the global agent defaults and forgets its pin. */
     fun clearModel() {
+        val owner = chatOwner()
         if (!hasStoredRoute.value) {
             notice.value = "This chat already uses the agent default"
             return
         }
+        val version = ++routeVersion
         viewModelScope.launch {
-            if (repo.isDraft(sessionId)) {
-                draftRoute = null
-                selectedProvider.value = ""
-                selectedModel.value = ""
-                hasStoredRoute.value = false
-                notice.value = "Cleared this chat model lock — using agent default"
-                return@launch
-            }
-            val ok = runCatching { repo.clearSessionModel(sessionId) }.getOrDefault(false)
+            val ok = runCatchingCancellable {
+                routeMutex.withLock {
+                    if (repo.isDraft(owner.sid)) {
+                        draftRoutes.remove(owner.sid)
+                        true
+                    } else repo.clearSessionModel(owner.sid)
+                }
+            }.getOrDefault(false)
+            if (!owns(owner) || version != routeVersion) return@launch
             if (ok) {
                 selectedProvider.value = ""
                 selectedModel.value = ""
@@ -1337,35 +1406,42 @@ class ChatViewModel(
      */
     fun attach(uris: List<android.net.Uri>) {
         val ctx = appContext ?: return
-        if (uris.isEmpty()) return
+        if (uris.isEmpty() || uploading.value) return
+        val owner = chatOwner()
+        val request = ++uploadRequest
         uploading.value = true
-        val sid = sessionId
         viewModelScope.launch {
             val resolver = ctx.contentResolver
             var failed = 0
-            for (uri in uris) {
-                var name = "file"
-                var mime = ""
-                runCatching {
-                    resolver.query(uri, null, null, null, null)?.use { c ->
-                        val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (idx >= 0 && c.moveToFirst()) name = c.getString(idx) ?: name
+            try {
+                for (uri in uris) {
+                    if (!owns(owner)) return@launch
+                    var name = "file"
+                    var mime = ""
+                    runCatchingCancellable {
+                        resolver.query(uri, null, null, null, null)?.use { c ->
+                            val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0 && c.moveToFirst()) name = c.getString(idx) ?: name
+                        }
+                        mime = resolver.getType(uri).orEmpty()
                     }
-                    mime = resolver.getType(uri).orEmpty()
+                    val ref = runCatchingCancellable {
+                        repo.uploadAttachment(owner.sid, name, mime) {
+                            runCatchingCancellable { resolver.openInputStream(uri) }.getOrNull()
+                        }
+                    }.getOrNull()
+                    // The visit matters too: leaving and returning must not
+                    // attach an old upload to a newly composed message.
+                    if (!owns(owner)) return@launch
+                    if (ref == null) failed++
+                    else pendingAttachments.value = pendingAttachments.value + ref
                 }
-                val ref = repo.uploadAttachment(sid, name, mime) {
-                    runCatching { resolver.openInputStream(uri) }.getOrNull()
+                if (failed > 0 && owns(owner)) {
+                    notice.value = "Upload failed for $failed of ${uris.size} files"
                 }
-                // A file uploaded for the chat that was open when it was
-                // picked stays with that chat; attaching it after a switch
-                // would send it to the wrong one.
-                if (ref == null) failed++
-                else if (sessionId == sid) pendingAttachments.value = pendingAttachments.value + ref
+            } finally {
+                if (owns(owner) && request == uploadRequest) uploading.value = false
             }
-            if (failed > 0) {
-                notice.value = "Upload failed for $failed of ${uris.size} files"
-            }
-            uploading.value = false
         }
     }
 
@@ -1422,9 +1498,13 @@ class ChatViewModel(
     }
 
     /** Resets the thread's live state for a new turn, sent or retried. */
-    private fun beginLiveTurn() {
+    private fun beginLiveTurn(): TurnOwner {
+        turnVersion++
         answerSettled = false
         errorCard.value = ""
+        notice.value = ""
+        status.value = ""
+        liveThinkingMs.value = 0L
         busy.value = true
         // The daemon has not been heard from yet for this turn. The watcher
         // starts counting from here.
@@ -1458,11 +1538,21 @@ class ChatViewModel(
             startedAtMs = SystemClock.elapsedRealtime(),
             running = true,
         )
+        return turnOwner()
     }
 
-    fun send(text: String) {
+    fun send(text: String, onAccepted: () -> Unit = {}) {
+        val chat = chatOwner()
         val attachments = pendingAttachments.value
         if (text.isBlank() && attachments.isEmpty()) return
+        if (chat.sid.isBlank()) {
+            notice.value = "Open a chat before sending"
+            return
+        }
+        if (uploading.value) {
+            notice.value = "Wait for the files to finish uploading"
+            return
+        }
         val online = conn.value == ConnState.ONLINE
         // A live turn already owns the bubble and the stream. Queueing text is
         // only meaningful while offline; sending over a healthy stream would
@@ -1475,40 +1565,53 @@ class ChatViewModel(
             notice.value = "Connect to the daemon before sending attachments"
             return
         }
-        if (online) beginLiveTurn()
+        val pendingRoute = draftRoutes[chat.sid]
+        if (online) {
+            recoveryJob?.cancel()
+            recoveryJob = null
+        }
+        val owner = if (online) beginLiveTurn() else turnOwner()
         viewModelScope.launch {
-            val wasDraft = repo.isDraft(sessionId)
-            // Offline text is queued locally; a New chat is created when the
-            // reconnect flush actually has a socket to send it through.
-            if (online && wasDraft && !repo.ensureRemoteSession(sessionId, text.trim().take(60))) {
-                clearLiveTurn()
-                val msg = "Could not start this chat on the daemon. Check the connection and try again."
-                errorCard.value = msg
-                notice.value = msg
-                return@launch
-            }
-            // A model chosen before the first message was kept on the phone:
-            // now that the chat exists, pin it before the turn goes out.
-            val pendingRoute = draftRoute
-            if (online && wasDraft && pendingRoute != null) {
-                runCatching { repo.setSessionModel(sessionId, pendingRoute.first, pendingRoute.second) }
-                draftRoute = null
-            }
-            if (online) turnBaseSeq = repo.maxSeq(sessionId)
-            val fresh = try {
-                repo.send(sessionId, text.trim(), attachments)
+            try {
+                val sid = chat.sid
+                val wasDraft = repo.isDraft(sid)
+                // Every read/write keeps the id captured at the tap, even if
+                // the reader switches before preparation or sending finishes.
+                if (online && wasDraft && !repo.ensureRemoteSession(sid, text.trim().take(60))) {
+                    throw IllegalStateException("Could not start this chat on the daemon")
+                }
+                if (online && wasDraft && pendingRoute != null) {
+                    val pinned = routeMutex.withLock {
+                        repo.setSessionModel(sid, pendingRoute.first, pendingRoute.second)
+                    }
+                    if (!pinned) throw IllegalStateException("Could not save this chat's provider/model")
+                    if (draftRoutes[sid] == pendingRoute) draftRoutes.remove(sid)
+                }
+                if (online) {
+                    val base = repo.maxSeq(sid)
+                    if (owns(owner)) turnBaseSeq = base
+                }
+                val fresh = repo.send(sid, text.trim(), attachments)
+                currentCoroutineContext().ensureActive()
+                // False means an identical message was already queued; in
+                // either case the repository owns a durable copy of the text.
+                onAccepted()
+                if (!owns(owner)) return@launch
+                pendingAttachments.value = pendingAttachments.value.filterNot { it in attachments }
+                if (!online) {
+                    notice.value = "Queued — it will send when the daemon reconnects"
+                } else if (!fresh) {
+                    notice.value = "Already sent, waiting for reply"
+                }
+            } catch (err: CancellationException) {
+                if (online && owns(owner)) clearLiveTurn()
+                throw err
             } catch (err: Exception) {
-                clearLiveTurn()
+                if (!owns(owner)) return@launch
+                if (online) clearLiveTurn()
                 val msg = "Could not start this chat on the daemon. Check the connection and try again."
                 errorCard.value = msg
                 notice.value = msg
-                return@launch
-            }
-            pendingAttachments.value = emptyList()
-            if (!online) {
-                notice.value = "Queued — it will send when the daemon reconnects"
-            } else if (!fresh) {
-                notice.value = "Already sent, waiting for reply"
             }
         }
     }
@@ -1519,22 +1622,44 @@ class ChatViewModel(
      * sees the tool trail that already exists instead of the prompt twice.
      */
     fun retryLast() {
+        if (busy.value) {
+            notice.value = "Wait for the current answer before retrying"
+            return
+        }
         if (conn.value != ConnState.ONLINE) {
             notice.value = "Not connected to the daemon"
             return
         }
         if (sessionId.isBlank()) return
+        val chat = chatOwner()
+        recoveryJob?.cancel()
+        recoveryJob = null
+        val owner = beginLiveTurn()
         viewModelScope.launch {
-            if (repo.isDraft(sessionId)) {
-                errorCard.value = ""
-                notice.value = "This chat has not started yet — send the message again"
-                return@launch
-            }
-            beginLiveTurn()
-            turnBaseSeq = repo.maxSeq(sessionId)
-            if (!repo.retryTurn(sessionId)) {
-                notice.value = "Could not ask the daemon to retry"
-                clearLiveTurn()
+            try {
+                if (repo.isDraft(chat.sid)) {
+                    if (owns(owner)) {
+                        clearLiveTurn()
+                        errorCard.value = ""
+                        notice.value = "This chat has not started yet — send the message again"
+                    }
+                    return@launch
+                }
+                val base = repo.maxSeq(chat.sid)
+                if (owns(owner)) turnBaseSeq = base
+                val sent = repo.retryTurn(chat.sid)
+                if (!sent && owns(owner)) {
+                    clearLiveTurn()
+                    notice.value = "Could not ask the daemon to retry"
+                }
+            } catch (err: CancellationException) {
+                if (owns(owner)) clearLiveTurn()
+                throw err
+            } catch (err: Exception) {
+                if (owns(owner)) {
+                    clearLiveTurn()
+                    notice.value = "Could not ask the daemon to retry: ${err.message}"
+                }
             }
         }
     }
@@ -1548,23 +1673,24 @@ class ChatViewModel(
      * the notice says plainly where the history went.
      */
     private fun dropDeadChat(dead: String) {
-        viewModelScope.launch {
-            repo.forgetDeadSession(dead)
-            if (sessionId != dead) return@launch
-            recoveryJob?.cancel()
-            recoveryJob = null
-            val next = runCatching { repo.createDraftSession() }.getOrNull()
-            if (next == null) {
-                notice.value = "This chat no longer exists on the daemon. Its history was lost there."
-                return@launch
+        val owner = chatOwner()
+        if (owner.sid != dead) return
+        val request = beginNavigation()
+        switchJob = viewModelScope.launch {
+            runCatchingCancellable {
+                repo.forgetDeadSession(dead)
+                if (!owns(owner) || request != navigationVersion) return@launch
+                val next = repo.createDraftSession()
+                if (!owns(owner) || request != navigationVersion) return@launch
+                changeDraft("", dead)
+                draftRoutes.remove(dead)
+                if (!switchChat(next, request) || !completeSelection(next, request)) return@launch
+                notice.value = "This chat no longer exists on the daemon — its history was lost there. A new chat is open."
+            }.onFailure {
+                if (request == navigationVersion) {
+                    notice.value = "This chat no longer exists on the daemon. Its history was lost there."
+                }
             }
-            switchChat(next)
-            selectedProvider.value = ""
-            selectedModel.value = ""
-            hasStoredRoute.value = false
-            draftRoute = null
-            settings.saveSession(next)
-            notice.value = "This chat no longer exists on the daemon — its history was lost there. A new chat is open."
         }
     }
 
@@ -1574,99 +1700,123 @@ class ChatViewModel(
      * server that a later tap can find stale.
      */
     fun newChat() {
-        switchJob?.cancel()
-        val from = sessionId
-        viewModelScope.launch {
-            runCatching { repo.createDraftSession() }
-                .onSuccess {
-                    // A chat opened while the draft was being made wins: this
-                    // draft stays in the drawer for later instead of pulling
-                    // the reader away from the chat they just chose. Making
-                    // the draft made it the daemon's current chat, so put the
-                    // socket back on the chat that is actually on screen.
-                    if (sessionId != from) {
-                        runCatching { repo.selectSession(sessionId) }
-                        return@onSuccess
-                    }
-                    switchChat(it)
-                    selectedProvider.value = ""
-                    selectedModel.value = ""
-                    hasStoredRoute.value = false
-                    draftRoute = null
-                    settings.saveSession(it)
-                }
-                .onFailure { notice.value = "Failed to create a new chat: ${it.message}" }
+        val request = beginNavigation()
+        switchJob = viewModelScope.launch {
+            runCatchingCancellable {
+                val id = repo.createDraftSession()
+                if (!switchChat(id, request)) return@launch
+                completeSelection(id, request)
+            }.onFailure {
+                if (request == navigationVersion) notice.value = "Failed to create a new chat: ${it.message}"
+            }
         }
     }
 
     fun openChat(id: String) {
-        if (id == sessionId) return
-        switchJob?.cancel()
+        if (id.isBlank()) return
+        // Tapping the visible chat cancels a pending switch away from it too.
+        val request = beginNavigation()
+        if (id == sessionId && windowFloor != null) return
         switchJob = viewModelScope.launch {
             // Switch the visible window from Room before touching the network.
             // repo.selectSession used to be first and waited for a D1 refresh,
             // so the drawer closed on the old chat and the new one appeared
             // only when that round trip finished. The cached page is local and
             // can be on screen in the same frame as the tap.
-            switchChat(id)
-            if (sessionId != id) return@launch
-            selectedProvider.value = ""
-            selectedModel.value = ""
-            hasStoredRoute.value = false
-            draftRoute = null
-            settings.saveSession(id)
-            if (sessionId != id) return@launch
-            // Now make it the daemon's current chat and pull the network tail;
-            // openSession's remote work runs in the repository's own scope.
-            repo.selectSession(id)
-            if (sessionId != id) return@launch
-            // The header shows this chat's model, not the daemon default.
-            runCatching { repo.sessionRoute(id) }.getOrNull()?.let { (provider, model) ->
-                selectedProvider.value = provider
-                selectedModel.value = model
-                hasStoredRoute.value = true
+            runCatchingCancellable {
+                if (!switchChat(id, request)) return@launch
+                val owner = chatOwner()
+                val version = routeVersion
+                if (!completeSelection(id, request)) return@launch
+                readRoute(owner, version)
+                if (owns(owner) && request == navigationVersion) recoverInterruptedTurn()
+            }.onFailure {
+                if (request == navigationVersion) notice.value = "Failed to open chat: ${it.message}"
             }
-            recoverInterruptedTurn()
         }
     }
 
+    /** Persisted changes can be external intents or echoes of our own selection. */
+    fun openSavedChat(id: String) {
+        val echo = selectionEchoes.indexOfLast { it == id }
+        if (echo >= 0) {
+            // A stopped composition may observe only the newest write. Forget
+            // earlier unobserved echoes as well, rather than retaining them.
+            repeat(echo + 1) { selectionEchoes.removeAt(0) }
+            return
+        }
+        persistedSelection = id
+        if (id.isNotBlank() && id != sessionId) openChat(id)
+    }
+
+    private fun beginNavigation(): Long {
+        navigationVersion++
+        startupJob?.cancel()
+        switchJob?.cancel()
+        return navigationVersion
+    }
+
+    private suspend fun completeSelection(id: String, request: Long): Boolean = navigationMutex.withLock {
+        currentCoroutineContext().ensureActive()
+        if (request != navigationVersion || id != sessionId) return@withLock false
+        repo.selectSession(id)
+        currentCoroutineContext().ensureActive()
+        if (request != navigationVersion || id != sessionId) return@withLock false
+        if (id != persistedSelection) {
+            selectionEchoes += id
+            settings.saveSession(id)
+            persistedSelection = id
+        }
+        currentCoroutineContext().ensureActive()
+        request == navigationVersion && id == sessionId
+    }
+
     fun renameChat(id: String, title: String) {
-        viewModelScope.launch { repo.renameSession(id, title) }
+        val owner = chatOwner()
+        viewModelScope.launch {
+            runCatchingCancellable { repo.renameSession(id, title) }.onFailure {
+                if (owns(owner)) notice.value = "Failed to rename chat: ${it.message}"
+            }
+        }
     }
 
     fun deleteChat(id: String) {
-        switchJob?.cancel()
+        val owner = chatOwner()
+        val request = if (id == owner.sid) beginNavigation() else null
         viewModelScope.launch {
-            repo.deleteSession(id)
-            if (id == sessionId) {
-                val next = repo.activeSession.value
-                switchChat(next)
-                selectedProvider.value = ""
-                selectedModel.value = ""
-                hasStoredRoute.value = false
-                draftRoute = null
-                settings.saveSession(next)
-                runCatching { repo.sessionRoute(next) }.getOrNull()?.let { (provider, model) ->
-                    selectedProvider.value = provider
-                    selectedModel.value = model
-                    hasStoredRoute.value = true
+            runCatchingCancellable {
+                repo.deleteSession(id)
+                changeDraft("", id)
+                draftRoutes.remove(id)
+                if (request == null || request != navigationVersion || !owns(owner)) return@launch
+                val next = repo.ensureSession("")
+                if (!owns(owner) || request != navigationVersion || !switchChat(next, request)) return@launch
+                val selected = chatOwner()
+                val version = routeVersion
+                if (!completeSelection(next, request)) return@launch
+                readRoute(selected, version)
+                if (owns(selected) && request == navigationVersion) recoverInterruptedTurn()
+            }.onFailure {
+                if ((request != null && request == navigationVersion) || (request == null && owns(owner))) {
+                    notice.value = "Failed to delete chat: ${it.message}"
                 }
             }
         }
     }
 
     fun refresh() {
+        val owner = chatOwner()
         viewModelScope.launch {
             refreshDaemonStart()
             // The drawer is drawn from the cache, so the network refresh only
             // updates those rows: the list is usable while this is in flight,
             // and stays usable when it fails.
-            runCatching { repo.syncSessions() }
+            runCatchingCancellable { repo.syncSessions() }
             // The rows this writes to Room reach the thread through its live
             // window; nothing has to be re-anchored here, so a chat the reader
             // scrolled up in keeps its pages.
-            runCatching { repo.refreshLatest(sessionId) }
-                .onFailure { notice.value = "Failed to fetch latest: ${it.message}" }
+            runCatchingCancellable { repo.refreshLatest(owner.sid) }
+                .onFailure { if (owns(owner)) notice.value = "Failed to fetch latest: ${it.message}" }
         }
     }
 
@@ -1675,7 +1825,7 @@ class ChatViewModel(
      * socket comes back; the displayed uptime then advances on its own.
      */
     private suspend fun refreshDaemonStart() {
-        val node = repo.node() ?: return
+        val node = runCatchingCancellable { repo.node() }.getOrNull() ?: return
         val started = node.startedAt
         if (started <= 0L) return
         // Same daemon as the last answer: the number on screen is already right,
@@ -1683,7 +1833,7 @@ class ChatViewModel(
         // change.
         if (started == daemonStartedAt.value) return
         daemonStartedAt.value = started
-        settings.saveDaemonStartedAt(started)
+        runCatchingCancellable { settings.saveDaemonStartedAt(started) }
     }
 
     /**
@@ -1695,14 +1845,12 @@ class ChatViewModel(
      * A cancelled switch (another tap, a closing drawer) then leaves the
      * previous chat whole, never a window with no floor that never fills.
      */
-    private suspend fun switchChat(sid: String): MessageWindow? {
-        val page = if (sid.isBlank()) null else try {
-            repo.latestWindow(sid, CHAT_PAGE)
-        } catch (_: Exception) {
-            null
-        }
+    private suspend fun switchChat(sid: String, request: Long): Boolean {
+        val page = if (sid.isBlank()) null else runCatchingCancellable { repo.latestWindow(sid, CHAT_PAGE) }.getOrNull()
+        currentCoroutineContext().ensureActive()
+        if (request != navigationVersion) return false
         adoptWindow(sid, page)
-        return page
+        return true
     }
 
     /**
@@ -1723,12 +1871,27 @@ class ChatViewModel(
         // Attachments were picked for the chat being left; sending them here
         // would put that chat's files in this one.
         pendingAttachments.value = emptyList()
+        uploadRequest++
+        uploading.value = false
+        routeVersion++
+        val route = draftRoutes[sid]
+        selectedProvider.value = route?.first.orEmpty()
+        selectedModel.value = route?.second.orEmpty()
+        hasStoredRoute.value = route != null
+        notice.value = ""
+        objectivesJob?.cancel()
+        objectivesRequest++
+        objectives.value = null
+        olderRequest++
+        olderJob?.cancel()
+        olderJob = null
         olderExhausted = false
         loadingOlder.value = false
         hasOlder.value = page?.hasOlder ?: false
         // An empty chat has no floor yet. Long.MIN_VALUE keeps the window open
         // so the optimistic row of the first send (seq 1) appears immediately.
-        window.value = ChatWindow(sid, windowFloorFor(page))
+        window.value = ChatWindow(sid, windowFloorFor(page), ++nextVisit)
+        refreshObjectives(sid)
     }
 
     /**
@@ -1736,29 +1899,36 @@ class ChatViewModel(
      * when it does not. Concurrent triggers are folded into one request: the
      * scroll listener can fire several times while a page is in flight.
      */
-    fun loadOlder() {
-        val sid = sessionId
-        val floor = windowFloor ?: return
-        if (loadingOlder.value || !hasOlder.value || olderExhausted || floor <= 1L) return
+    fun loadOlder(): Boolean {
+        val owner = chatOwner()
+        val floor = windowFloor ?: return false
+        if (loadingOlder.value || !hasOlder.value || olderExhausted || floor <= 1L) return false
+        val request = ++olderRequest
         loadingOlder.value = true
-        viewModelScope.launch {
-            val page = try {
-                repo.loadOlderWindow(sid, floor, CHAT_PAGE)
+        olderJob = viewModelScope.launch {
+            try {
+                val page = repo.loadOlderWindow(owner.sid, floor, CHAT_PAGE)
+                currentCoroutineContext().ensureActive()
+                if (!owns(owner) || request != olderRequest || windowFloor != floor) return@launch
+                if (page.messages.isNotEmpty()) {
+                    window.value = window.value.copy(floor = minOf(floor, page.messages.first().seq))
+                }
+                hasOlder.value = page.hasOlder
+                olderExhausted = !page.hasOlder
+            } catch (err: CancellationException) {
+                throw err
             } catch (err: Exception) {
-                notice.value = "Failed to load older history: ${err.message}"
-                loadingOlder.value = false
-                return@launch
+                if (owns(owner) && request == olderRequest) {
+                    notice.value = "Failed to load older history: ${err.message}"
+                }
+            } finally {
+                if (owns(owner) && request == olderRequest) {
+                    loadingOlder.value = false
+                    olderJob = null
+                }
             }
-            if (sessionId != sid) return@launch
-            if (page.messages.isNotEmpty()) {
-                // The new floor is the page's oldest message, so Room maps the
-                // page together with everything it already had.
-                window.value = window.value.copy(floor = page.messages.first().seq)
-            }
-            hasOlder.value = page.hasOlder
-            olderExhausted = !page.hasOlder
-            loadingOlder.value = false
         }
+        return true
     }
 
     fun clearNotice() { notice.value = "" }

@@ -176,4 +176,72 @@ class MarkdownBlocksTest {
         // block structure is a paragraph and the markers survive to be styled.
         assertEquals("***read*** now", parsed.text)
     }
+
+    @Test
+    fun `escaped pipes stay inside their table cells`() {
+        val table = blocks("name | meaning\n---- | -------\na\\|b | either").filterIsInstance<Block.Table>().single()
+        assertEquals(listOf(listOf("a|b", "either")), table.rows)
+    }
+
+    @Test
+    fun `an escaped final pipe is content not an outer border`() {
+        val table = blocks("name | meaning\n---- | -------\npipe | ends with \\|")
+            .filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("pipe", "ends with |"), table.rows.single())
+    }
+
+    @Test
+    fun `a longer fence can contain a shorter fence literally`() {
+        assertEquals(
+            listOf(Block.Code("```go\ngo test ./...\n```", "markdown")),
+            blocks("````markdown\n```go\ngo test ./...\n```\n````"),
+        )
+    }
+
+    @Test
+    fun `a closing fence cannot carry a language`() {
+        assertEquals(
+            listOf(Block.Code("first\n```kotlin\nlast", "text")),
+            blocks("```text\nfirst\n```kotlin\nlast\n```"),
+        )
+    }
+
+    @Test
+    fun `a closing fence may be longer than the opening fence`() {
+        assertEquals(
+            listOf(Block.Code("body", "text"), Block.Paragraph("after")),
+            blocks("```text\nbody\n`````\nafter"),
+        )
+    }
+
+    @Test
+    fun `blank lines at the start of code are not lost`() {
+        assertEquals(listOf(Block.Code("\n\nbody", "text")), blocks("```text\n\n\nbody\n```"))
+    }
+
+    @Test
+    fun `CRLF code has no extra spaces at the end of its lines`() {
+        assertEquals(listOf(Block.Code("  first\nsecond", "text")), blocks("```text\r\n  first\r\nsecond\r\n```"))
+    }
+
+    @Test
+    fun `backticks in an info string do not make a fence or disappear`() {
+        assertEquals(listOf(Block.Paragraph("```not a fence```")), blocks("```not a fence```"))
+    }
+
+    @Test
+    fun `trailing blank code lines are preserved too`() {
+        assertEquals(listOf(Block.Code("body\n\n", "text")), blocks("```text\nbody\n\n\n```"))
+    }
+
+    @Test
+    fun `another fence symbol cannot close the code block`() {
+        assertEquals(listOf(Block.Code("~~~\nbody", "text")), blocks("```text\n~~~\nbody\n```"))
+    }
+
+    @Test
+    fun `an even number of backslashes does not escape a table separator`() {
+        val table = blocks("name | meaning\n---- | -------\na\\\\| either").filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("a\\\\", "either"), table.rows.single())
+    }
 }

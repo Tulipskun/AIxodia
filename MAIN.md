@@ -1,4 +1,7 @@
 GOAL:
+[IN_PROCESS] Session 2026-10-29 (display/logic review): fix verified AIxodia
+             display bugs and flawed UI state logic, with regression coverage.
+
 [COMPLETED] Fix the crash on pressing send (operator: "แอพ crash ตอนกดส่งข้อความ"),
             then commit, push and cut the rolling `latest` release.
 
@@ -11,6 +14,14 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[COMPLETED] Review chat rendering, paging, live-event handover and formatting;
+            baseline: 247 tests, 231 passed, 16 renderer initialization failures.
+[IN_PROCESS] Reproduce verified defects, apply focused fixes and add regression
+             tests without changing the product's UI conventions.
+[IN_PROCESS] Run the full unit/snapshot suite and assemble the debug APK.
+[IN_PROCESS] Commit, push and publish the app's rolling `latest` after each
+             validated fix batch, as explicitly requested by the operator.
+
 [COMPLETED] Send-crash fix (this pass): every liveBlocks write now runs under a
             Mutex in ChatViewModel. WS frames mutate the live timeline on
             Dispatchers.IO while send()/beginLiveTurn/clearLiveTurn tear it down
@@ -81,6 +92,93 @@ PLAN:
             credential line synced to TokenCipher + backup exclusion.
 [IN_PROCESS] Commit, push to main (release).
 NOTE:
+- 2026-10-29 (display/logic review): baseline Paparazzi failures are a host
+  architecture mismatch: layoutlib-runtime-14.0.11-linux ships an AMD64 native
+  library that cannot load on this AARCH64 JVM. Do not hide or re-record these
+  failures. Add deterministic Markdown, accounting and coroutine regressions;
+  a test-owned repository scope permits exercising real reads without leaks.
+- Regression validation in progress: compile and run the new chat-state,
+  Markdown and token-accounting tests before applying behavioral fixes.
+  Application compilation passed; the first run exceeded its two-minute
+  command limit before test compilation. Retrying without that short limit.
+- Added real-repository regressions for cancelled cache/server reads,
+  cancelled session selection and sync, and failed older-page reads. These
+  exercise ChatRepository with mocked DAOs/transport and a test-owned scope.
+- Focused baseline confirmed: 53 tests ran, with 22 meaningful failures
+  (11 chat-state, 7 Markdown, 3 token-accounting, 1 percentage overflow).
+  Running the 13 repository regressions against unchanged read behavior next.
+- Applying the independently reproduced Markdown/accounting fixes: preserve
+  fence lengths, blank code lines and escaped table pipes; size the table's
+  scrollable content including all gaps/padding; use the explicit cache-input
+  convention and Long arithmetic for cache percentages.
+- Repository baseline: 12 cancellation cases reproduce swallowed cancellation
+  (some then reach unintended transport/pruning work); the ordinary-I/O case
+  had an invalid checked-exception Mockito stub, corrected to throw from its
+  suspendable answer. Critical cache/recovery reads will now propagate failure,
+  and best-effort work will catch ordinary errors without swallowing cancellation.
+- Validating the applied Markdown/accounting and repository/history patches
+  together (six focused suites), before changing chat ownership or draft logic.
+- Focused result: 65 tests, 63 passed. All Markdown, geometry, accounting and
+  repository cancellation tests pass. Two real-history tests received the
+  expected exception type/message but rejected coroutine stacktrace-recovery
+  copies by identity; assert the original cause remains in the chain instead.
+- Adding recovery/read-failure and same-chat stale-result regressions before
+  applying the remaining view-model fixes.
+- Running the expanded chat-state baseline plus the corrected real-history
+  assertions. ChatViewModel behavior is still unchanged at this point.
+- The expanded baseline has compiled and is executing the old behavior; it
+  already reproduces stale paging/route results, cross-chat retry, startup
+  override, attachment cleanup and cached-answer handover failures. Applying
+  chat/turn ownership guards while that compiled baseline finishes.
+- Live-block scheduling now captures the turn before launching; every mutation
+  checks that identity under the existing mutex, so teardown invalidates queued
+  work without undoing the earlier duplicate-key protections.
+- Startup, recovery and cached-answer handover are being changed to require
+  successful reads and matching ownership; unknown history is never treated as
+  a finished answer or as permission to retry a different chat.
+- Send/retry/model operations now capture their originating chat before the
+  first suspension. Success, failure and attachment cleanup will update only
+  that visit/turn; draft text is acknowledged only after repository acceptance.
+- Navigation has one latest-request owner, including startup and New chat.
+  Draft creation/session discovery will no longer select the transport as a
+  side effect; only an accepted navigation may select and persist its chat.
+- Older-page requests will own both their result and loading cleanup, including
+  failure and cancellation, so a departed request cannot exhaust a later visit.
+- Operator now explicitly requests commit + push + release for each completed
+  batch so progress can be checked on a phone. Publish only build-validated app
+  changes; keep the ARM Paparazzi blocker visible. No engine deploy requested.
+- Correcting fixture restubs that invoked their own suspended old answer; use
+  doReturn for replacements so the stale-result regressions can finish rather
+  than waiting on the very response the test has yet to complete.
+- Running the ownership patches through chat-state, real-history and repository
+  regressions on JDK17/ARM64. Inspecting the release workflow and working tree
+  before publishing the operator-requested progress build.
+- The current app has `.github/workflows/release.yml`: a push to main already
+  builds, signs and replaces `latest`. Use that single release writer, verify
+  its final APK/version metadata, and avoid racing it with a local publisher.
+- Ownership/history validation passed: 41 tests (24 chat-state, 4 real-history,
+  13 repository), BUILD SUCCESSFUL in 2m48s. The corrected suspended fixtures
+  complete normally. Running the complete suite and assembleDebug with
+  --continue so the known native renderer failures stay visible while the APK
+  is still built. Publish this verified batch before the remaining screen work.
+- Add full unit/renderer checks and retained reports to the existing x86
+  release workflow, before publishing. This supplies compatible renderer
+  evidence without skipping tests or re-recording snapshots on the ARM host.
+- Next batch: wire per-chat drafts/acceptance into ChatScreen, count the goals
+  card in paging geometry and release failed anchors for retries. Also add a
+  real RunSocket reducer regression: handle(run, ...) ignores the run argument
+  and tags an event with mutable frameSession(), allowing a departed SSE reader
+  to label old events with the newly selected chat. Fix only after reproduction.
+- Full local suite finished its tests: 307 ran, 291 passed; the same 16
+  renderer-initialization failures remain, with no logic/test regressions.
+  APK assembly is continuing. Prepare the next RunSocket regression separately
+  and leave it out of the first release until it has been executed and fixed.
+- First batch local validation complete: assembleDebug produced the APK.
+  The combined command correctly exits nonzero for the 16 known ARM renderer
+  failures; all other 291 of 307 tests pass. Commit the Markdown/accounting,
+  repository/history and 24-test view-model ownership fixes plus the x86 CI
+  test gate. The unexecuted RunSocketOwnershipTest belongs to the next batch
+  and is deliberately excluded from this commit/release.
 - Deliberate deviation, recorded rather than silently dropped: "off-main
   terminal parse" became chunked-with-yield parsing ON the main thread
   (TerminalPanel WRITE_CHUNK slices + yield()). emulator.write feeds the view

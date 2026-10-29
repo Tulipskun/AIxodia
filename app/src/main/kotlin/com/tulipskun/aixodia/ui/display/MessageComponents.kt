@@ -482,14 +482,9 @@ private fun footerIcon(field: TokenField): androidx.compose.ui.graphics.vector.I
  */
 fun ChatMessage.toTokenCounts(): TokenCounts = TokenCounts(
     cacheRead = cacheRead,
-    // The second half of in: is the part of the prompt the cache could not help
-    // with — total input minus what the cache served. Derived by subtraction from
-    // the two numbers the provider gave, so it does not depend on a convention
-    // flag: every row on the device, including those recorded before that flag
-    // existed, adds up to the prompt. When the cache figure exceeds the prompt
-    // figure the provider counted them separately, and then all of the prompt
-    // is fresh.
-    cacheWrite = if (cacheRead <= tokensIn) tokensIn - cacheRead else tokensIn,
+    // The footer's second input figure is fresh input, not just cache creation.
+    // Use the provider's explicit convention, as the session strip does too.
+    cacheWrite = freshInputTokens(),
     // Anthropic has no thinking count in its usage; OpenAI and Gemini report a
     // real one, zero on a model that does not think.
     reportsReasoning = inputIncludesCache,

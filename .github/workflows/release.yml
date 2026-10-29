@@ -44,6 +44,19 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
+      - name: Unit and renderer checks
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
+      - name: Retain test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/paparazzi/debug/
+
       - name: Build, sign and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -4,6 +4,7 @@ import com.tulipskun.aixodia.data.model.mergeToolPairs
 import com.tulipskun.aixodia.data.model.normalizedRole
 import com.tulipskun.aixodia.data.model.toolRowView
 import androidx.room.withTransaction
+import com.tulipskun.aixodia.data.runCatchingCancellable
 import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.local.MessageEntity
 import com.tulipskun.aixodia.data.local.SessionEntity
@@ -21,6 +22,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -43,8 +46,8 @@ class ChatRepository(
     private val db: AppDatabase,
     private val history: HistoryApi,
     private val socket: ChatTransport,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val connState: StateFlow<ConnState> = socket.state
     /** A string resource id (0 = nothing wrong). */
     val socketError: StateFlow<Int> = socket.lastError
@@ -80,17 +83,18 @@ class ChatRepository(
                         // were away (incremental, no full re-pull), verify
                         // against D1 and repair only missing turns, then resend
                         // anything still queued.
-                        refreshLatest(_active.value)
-                        scope.launch { verify(_active.value) }
+                        val sid = _active.value
+                        runCatchingCancellable { refreshLatest(sid) }
+                        scope.launch { runCatchingCancellable { verify(sid) } }
                     }
                     // The first ONLINE also repairs the chat list: settings can
                     // be written a moment after the screen is created, so an
                     // earlier sync would have seen an empty endpoint and pulled
                     // nothing.
-                    syncSessions()
+                    runCatchingCancellable { syncSessions() }
                     wasOnline = true
                     connectedBefore = true
-                    flushPending()
+                    runCatchingCancellable { flushPending() }
                 } else {
                     wasOnline = false
                 }
@@ -172,10 +176,11 @@ class ChatRepository(
      * never pruned.
      */
     suspend fun syncSessions() {
-        val rows = try { history.sessionsOrNull() } catch (_: Exception) { null } ?: return
+        val rows = runCatchingCancellable { history.sessionsOrNull() }.getOrNull() ?: return
         val ids = rows.map { it.id }.toSet()
-        val local = try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }
-        val pending = try { db.messages().allPending().map { it.sessionId }.toSet() } catch (_: Exception) { emptySet() }
+        // Unknown local or pending state is not permission to prune history.
+        val local = db.sessions().observeAll()
+        val pending = db.messages().allPending().map { it.sessionId }.toSet()
         // The daemon sends its newest page, not every chat. Treating an absent
         // id as deleted once the page is full would erase older chats from the
         // phone every time the user has more than one page of history.
@@ -187,10 +192,10 @@ class ChatRepository(
             if (!session.remote) continue
             if (!complete) continue
             if (session.id in pending) continue
-            try {
+            runCatchingCancellable {
                 db.messages().deleteSession(session.id)
                 db.sessions().delete(session.id)
-            } catch (_: Exception) { }
+            }
         }
         // An empty list is authoritative: the daemon answered and has no chats
         // (a server-side wipe, or a fresh engine under the same address). The
@@ -216,55 +221,57 @@ class ChatRepository(
      */
     suspend fun forgetDeadSession(sid: String) {
         if (sid.isEmpty()) return
-        try {
+        runCatchingCancellable {
             // Pending flags first: a queued row is flushed on reconnect, and
             // deleting the messages under a flush would leave the sender
             // writing into a chat that no longer exists on either side.
             db.messages().clearPending(sid)
             db.messages().deleteSession(sid)
             db.sessions().delete(sid)
-        } catch (_: Exception) { }
+        }
     }
 
     suspend fun openSession(sid: String) {
-        _active.value = sid
-        val local = try { db.sessions().get(sid) } catch (_: Exception) { null }
+        val local = db.sessions().get(sid)
+        val fromSeq = db.messages().maxSeq(sid)
         if (local == null) {
             // A chat can be opened from another device before its row reaches
             // this phone. Make a placeholder from the id now so the drawer and
             // the thread have somewhere to land; the real title, model and
             // usage arrive below without holding up the switch.
-            try {
+            runCatchingCancellable {
                 db.sessions().upsert(SessionEntity(id = sid, title = sid))
-            } catch (_: Exception) { }
+            }
         }
-        try { db.sessions().clearUnread(sid) } catch (_: Exception) { }
+        runCatchingCancellable { db.sessions().clearUnread(sid) }
 
         // The local part of a switch finishes here: socket, window floor and
         // the cached page. The network tail is pulled afterwards, so tapping a
         // chat does not sit on a D1 round trip before the screen changes.
+        currentCoroutineContext().ensureActive()
+        _active.value = sid
         socket.switchSession(sid)
-        socket.open(sid, db.messages().maxSeq(sid))
-        flushPending()
+        socket.open(sid, fromSeq)
+        runCatchingCancellable { flushPending() }
 
         // A draft has no D1 row to read or verify; asking would only log a 404.
         if (local?.remote != false) {
             scope.launch {
-                if (local == null) seedRemoteSession(sid)
-                // One newest-page read on open; loadOlder backfills the rest on demand.
-                refreshLatest(sid)
-                verify(sid)
+                runCatchingCancellable {
+                    if (local == null) seedRemoteSession(sid)
+                    // One newest-page read on open; loadOlder backfills the rest on demand.
+                    refreshLatest(sid)
+                    verify(sid)
+                }
             }
         }
     }
 
     /** Fills a placeholder row with the daemon's title, model and summed usage. */
     private suspend fun seedRemoteSession(sid: String) {
-        val row = try {
+        val row = runCatchingCancellable {
             history.sessions().firstOrNull { it.id == sid }
-        } catch (_: Exception) {
-            null
-        } ?: return
+        }.getOrNull() ?: return
         val usage = row.usage?.toStoredTotals()
         db.sessions().upsert(
             SessionEntity(
@@ -293,13 +300,12 @@ class ChatRepository(
         db.sessions().upsert(
             SessionEntity(id = id, title = title.ifBlank { "New chat" }, remote = false)
         )
-        openSession(id)
         return id
     }
 
     /** True while [sid] is a New chat the daemon has not been told about yet. */
     suspend fun isDraft(sid: String): Boolean =
-        try { db.sessions().get(sid)?.remote == false } catch (_: Exception) { false }
+        db.sessions().get(sid)?.remote == false
 
     /**
      * Creates the server row for a local draft, keeping its id. Idempotent on
@@ -308,13 +314,11 @@ class ChatRepository(
      */
     suspend fun ensureRemoteSession(sid: String, title: String): Boolean {
         if (sid.isBlank()) return false
-        val local = try { db.sessions().get(sid) } catch (_: Exception) { null }
+        val local = db.sessions().get(sid)
         if (local != null && local.remote) return true
-        val engineId = try {
+        val engineId = runCatchingCancellable {
             history.createSession(sid, title.ifBlank { "New chat" })
-        } catch (_: Exception) {
-            ""
-        }
+        }.getOrDefault("")
         if (engineId != sid) return false
         db.sessions().upsert(
             (local ?: SessionEntity(id = sid, title = title.ifBlank { "New chat" }))
@@ -325,22 +329,20 @@ class ChatRepository(
 
     /**
      * Chat apps do not ask for a session id: they open the last chat, or start
-     * one. This makes that decision here so the UI can stay a plain list.
+     * one. Choosing/creating is separate from selecting: a stale startup or
+     * New-chat request must not move the transport behind the visible window.
      */
     suspend fun ensureSession(preferred: String): String {
-        val known = try { db.sessions().get(preferred) } catch (_: Exception) { null }
+        val known = db.sessions().get(preferred)
         if (known != null && preferred.isNotBlank()) {
-            openSession(preferred)
             return preferred
         }
         // Prefer a session that already has messages, else start a new chat.
         // A fresh chat is local-only, so opening the app never creates a daemon
         // session before the person has actually said something.
-        val rows = try { db.sessions().observeAll() } catch (_: Exception) { emptyList() }
+        val rows = db.sessions().observeAll()
         val withContent = rows.firstOrNull { db.messages().count(it.id) > 0 } ?: rows.firstOrNull()
-        val id = withContent?.id ?: return createDraftSession()
-        openSession(id)
-        return id
+        return withContent?.id ?: createDraftSession()
     }
 
     suspend fun selectSession(id: String) = openSession(id)
@@ -349,20 +351,14 @@ class ChatRepository(
         val clean = title.trim().take(120)
         if (clean.isEmpty()) return
         db.sessions().get(id)?.let { db.sessions().upsert(it.copy(title = clean)) }
-        try { history.renameSession(id, clean) } catch (_: Exception) { }
+        runCatchingCancellable { history.renameSession(id, clean) }
     }
 
-    /** Deletes on both sides; when the active chat goes, the next one opens. */
+    /** Deletes on both sides; the owning UI navigation chooses the next chat. */
     suspend fun deleteSession(id: String) {
-        try { history.deleteSession(id) } catch (_: Exception) { }
+        runCatchingCancellable { history.deleteSession(id) }
         db.messages().deleteSession(id)
         db.sessions().delete(id)
-        if (_active.value == id) {
-            val next = try { db.sessions().observeAll().firstOrNull() } catch (_: Exception) { null }
-            val nextId = next?.id ?: createDraftSession()
-            _active.value = nextId
-            socket.switchSession(nextId)
-        }
     }
 
     /** Newest rows from the DB — the "reopen the app" path. */
@@ -387,7 +383,7 @@ class ChatRepository(
      * uptime locally, so no periodic healthz call is made.
      */
     suspend fun node(): com.tulipskun.aixodia.data.remote.NodeInfo? =
-        runCatching { history.node() }.getOrNull()
+        runCatchingCancellable { history.node() }.getOrNull()
 
     /** Uploads one attachment; null when the daemon could not take it. */
     suspend fun uploadAttachment(
@@ -403,14 +399,14 @@ class ChatRepository(
 
     /** The provider/model the daemon has stored for one chat, if it has one. */
     suspend fun sessionRoute(sid: String): Pair<String, String>? =
-        runCatching { history.sessions().firstOrNull { it.id == sid } }
+        runCatchingCancellable { history.sessions().firstOrNull { it.id == sid } }
             .getOrNull()
             ?.let { it.provider to it.model }
             ?.takeIf { it.first.isNotBlank() }
 
     /** One chat's goals and plans with statuses, from the daemon. */
     suspend fun objectives(sid: String): com.tulipskun.aixodia.data.remote.ObjectivesPage? =
-        runCatching { history.objectives(sid) }.getOrNull()
+        runCatchingCancellable { history.objectives(sid) }.getOrNull()
 
     /**
      * Pins provider and model for one chat. The daemon validates the pair and
@@ -426,7 +422,7 @@ class ChatRepository(
     suspend fun refreshLatest(sid: String) {
         // Incremental: only pull turns newer than what Room already has, so a
         // reconnect does not re-download the whole history (Telegram/Discord style).
-        val localMax = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
+        val localMax = db.messages().maxSeq(sid)
         val rows = if (localMax <= 0L) {
             // A cold open has no local seq to continue from. Pull one newest
             // page, not the whole transcript: older pages arrive on demand
@@ -434,9 +430,9 @@ class ChatRepository(
             // send is numbered from this page's max. An old page made that row
             // collide with turns that were already on the server; ten thousand
             // rows made opening a long chat download it before showing it.
-            try { history.latest(sid, limit = CHAT_PAGE) } catch (_: Exception) { emptyList() }
+            history.latest(sid, limit = CHAT_PAGE)
         } else {
-            try { history.turnsAfter(sid, localMax) } catch (_: Exception) { emptyList() }
+            history.turnsAfter(sid, localMax)
         }
         if (rows.isEmpty()) return
         reconcile(sid, rows)
@@ -453,23 +449,21 @@ class ChatRepository(
 
     /** Verifies Room vs D1 and repairs only missing turns (no full re-pull). */
     suspend fun verify(sid: String): Int {
-        val localMax = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
-        val remote = try {
+        val localMax = db.messages().maxSeq(sid)
+        val remote = runCatchingCancellable {
             // An empty cache gets the newest page, the same page the screen
             // opens on. Pulling the whole transcript here would fill the gap
             // below that page before the reader ever asked for it.
             if (localMax <= 0L) history.latest(sid, CHAT_PAGE)
             else history.turnsAfter(sid, localMax)
-        } catch (_: Exception) {
-            emptyList()
-        }
+        }.getOrDefault(emptyList())
         if (remote.isEmpty()) return 0
         reconcile(sid, remote)
         return remote.size
     }
 
     /** The highest stored seq, so a turn can stamp only the rows it created. */
-    suspend fun maxSeq(sid: String): Long = try { db.messages().maxSeq(sid) } catch (_: Exception) { 0L }
+    suspend fun maxSeq(sid: String): Long = db.messages().maxSeq(sid)
 
     /**
      * True when the last committed question has no answer after it. A pending
@@ -479,7 +473,7 @@ class ChatRepository(
      */
     suspend fun hasUnfinishedTurn(sid: String): Boolean {
         if (sid.isBlank()) return false
-        val rows = try { db.messages().allNow(sid) } catch (_: Exception) { return false }
+        val rows = db.messages().allNow(sid)
         val lastUser = rows.indexOfLast { it.role == "user" }
         if (lastUser < 0 || rows[lastUser].pending) return false
         return rows.drop(lastUser + 1).none { it.isStoredAnswer() }
@@ -488,11 +482,7 @@ class ChatRepository(
     /** When the last committed question was written, or 0 when there is none. */
     suspend fun lastUserCreatedAt(sid: String): Long {
         if (sid.isBlank()) return 0L
-        return try {
-            db.messages().allNow(sid).lastOrNull { it.role == "user" }?.createdAt ?: 0L
-        } catch (_: Exception) {
-            0L
-        }
+        return db.messages().allNow(sid).lastOrNull { it.role == "user" }?.createdAt ?: 0L
     }
 
     private fun MessageEntity.isStoredAnswer(): Boolean {
@@ -521,7 +511,7 @@ class ChatRepository(
         byCall: Map<String, Long>,
     ) {
         if (answerMs <= 0L && byCall.isEmpty()) return
-        val rows = try { db.messages().allNow(sid) } catch (_: Exception) { return }
+        val rows = runCatchingCancellable { db.messages().allNow(sid) }.getOrNull() ?: return
         var lastAnswer: MessageEntity? = null
         for (row in rows) {
             if (row.seq <= afterSeq) continue
@@ -530,12 +520,12 @@ class ChatRepository(
             val callId = try { Block.parse(row.block)?.id.orEmpty() } catch (_: Exception) { "" }
             val ms = byCall[callId] ?: continue
             if (ms > 0L) {
-                try { db.messages().stampThinkingAt(sid, row.seq, ms) } catch (_: Exception) { }
+                runCatchingCancellable { db.messages().stampThinkingAt(sid, row.seq, ms) }
             }
         }
         val answer = lastAnswer
         if (answerMs > 0L && answer != null && answer.reasoningContent.isNotBlank()) {
-            try { db.messages().stampThinkingAt(sid, answer.seq, answerMs) } catch (_: Exception) { }
+            runCatchingCancellable { db.messages().stampThinkingAt(sid, answer.seq, answerMs) }
         }
     }
 
@@ -558,10 +548,9 @@ class ChatRepository(
         // chat has to exist already, so the server session is ensured before the
         // row is marked pending again.
         var last: MessageEntity? = null
-        try {
+        runCatchingCancellable {
             val lastSeq = db.messages().maxSeq(sid)
             if (lastSeq > 0) last = db.messages().get(sid, lastSeq)
-        } catch (_: Exception) {
         }
         if (last != null && last.role == "user" && last.text.trim() == clean) {
             if (last.pending) return false
@@ -582,9 +571,9 @@ class ChatRepository(
             socket.send(sid, clean, clientMsgId, attachments)
             return true
         }
-        val dup = try {
+        val dup = runCatchingCancellable {
             db.messages().allPending().any { it.sessionId == sid && it.role == "user" && it.text.trim() == clean }
-        } catch (_: Exception) { false }
+        }.getOrDefault(false)
         if (dup) return false
         val clientMsgId = "$sid:${System.currentTimeMillis()}"
         val seq = db.messages().maxSeq(sid) + 1
@@ -610,7 +599,7 @@ class ChatRepository(
         if (socket.state.value == ConnState.ONLINE && isDraft(sid) &&
             !ensureRemoteSession(sid, clean.take(60))
         ) {
-            runCatching { db.messages().deleteOne(sid, seq) }
+            runCatchingCancellable { db.messages().deleteOne(sid, seq) }
             throw IllegalStateException("Could not start this chat on the daemon")
         }
         // queued == false → stays pending. queued == true also stays pending
@@ -644,10 +633,9 @@ class ChatRepository(
      * on the server, so the screen knows to ask for a page at the top.
      */
     suspend fun latestWindow(sid: String, limit: Int = CHAT_PAGE): MessageWindow {
-        val rows = try { db.messages().recent(sid, limit) } catch (_: Exception) { emptyList() }
-            .sortedBy { it.seq }
+        val rows = db.messages().recent(sid, limit).sortedBy { it.seq }
         if (rows.isEmpty()) return MessageWindow(emptyList(), hasOlder = false)
-        val cachedMin = try { db.messages().minSeq(sid) } catch (_: Exception) { rows.first().seq }
+        val cachedMin = db.messages().minSeq(sid)
         val oldest = rows.first().seq
         // Either the cache already holds rows below this page, or the sequence
         // starts after 1 and only the server can say whether more exists.
@@ -670,21 +658,15 @@ class ChatRepository(
         limit: Int = CHAT_PAGE,
     ): MessageWindow {
         if (beforeSeq <= 1L) return MessageWindow(emptyList(), hasOlder = false)
-        val cached = try { db.messages().before(sid, beforeSeq, limit) } catch (_: Exception) {
-            emptyList()
-        }.sortedBy { it.seq }
+        val cached = db.messages().before(sid, beforeSeq, limit).sortedBy { it.seq }
         if (cached.isNotEmpty()) {
             return MessageWindow(cached.toChatMessages(), hasOlder = cached.first().seq > 1L)
         }
 
-        val fetched = try { history.turns(sid, beforeSeq = beforeSeq, limit = limit) } catch (_: Exception) {
-            emptyList()
-        }
+        val fetched = history.turns(sid, beforeSeq = beforeSeq, limit = limit)
         if (fetched.isEmpty()) return MessageWindow(emptyList(), hasOlder = false)
         reconcile(sid, fetched)
-        val page = try { db.messages().before(sid, beforeSeq, limit) } catch (_: Exception) {
-            emptyList()
-        }.sortedBy { it.seq }
+        val page = db.messages().before(sid, beforeSeq, limit).sortedBy { it.seq }
         // A full server page may have more behind it; a short one is the start.
         // If reconcile moved rows out of range, ask again on the next scroll
         // rather than claiming the thread has ended.
@@ -718,10 +700,10 @@ class ChatRepository(
         if (rows.isEmpty()) return
         // Collapse stacked repeat taps first: identical queued questions keep
         // only the earliest row, so a retry can never double the bubble.
-        val queued = try { db.messages().allNow(sid) } catch (_: Exception) { emptyList() }
+        val queued = db.messages().allNow(sid)
         for (group in queued.filter { it.pending && it.role == "user" }.groupBy { it.text.trim() }.values) {
             for (extra in group.sortedBy { it.seq }.drop(1)) {
-                try { db.messages().deleteOne(sid, extra.seq) } catch (_: Exception) { }
+                runCatchingCancellable { db.messages().deleteOne(sid, extra.seq) }
             }
         }
         val entities = rows.map { it.toEntity(sid) }

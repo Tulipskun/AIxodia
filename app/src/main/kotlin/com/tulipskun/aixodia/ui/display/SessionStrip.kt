@@ -78,7 +78,8 @@ data class SessionTotals(
 ) {
     /** The share of the prompt served from cache, in whole percent. */
     val cachePercent: Int
-        get() = if (promptTokens <= 0) 0 else (cacheRead * 100 / promptTokens).coerceIn(0, 100)
+        get() = if (promptTokens <= 0) 0 else
+            (cacheRead.toLong() * 100L / promptTokens).coerceIn(0L, 100L).toInt()
 
     /** Nothing has been counted yet, so there is nothing worth a strip. */
     val isEmpty: Boolean get() = promptTokens <= 0 && outTokens <= 0 && totalMs <= 0L
