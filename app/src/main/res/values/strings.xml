@@ -15,6 +15,7 @@
     <string name="offline_unknown_host">Host not found — check the daemon and tunnel are still running</string>
     <string name="offline_retry">Retry</string>
 
+    <string name="composer_label">Message</string>
     <string name="composer_hint">Send a message…</string>
     <string name="send">Send</string>
     <string name="attach">Attach</string>
@@ -28,6 +29,7 @@
     <string name="clear_draft">Clear draft</string>
     <string name="new_chat">New chat</string>
     <string name="settings">Settings</string>
+    <string name="providers">Providers</string>
     <string name="refresh">Refresh latest</string>
     <string name="load_older">Load older messages</string>
     <string name="menu">Chat menu</string>
@@ -37,6 +39,8 @@
     <string name="empty_hint">Type below — the agent keeps working even after the app is closed</string>
 
     <string name="collapse">Collapse</string>
+    <string name="state_expanded">expanded</string>
+    <string name="state_collapsed">collapsed</string>
     <string name="expand">Expand</string>
     <string name="tool_done">Done</string>
     <string name="tool_failed">Failed</string>
@@ -50,6 +54,7 @@
     <string name="live_answering">Answering</string>
     <string name="live_thinking">Thinking · %1$s</string>
     <string name="sending">Sending…</string>
+    <string name="confirm">Confirm</string>
     <string name="sending_request">Sending request to provider…</string>
     <string name="thinking_title">Thinking…</string>
     <string name="thought_for">Thought for %1$s</string>
@@ -102,4 +107,86 @@
     <string name="goals_dropped">Dropped</string>
     <string name="goals_none">none</string>
     <string name="compact_marker">Context trimmed — kept %1$d turns, dropped %2$d</string>
+
+    <!-- Chat screen. -->
+    <string name="push_now_title">Push now?</string>
+    <string name="push_now_body">Signals the daemon to end this session: it backs up and starts the next one. Confirm?</string>
+    <string name="push_now_requested">Push now requested</string>
+    <string name="push_now_failed">Push now failed</string>
+    <string name="model_label">Model</string>
+    <string name="provider_label">Provider</string>
+    <string name="model_count">Model (%1$d)</string>
+    <string name="no_matching_model">No matching model</string>
+    <string name="use_for_chat">Use for this chat</string>
+    <string name="use_agent_default">Use agent default (clear this chat lock)</string>
+    <string name="check_updates">Check for updates</string>
+    <string name="app_version">App • %1$s</string>
+
+    <!-- Drawer. -->
+    <string name="drawer_chats">Chats</string>
+    <string name="drawer_search">Search chats…</string>
+    <string name="drawer_empty_title">No chats yet</string>
+    <string name="drawer_empty_hint">Press "New chat" to start talking to the agent</string>
+    <string name="drawer_no_match">No chats match "%1$s"</string>
+    <string name="group_today">Today</string>
+    <string name="group_yesterday">Yesterday</string>
+    <string name="group_week">Last 7 days</string>
+    <string name="group_older">Older</string>
+    <string name="no_messages_yet">No messages yet</string>
+    <string name="rename">Rename</string>
+    <string name="rename_chat_title">Rename chat</string>
+    <string name="chat_name">Chat name</string>
+    <string name="delete">Delete</string>
+    <string name="close">Close</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete_chat_title">Delete this chat?</string>
+    <string name="delete_chat_body">Chat "%1$s" and all its history will be deleted locally and on D1</string>
+    <plurals name="drawer_sessions">
+        <item quantity="one">%1$d session</item>
+        <item quantity="other">%1$d sessions</item>
+    </plurals>
+
+    <!-- Providers screen. -->
+    <string name="providers_title">Providers</string>
+    <string name="back">Back</string>
+    <string name="test_all">Test all</string>
+    <string name="add_provider">Add provider</string>
+    <string name="loading">Loading…</string>
+    <string name="providers_summary">%1$d providers · %2$d keys · %3$d working</string>
+    <string name="search_providers">Search name, adapter or endpoint</string>
+    <string name="filter_all">All</string>
+    <string name="filter_working">Working</string>
+    <string name="filter_untested">Untested</string>
+    <string name="filter_broken">Broken</string>
+    <string name="providers_no_match">Nothing matches this filter</string>
+    <string name="provider_daemon_no_reply">The daemon did not answer — check that ai-engine is running</string>
+    <string name="providers_tested">Tested %1$d of %2$d usable</string>
+    <string name="provider_status_working_model">Working · %1$s</string>
+    <string name="provider_status_working_count">Working · %1$d models</string>
+    <string name="provider_status_broken">Broken · %1$s</string>
+    <string name="provider_status_unknown">unknown reason</string>
+    <string name="provider_status_untested">Untested</string>
+    <string name="provider_meta_builtin">%1$s · built-in · no key needed</string>
+    <string name="provider_meta_keys">%1$s · %2$d keys</string>
+    <string name="builtin_opencode_note">This provider ships with the engine and cannot be edited or deleted.\nOpenCode opens its free models to its own app only, so this app is usually refused; paste your own key to use a paid model.</string>
+    <string name="builtin_free_note">This provider ships with the engine — no-login mode: usable at once without a key, and it cannot be edited or deleted.\nFree models answer about one message every 30 seconds; if you are rate-limited, wait and send again.</string>
+    <string name="provider_keys_count">%1$d keys</string>
+    <string name="provider_keys_stored">Keys are stored on the daemon and cannot be read back. Deleting one means pasting it again.</string>
+    <string name="key_n">Key %1$d</string>
+    <string name="add_key">Add key</string>
+    <string name="provider_test_failed">Test failed — the daemon did not answer</string>
+    <string name="provider_working_models">Working — %1$d models</string>
+    <string name="provider_broken_reason">Broken: %1$s</string>
+    <string name="testing">Testing…</string>
+    <string name="test_provider">Test this provider</string>
+    <string name="delete_provider">Delete provider</string>
+    <string name="delete_provider_title">Delete %1$s?</string>
+    <string name="delete_provider_body">Deletes the provider and all of its keys; this cannot be undone.</string>
+    <string name="provider_name_label">Name (e.g. nousresearch)</string>
+    <string name="api_shape">API shape</string>
+    <string name="provider_endpoint_label">Endpoint (https://…)</string>
+    <string name="provider_key_optional">Key (optional — leave blank if the provider needs none)</string>
+    <string name="saving">Saving…</string>
+    <string name="provider_added">Added %1$s</string>
 </resources>

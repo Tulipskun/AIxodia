@@ -1,4 +1,79 @@
 GOAL:
+[COMPLETED] Audit the Android UI (impeccable `audit`, native variant): a11y,
+            performance, theming, platform conformance, adaptivity. Document
+            findings only; no fixes in this pass. Score 12/20 (Acceptable),
+            1 P0, 4 P1, 17 P2, 4 P3.
+
+[IN_PROCESS] Fix every audit finding, P0 through P3, and take the result all
+            the way to the rolling `latest` release.
+
+PLAN:
+[COMPLETED] Session 2026-10-29 (impeccable finish pass): verified every
+            P0–P3 fix already in the working tree against its finding, wrote
+            DESIGN.md + .impeccable/design.json from the implemented tokens,
+            synced README (token-at-rest + stale Thai status-word quote) and
+            PRODUCT.md (credential model + voice split), fixed the one compile
+            error the tree carried (AddProviderSheet used ctx without a
+            LocalContext declaration).
+[COMPLETED] Load PRODUCT.md + Android platform reference (context run).
+[COMPLETED] Read the theme, entry point, chat/thread surface, settings and
+            terminal panels; check strings, manifest, build config.
+[COMPLETED] Score five dimensions, write the report with P0-P3 findings.
+[COMPLETED] P0: provider management reachable again (drawer Key row opening
+            ProvidersScreen), and the duplicate dead provider UI in Settings
+            removed (its six dialog states and imports deleted).
+[COMPLETED] P1: 48dp composer discs (DiscControl size floor + Role.Button
+            semantics) and terminal keys with a semantic click path, Settings
+            imePadding, bounded chat ViewModel retention (one viewModel keyed
+            by nav graph, not per session id — twenty chats no longer mean
+            twenty live ViewModels), token out of auto-backup
+            (backup_rules/data_extraction_rules exclude the DataStore file)
+            and sealed at rest with AES-GCM under an Android-keystore key
+            (TokenCipher; plaintext legacy values pass through and re-seal on
+            next save; tokenFlow reads on Dispatchers.IO).
+[COMPLETED] P2/P3: legend/type sizes raised to a 12sp readout floor, semantics
+            on expandable rows and selection, terminal TalkBack text
+            (TerminalBuffer.spokenTail), system bars declared dark
+            (enableEdgeToEdge SystemBarStyle.dark), non-role colours moved into
+            AixodiaColors beside the scheme (no second palette in ui/ except
+            the deliberately unthemed terminal ink), adaptive launcher icon
+            added, lazy drawer (SessionOrganize LazyColumn grouped+keyed),
+            ticker at one-per-second while busy, thinking-level picker
+            (ChoiceRow gated on model.supportsThinking; engine capability
+            reporting is the open follow-up below), StatusBanner severity set
+            where the outcome is known, strings sweep into res/values
+            (English default, values-en carries the shared technical subset),
+            rememberSaveable overlays/drafts, scrollable setup sheet,
+            Snackbar copy feedback, navigationBars∪ime inset union, connection
+            word kept as Online/Connecting/Offline strings (README's "ai
+            ออฟไลน์" quote was stale — corrected there and in PRODUCT.md's
+            voice line: English carries status words, Thai the failure
+            notices).
+[IN_PROCESS] Toolchain: JDK 17 + /opt/android-sdk, compileDebugKotlin then
+            testDebugUnitTest; record Paparazzi goldens
+            (:app:recordPaparazziDebug) so the repo carries rendered-output
+            evidence for the first time.
+[COMPLETED] DESIGN.md written from the implemented tokens (scan mode) with the
+            .impeccable/design.json sidecar; README auth section and PRODUCT.md
+            credential line synced to TokenCipher + backup exclusion.
+[IN_PROCESS] Commit, push to main (release).
+NOTE:
+- Deliberate deviation, recorded rather than silently dropped: "off-main
+  terminal parse" became chunked-with-yield parsing ON the main thread
+  (TerminalPanel WRITE_CHUNK slices + yield()). emulator.write feeds the view
+  directly, so moving it off-main would need a render-buffer handoff; the
+  stutter fix (frames land while a build log scrolls) is achieved without it.
+- The thinking picker offers the four levels all current providers accept
+  (GenerationSettings.thinkingLevels); ModelView.thinkingLevels exists for the
+  daemon to override per model, but the Rust engine reports only
+  supports_streaming/supports_tools today (api.rs models view). Engine-side
+  capability reporting is a separate deploy, deliberately not bundled into
+  this app release.
+- Evidence is source-level: no device/emulator here, and app/src/test/snapshots
+  holds no committed PNGs, so no rendered capture was re-verified.
+- Build and tests are the only runtime proof available; every fix below is
+  compile- and unit-test-verified, never screenshot-verified.
+
 [COMPLETED] Chat switching is store-first, like Discord/Telegram (operator:
             "ไม่เห็นจะดีขึ้นเลย ข้อมูลทุกอย่างเหมือนรอจาก ws อย่างเดียว ไม่มีการ
             เก็บไว้ใช้ซ้ำ การสลับแชทไปมาก็แสดงผลไม่ถูกต้อง" — the switch still

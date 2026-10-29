@@ -9,13 +9,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -25,6 +30,7 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
@@ -52,7 +58,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.tulipskun.aixodia.BuildConfig
@@ -75,37 +83,42 @@ import androidx.compose.ui.text.input.VisualTransformation
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.ui.settings.LabelledField
+import com.tulipskun.aixodia.ui.theme.aixodia
 
 /**
- * The blue that fills the send button. Deeper than the accent icons are drawn in
- * so that a white arrow reads on it at a glance: this is the one control on the
- * screen that is meant to be hit without reading.
- */
-private val SendAccent = Color(0xFF2F6FED)
-
-/**
- * The connection state as a bare colour — green / amber / red — with no word
- * beside it. The state is already the thing the colour encodes, and a label on
- * every screen of every app is noise; a screen reader still gets the meaning
- * from the content description.
+ * The connection state: a coloured dot with the state's own word beside it.
+ *
+ * The dot alone was the whole signal, and red against green is exactly the pair
+ * a red-green colourblind reader cannot separate — and the header is where the
+ * app says whether it can reach the machine. The word is small and quiet; it
+ * carries the meaning, and the colour only reinforces it.
  */
 @Composable
 fun ConnDot(c: ConnState) {
     // Green / amber / red, the colours a status dot is expected to wear. The
     // scheme's primary was blue, which reads as "selected", not "connected".
     val (label, color) = when (c) {
-        ConnState.ONLINE -> stringResource(R.string.online) to Color(0xFF3DDC84)
-        ConnState.CONNECTING -> stringResource(R.string.connecting) to Color(0xFFFFB020)
-        ConnState.OFFLINE -> stringResource(R.string.offline) to Color(0xFFE5484D)
+        ConnState.ONLINE -> stringResource(R.string.online) to MaterialTheme.aixodia.online
+        ConnState.CONNECTING -> stringResource(R.string.connecting) to MaterialTheme.aixodia.connecting
+        ConnState.OFFLINE -> stringResource(R.string.offline) to MaterialTheme.aixodia.offline
     }
-    Box(
-        Modifier
-            .padding(horizontal = 6.dp)
-            .size(10.dp)
-            .clip(CircleShape)
-            .background(color)
-            .semantics { contentDescription = label },
-    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 6.dp),
+    ) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 5.dp),
+        )
+    }
 }
 
 /**
@@ -132,13 +145,17 @@ fun SetupNeeded(
     var showToken by remember { mutableStateOf(false) }
     val clip = LocalClipboardManager.current
     // Edge-to-edge: the screen owns the whole window, so it has to keep its own
-    // content clear of the system bars. The navigation-bar inset is what keeps
-    // the version line at the bottom-right out from under the gesture bar; the
-    // IME inset lifts the whole form (and that line) above the keyboard.
-    Box(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
+    // content clear of the system bars. The inset is a union rather than two
+    // paddings added together: when the keyboard is up the IME already covers
+    // the gesture bar, so stacking them floated the form a bar's height above
+    // the keys. The column scrolls because at 200% font, or on a short screen
+    // with the keyboard open, the fields and the Continue button no longer fit
+    // and used to be clipped with no way to reach them.
+    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
             Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(28.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -318,6 +335,7 @@ fun ChatComposer(
     val attachLabel = stringResource(R.string.attach)
     val stopLabel = stringResource(R.string.stop)
     val sendLabel = stringResource(R.string.send)
+    val fieldLabel = stringResource(R.string.composer_label)
     val card = MaterialTheme.shapes.extraLarge
     val canSend = (draft.isNotBlank() || attachments.isNotEmpty()) && connected
     var commandMenuOpen by remember { mutableStateOf(false) }
@@ -358,7 +376,13 @@ fun ChatComposer(
         BasicTextField(
             value = draft,
             onValueChange = onDraftChange,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            // The placeholder is a separate Text, so once anything is typed it
+            // was gone and the field had no name at all: TalkBack announced
+            // "edit box" and nothing else. The label stays with the field.
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp)
+                .semantics { contentDescription = fieldLabel },
             textStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = MaterialTheme.colorScheme.onSurface,
             ),
@@ -503,10 +527,15 @@ private fun DiscControl(
     enabled: Boolean = true,
     primary: Boolean = false,
     outlined: Boolean = false,
-    size: Dp = 40.dp,
+    // 48dp is the platform floor for a touch target, and these are raw
+    // Surface-and-clickable discs rather than Material buttons, so nothing
+    // enforces it for them: the box *is* the hit area.
+    size: Dp = 48.dp,
     content: @Composable (Color) -> Unit,
 ) {
-    val container = if (primary && enabled) SendAccent else MaterialTheme.colorScheme.surfaceContainerHighest
+    val container =
+        if (primary && enabled) MaterialTheme.aixodia.send
+        else MaterialTheme.colorScheme.surfaceContainerHighest
     val tint = if (enabled) MaterialTheme.colorScheme.onSurface
     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     Box(
@@ -520,7 +549,10 @@ private fun DiscControl(
                 else Modifier
             )
             .clickable(enabled = enabled, onClick = onClick)
-            .semantics { contentDescription = label },
+            .semantics {
+                contentDescription = label
+                role = Role.Button
+            },
     ) {
         content(tint)
     }
@@ -542,11 +574,12 @@ private fun PillControl(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .height(40.dp)
+            .height(48.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
             .clickable(onClick = onClick)
+            .semantics { role = Role.Button }
             // 10 rather than 12: the row has four controls in it, and the two
             // dp the pills give back are the two dp the model name is short of
             // fitting. It still reads as a pill, not as a filled word.

@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -21,7 +22,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Edge-to-edge: let Compose handle status/nav bars via WindowInsets.
         // Without this, the system draws bars over the app (content under NavBar).
-        enableEdgeToEdge()
+        //
+        // The app is dark in every appearance, so the bars are declared dark
+        // rather than following the phone: with the default styles a phone in
+        // light mode drew dark status-bar icons on a black bar.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         val c = (application as AixodiaApp).container
         applyDebugSeed(intent)
         setContent {

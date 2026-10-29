@@ -68,6 +68,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.Block
@@ -107,7 +111,7 @@ fun formatClock(ts: Long): String =
  */
 @Composable
 private fun clockStyle() = MaterialTheme.typography.labelSmall.copy(
-    fontSize = 10.sp,
+    fontSize = 12.sp,
     fontFamily = FontFamily.Monospace,
 )
 
@@ -434,7 +438,7 @@ fun FooterLine(
                         // The harness draws this line at 26px on a 2.8125 px/dp
                         // screen, which is 9.2sp. Ten is what fits the whole
                         // model name on a 360dp thread without reaching for it.
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = if (piece.second) FontWeight.Normal else FontWeight.SemiBold,
                         color = if (piece.second) MaterialTheme.colorScheme.onSurfaceVariant
@@ -1011,6 +1015,8 @@ fun ToolCallCard(
     runningMs: Long = 0L,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val expandLabel = stringResource(R.string.state_collapsed)
+    val collapseLabel = stringResource(R.string.state_expanded)
     val open = expanded || running
     val scheme = MaterialTheme.colorScheme
     val shape = MaterialTheme.shapes.small
@@ -1024,7 +1030,7 @@ fun ToolCallCard(
             // announces itself as a button and then does not behave like one.
             onLongClickLabel = copyLabel.ifBlank { null },
         ),
-    )
+    ).expandable(expanded, !running, expandLabel, collapseLabel)
     Surface(
         color = scheme.surfaceContainerHigh,
         shape = shape,
@@ -1048,7 +1054,7 @@ fun ToolCallCard(
                     Text(
                         ">_",
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 8.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = scheme.primary,
                     )
@@ -1192,6 +1198,21 @@ private fun AttachmentChip(file: AttachmentRef) {
  * expanded it is three sections that separate what is in progress from what
  * succeeded and what was dropped.
  */
+/**
+ * The semantics a row that opens and closes owes a screen reader: it is a
+ * button, and it says whether it is open. Without this the row announced itself
+ * as plain text that happened to move things when tapped.
+ */
+private fun Modifier.expandable(
+    expanded: Boolean,
+    enabled: Boolean,
+    expandLabel: String,
+    collapseLabel: String,
+): Modifier = if (!enabled) this else this.semantics {
+    role = Role.Button
+    stateDescription = if (expanded) collapseLabel else expandLabel
+}
+
 @Composable
 fun GoalsCard(page: com.tulipskun.aixodia.data.remote.ObjectivesPage) {
     var expanded by remember { mutableStateOf(false) }
@@ -1208,6 +1229,12 @@ fun GoalsCard(page: com.tulipskun.aixodia.data.remote.ObjectivesPage) {
                 Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
+                    .expandable(
+                        expanded,
+                        true,
+                        stringResource(R.string.state_collapsed),
+                        stringResource(R.string.state_expanded),
+                    )
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1334,6 +1361,12 @@ fun CompactMarker(keptTurns: Int, droppedTurns: Int, summary: List<String>) {
                 Modifier
                     .fillMaxWidth()
                     .clickable(summary.isNotEmpty()) { expanded = !expanded }
+                    .expandable(
+                        expanded,
+                        summary.isNotEmpty(),
+                        stringResource(R.string.state_collapsed),
+                        stringResource(R.string.state_expanded),
+                    )
                     .padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

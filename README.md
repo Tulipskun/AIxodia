@@ -51,8 +51,10 @@ db/             Cloudflare D1 schema + migrations (applied with wrangler, no Wor
 `ai` serves the mobile WS on localhost only and opens a Cloudflare **quick
 tunnel** (`ai/transport/mobile/tunnel.go`); the random trycloudflare URL is
 written into D1 by the daemon itself. The app reads that row directly — no
-Worker and no `/api/node` round trip — and shows "ai ออฟไลน์" once the heartbeat
-is older than 90s. `ai` keeps no local state: config and sessions live in D1, and
+Worker and no `/api/node` round trip — and its status dot reads "Offline" once
+the heartbeat is older than 90s, with the banner's reason in Thai (the
+operator's language) while shared technical vocabulary stays English. `ai`
+keeps no local state: config and sessions live in D1, and
 the Cloudflare API token (sent in the WS hello, memory-only) is the daemon's
 credential too.
 
@@ -120,6 +122,11 @@ without approval; the daemon owns no credential of its own.
 - One credential does the work: the Cloudflare API token typed in Settings reads
   the daemon row out of D1, and the same token authenticates the `/v1/...`
   calls (the terminal WebSocket uses a short-lived ticket derived from it).
+  At rest the token is sealed with AES-GCM under a key that lives in the Android
+  keystore (`TokenCipher`) and is excluded from auto-backup
+  (`res/xml/backup_rules.xml`), so a preference-file backup is ciphertext that
+  is useless on another phone. Values stored before sealing existed are read
+  as-is and re-sealed on the next save.
 - The token used for `wrangler` stays in the shell (`CLOUDFLARE_API_TOKEN`); the
   repo contains config (`config/aixodia.example.json`) and no secrets. It needs
   Account → **D1: Edit**, which is what the app and the daemon both use it for.

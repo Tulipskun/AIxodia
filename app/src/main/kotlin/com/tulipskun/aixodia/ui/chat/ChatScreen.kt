@@ -23,12 +23,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -41,6 +43,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
@@ -68,6 +71,8 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -109,7 +114,6 @@ import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
-import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
@@ -191,9 +195,11 @@ fun ChatScreen(
     }
     val configured = token.isNotBlank()
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
-    var showSettings by remember { mutableStateOf(false) }
-    var showProviders by remember { mutableStateOf(false) }
-    var showTerminal by remember { mutableStateOf(false) }
+    // Saveable: a rotation in the terminal or in settings used to drop the
+    // reader back into the thread, losing the tab they were on.
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showProviders by rememberSaveable { mutableStateOf(false) }
+    var showTerminal by rememberSaveable { mutableStateOf(false) }
 
     // The terminal's sockets, tabs and grids belong to this screen, not to the
     // visible window. Back only hides the window: every WebSocket stays
@@ -269,8 +275,17 @@ fun ChatScreen(
     }
 
     val context = LocalContext.current
-    val vm: ChatViewModel = viewModel(key = sessId) {
+    // One view model for the screen, not one per chat visited. Keying it by
+    // session id kept every chat ever opened alive for the life of the
+    // activity — its Room flows, its observers, its coroutine scope — so twenty
+    // chats meant twenty live view models. The model already knows how to move
+    // between chats atomically (ChatWindow), which is the same path the drawer
+    // takes, so a switch is a state change here instead of a new instance.
+    val vm: ChatViewModel = viewModel {
         ChatViewModel(repo, settings, sessId, context.applicationContext)
+    }
+    LaunchedEffect(sessId) {
+        if (sessId.isNotBlank()) vm.openChat(sessId)
     }
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
     val sessionUsage by vm.sessionUsage.collectAsStateWithLifecycle(initialValue = null)
@@ -323,7 +338,10 @@ fun ChatScreen(
     var deleting by remember { mutableStateOf<ChatSession?>(null) }
     var showModelPicker by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf<ChatMessage?>(null) }
-    var toast by remember { mutableStateOf("") }
+    // A Snackbar, not a line of text that appears for two seconds: it is
+    // announced to TalkBack, it does not shift the composer, and it is the
+    // platform's own way of saying something happened without changing state.
+    val snackbar = remember { SnackbarHostState() }
     var showPushNowDialog by remember { mutableStateOf(false) }
     var pushNowBusy by remember { mutableStateOf(false) }
 
@@ -366,10 +384,13 @@ fun ChatScreen(
     // footer showed "19:42" beside a message sent at 05:13.
     var tick by remember { mutableStateOf(Tick.now()) }
     val nowMs = tick.elapsed
+    // One tick a second, not five: every label this feeds prints whole seconds
+    // ("0:07", "2.4s"), so the extra four recompositions of the whole screen
+    // changed no pixel. It still runs only while a turn is in flight.
     LaunchedEffect(busy) {
         while (busy) {
             tick = Tick.now()
-            kotlinx.coroutines.delay(200)
+            kotlinx.coroutines.delay(1000)
         }
     }
     // What the model button under the field reads: the model alone. The footer
@@ -390,10 +411,10 @@ fun ChatScreen(
     // recomposition, so Compose rebuilt the visible page for every streamed
     // token — the thread re-styled its own Markdown twice a second while an
     // answer was writing, and that is the stutter.
-    val copyMessage: (ChatMessage) -> Unit = remember(clip, copiedText) {
+    val copyMessage: (ChatMessage) -> Unit = remember(clip, copiedText, scope) {
         { m: ChatMessage ->
             clip.setText(AnnotatedString(m.text.ifBlank { m.toolArgs }))
-            toast = copiedText
+            scope.launch { snackbar.showSnackbar(copiedText) }
         }
     }
     val composerCommands = listOf(
@@ -410,12 +431,6 @@ fun ChatScreen(
         while (daemonStartedAt > 0L) {
             uptimeNow = System.currentTimeMillis()
             kotlinx.coroutines.delay(1000)
-        }
-    }
-    LaunchedEffect(toast) {
-        if (toast.isNotBlank()) {
-            kotlinx.coroutines.delay(2200)
-            toast = ""
         }
     }
     // The thread holds a page of rows, not the whole history. Everything below
@@ -559,10 +574,13 @@ fun ChatScreen(
         )
     }
     if (showPushNowDialog) {
+        // Hoisted out of the coroutine below: stringResource is a composable.
+        val pushNowDone = stringResource(R.string.push_now_requested)
+        val pushNowFail = stringResource(R.string.push_now_failed)
         AlertDialog(
             onDismissRequest = { if (!pushNowBusy) showPushNowDialog = false },
-            title = { Text("Push now?") },
-            text = { Text("Signals the daemon to end this session: it backs up and starts the next one. Confirm?") },
+            title = { Text(stringResource(R.string.push_now_title)) },
+            text = { Text(stringResource(R.string.push_now_body)) },
             confirmButton = {
                 TextButton(
                     enabled = !pushNowBusy,
@@ -572,13 +590,13 @@ fun ChatScreen(
                             val ok = history.pushNow()
                             pushNowBusy = false
                             showPushNowDialog = false
-                            toast = if (ok) "Push now requested" else "Push now failed"
+                            snackbar.showSnackbar(if (ok) pushNowDone else pushNowFail)
                         }
                     },
-                ) { Text(if (pushNowBusy) "Sending…" else "Confirm") }
+                ) { Text(stringResource(if (pushNowBusy) R.string.sending else R.string.confirm)) }
             },
             dismissButton = {
-                TextButton(enabled = !pushNowBusy, onClick = { showPushNowDialog = false }) { Text("Cancel") }
+                TextButton(enabled = !pushNowBusy, onClick = { showPushNowDialog = false }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -633,12 +651,40 @@ fun ChatScreen(
                 onOpen = { id -> vm.openChat(id); scope.launch { drawer.close() } },
                 onLongPress = { pending = it },
                 footer = {
-                    // Settings lives in the drawer, like ChatGPT and Claude put
-                    // it behind the hamburger, instead of an icon crowding the
-                    // top bar next to the status dot. The footer is anchored to
-                    // the bottom of the sheet, so this row sits low instead of
-                    // floating under a long list.
-                    UpdateRow(settings) { showSettings = true }
+                    Column(Modifier.fillMaxWidth()) {
+                        // Providers and Settings are the two controls over the
+                        // machine, so they sit together at the foot of the
+                        // drawer. Providers had a row here once and lost it when
+                        // the footer was restyled; without it a provider that
+                        // ran out of keys could not be re-keyed from the phone
+                        // at all, because every other path to that screen was
+                        // dead code.
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { showProviders = true }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Default.Key,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                stringResource(R.string.providers),
+                                modifier = Modifier.padding(start = 10.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
+                        // Settings lives in the drawer, like ChatGPT and Claude put
+                        // it behind the hamburger, instead of an icon crowding the
+                        // top bar next to the status dot. The footer is anchored to
+                        // the bottom of the sheet, so this row sits low instead of
+                        // floating under a long list.
+                        UpdateRow(settings) { showSettings = true }
+                    }
                 },
             )
         }
@@ -649,6 +695,7 @@ fun ChatScreen(
             // being inset twice.
             containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 TopAppBar(
                     // The title used to carry the model chip under it. The chip
@@ -670,7 +717,10 @@ fun ChatScreen(
                     },
                     actions = {
                         IconButton(onClick = { showPushNowDialog = true }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Push now")
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = stringResource(R.string.push_now_title),
+                            )
                         }
                         // Status at a glance: a coloured dot and how long the
                         // daemon has been up. No words — the colour is the state.
@@ -695,18 +745,14 @@ fun ChatScreen(
                 Surface(color = MaterialTheme.colorScheme.background) {
                     Column(
                         Modifier.fillMaxWidth()
-                            .navigationBarsPadding()
-                            .imePadding()
+                            // Union, not two paddings: with the keyboard up the
+                            // IME already covers the gesture bar, so stacking
+                            // them floated the composer a bar's height above it.
+                            .windowInsetsPadding(
+                                WindowInsets.navigationBars.union(WindowInsets.ime),
+                            )
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
-                        if (toast.isNotBlank()) {
-                            Text(
-                                toast,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(bottom = 2.dp),
-                            )
-                        }
                         if (busy) {
                             // Motion that means something: the agent is working
                             // and this is how long it has been at it.
@@ -939,10 +985,6 @@ fun ChatScreen(
     }
 }
 
-/** How a thinking level reads in the picker: blank is the model's own default. */
-private fun thinkingLabel(level: String): String =
-    if (level.isBlank()) "Default" else level.replaceFirstChar { it.uppercase() }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatModelSheet(
@@ -960,22 +1002,12 @@ private fun ChatModelSheet(
     var providerMenu by remember { mutableStateOf(false) }
     var modelMenu by remember { mutableStateOf(false) }
     var modelQuery by rememberSaveable { mutableStateOf("") }
-    var thinkingMenu by remember { mutableStateOf(false) }
-    var thinkingLevel by rememberSaveable { mutableStateOf("") }
     val provider = providers.firstOrNull { it.id == pickedProvider }
     val models = provider?.models.orEmpty()
     // The daemon's default model is the one a health check actually got an
     // answer from, so it leads the list: a catalogue of twenty models says
     // nothing about which one this key can use.
     val working = provider?.defaultModel.orEmpty()
-    // Thinking levels are the daemon's per-model answer. Until it reports
-    // thinking_levels, the set every provider accepts stands in so the picker
-    // is usable; a daemon list always wins over it.
-    val pickedModelView = models.firstOrNull { it.id == pickedModel }
-    val daemonLevels = pickedModelView?.thinkingLevels.orEmpty()
-    val thinkingOptions =
-        if (daemonLevels.isNotEmpty()) listOf("") + daemonLevels else GenerationSettings.thinkingLevels
-    val showThinking = pickedModelView?.supportsThinking == true || daemonLevels.isNotEmpty()
     val filtered = remember(models, modelQuery, working) {
         val searched = if (modelQuery.isBlank()) models else models.filter { it.id.contains(modelQuery, true) || it.name.contains(modelQuery, true) }
         if (working.isBlank() || searched.none { it.id == working }) searched
@@ -1001,7 +1033,7 @@ private fun ChatModelSheet(
             // This chat's own model: the main agent it answers with. The provider
             // is a drop-down rather than a row of chips so a long provider list
             // opens over the dialog instead of pushing the model list off screen.
-            Text("Model", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.model_label), style = MaterialTheme.typography.titleMedium)
             // Always the picker, never a "no provider" notice: the built-in
             // keyless provider makes this list non-empty on any daemon that
             // answers, and a daemon that does not answer should show an empty
@@ -1014,7 +1046,7 @@ private fun ChatModelSheet(
                     value = pickedProvider,
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("Provider") },
+                    label = { Text(stringResource(R.string.provider_label)) },
                     trailingIcon = {
                         ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenu)
                     },
@@ -1060,7 +1092,7 @@ private fun ChatModelSheet(
                     value = if (modelMenu) modelQuery else pickedModel,
                     onValueChange = { modelQuery = it; modelMenu = true },
                     singleLine = true,
-                    label = { Text("Model (${models.size})") },
+                    label = { Text(stringResource(R.string.model_count, models.size)) },
                     placeholder = {
                         Text(if (modelMenu) "Type to search" else "Select a model")
                     },
@@ -1075,7 +1107,7 @@ private fun ChatModelSheet(
                 ) {
                     if (filtered.isEmpty()) {
                         DropdownMenuItem(
-                            text = { Text("No matching model") },
+                            text = { Text(stringResource(R.string.no_matching_model)) },
                             onClick = {},
                             enabled = false,
                         )
@@ -1102,47 +1134,16 @@ private fun ChatModelSheet(
                     }
                 }
             }
-            // Chat-level thinking level. The choices are the daemon's; persisting
-            // the pick per session still waits on its settings endpoint, so the
-            // value lives in local state and does not change what the agent sends.
-            if (showThinking) {
-                ExposedDropdownMenuBox(
-                    expanded = thinkingMenu,
-                    onExpandedChange = { thinkingMenu = it },
-                ) {
-                    OutlinedTextField(
-                        value = thinkingLabel(thinkingLevel),
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Thinking level") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = thinkingMenu)
-                        },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = thinkingMenu,
-                        onDismissRequest = { thinkingMenu = false },
-                    ) {
-                        thinkingOptions.forEach { lvl ->
-                            DropdownMenuItem(
-                                text = { Text(thinkingLabel(lvl)) },
-                                onClick = { thinkingLevel = lvl; thinkingMenu = false },
-                            )
-                        }
-                    }
-                }
-            }
             Button(
                 onClick = onSave,
                 enabled = pickedProvider.isNotBlank() && pickedModel.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Use for this chat") }
+            ) { Text(stringResource(R.string.use_for_chat)) }
             TextButton(
                 onClick = onClear,
                 enabled = hasStoredRoute,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Use agent default (clear this chat lock)") }
+            ) { Text(stringResource(R.string.use_agent_default)) }
 
         }
     }
@@ -1155,7 +1156,7 @@ private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
     var msg by remember { mutableStateOf("App v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Text("App • $msg", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.app_version, msg), style = MaterialTheme.typography.labelMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         FilledTonalButton(
             onClick = {
@@ -1177,7 +1178,7 @@ private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
                 }
             },
             enabled = !busy,
-        ) { Text("Check for updates") }
+        ) { Text(stringResource(R.string.check_updates)) }
         IconButton(onClick = onSettings) {
             Icon(Icons.Default.Settings, contentDescription = "Settings")
         }

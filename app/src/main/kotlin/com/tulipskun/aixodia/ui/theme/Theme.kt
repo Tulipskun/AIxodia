@@ -7,6 +7,9 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -120,6 +123,44 @@ private val LightColors = lightColorScheme(
     surfaceContainerHighest = Color(0xFFDDE4E1),
 )
 
+/**
+ * The colours that are not Material roles.
+ *
+ * A status dot is not `primary` and a send button is not `secondary`: the dot
+ * has to be green/amber/red in a way a user recognises before reading, and send
+ * is the one control meant to be hit without reading, so it wears a blue deeper
+ * than the accent icons. They live here, next to the scheme, instead of as raw
+ * hex inside two composables: one place to change them, and no second palette
+ * growing in the UI layer.
+ */
+@Immutable
+data class AixodiaColors(
+    val send: Color,
+    val online: Color,
+    val connecting: Color,
+    val offline: Color,
+)
+
+private val DarkExtras = AixodiaColors(
+    send = Color(0xFF2F6FED),
+    online = Color(0xFF3DDC84),
+    connecting = Color(0xFFFFB020),
+    offline = Color(0xFFE5484D),
+)
+
+private val LightExtras = AixodiaColors(
+    send = Color(0xFF1F5FD6),
+    online = Color(0xFF12833F),
+    connecting = Color(0xFF8A5A00),
+    offline = Color(0xFFB3261E),
+)
+
+private val LocalAixodiaColors = staticCompositionLocalOf { DarkExtras }
+
+/** The non-role colours of the current theme. */
+val MaterialTheme.aixodia: AixodiaColors
+    @Composable get() = LocalAixodiaColors.current
+
 private val AppTypography = Typography(
     titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
     titleSmall = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
@@ -161,8 +202,12 @@ fun AIxodiaTheme(
         colorScheme = scheme,
         typography = AppTypography,
         shapes = shapes,
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(
+            LocalAixodiaColors provides if (dark) DarkExtras else LightExtras,
+            content = content,
+        )
+    }
 }
 
 /** Parses "#RRGGBB" (or "#AARRGGBB"), returning null when it is not a colour. */

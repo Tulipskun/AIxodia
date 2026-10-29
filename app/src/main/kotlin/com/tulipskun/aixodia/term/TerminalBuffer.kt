@@ -190,6 +190,27 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
         defaultBg = bgColor
     }
 
+    /**
+     * The last [maxRows] rows as plain text, for the terminal's accessibility
+     * description. A wide character owns its cell and leaves a zero in the next
+     * one, so the zero is skipped and Thai or CJK reads without gaps.
+     */
+    fun spokenTail(maxRows: Int = 12): String {
+        val from = (lines.size - maxRows).coerceAtLeast(0)
+        val out = StringBuilder()
+        for (i in from until lines.size) {
+            val row = lines[i]
+            val end = row.lastWritten
+            if (end < 0) continue
+            for (c in 0..end) {
+                val cp = row.chars[c]
+                if (cp != 0) out.appendCodePoint(cp)
+            }
+            out.append('\n')
+        }
+        return out.toString().trimEnd()
+    }
+
     fun blankRow(): TerminalRow = TerminalRow(columns).also { it.reset(defaultFg, defaultBg) }
 
     fun reset() {

@@ -4,8 +4,10 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 
 private val Context.ds by preferencesDataStore("aixodia")
@@ -76,7 +78,11 @@ class SettingsStore(private val ctx: Context) {
 
     val endpointFlow: Flow<String> = ctx.ds.data.map { it[endpoint] ?: "" }
     val daemonUrlFlow: Flow<String> = ctx.ds.data.map { it[daemonUrl] ?: "" }
-    val tokenFlow: Flow<String> = ctx.ds.data.map { it[token] ?: "" }
+    // The token is sealed at rest (see TokenCipher), so every read goes through
+    // the keystore: off the main thread, because a flow mapped on the main
+    // dispatcher would do a keystore round trip there.
+    val tokenFlow: Flow<String> =
+        ctx.ds.data.map { TokenCipher.open(it[token].orEmpty()) }.flowOn(Dispatchers.IO)
     val accountIdFlow: Flow<String> = ctx.ds.data.map { it[accountId] ?: "" }
     val databaseIdFlow: Flow<String> = ctx.ds.data.map { it[databaseId] ?: "" }
     val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "" }
@@ -97,7 +103,7 @@ class SettingsStore(private val ctx: Context) {
         return ConnConfig(
             endpoint = prefs[endpoint].orEmpty(),
             daemonUrl = prefs[daemonUrl].orEmpty(),
-            token = prefs[token].orEmpty(),
+            token = TokenCipher.open(prefs[token].orEmpty()),
             accountId = prefs[accountId].orEmpty(),
             databaseId = prefs[databaseId].orEmpty(),
             sessionId = prefs[sessionId].orEmpty(),
@@ -111,7 +117,7 @@ class SettingsStore(private val ctx: Context) {
      */
     suspend fun saveD1(tokenValue: String, accountValue: String = "", databaseValue: String = "") {
         ctx.ds.edit {
-            it[token] = tokenValue.trim()
+            it[token] = TokenCipher.seal(tokenValue.trim())
             if (accountValue.isNotBlank()) it[accountId] = accountValue.trim()
             if (databaseValue.isNotBlank()) it[databaseId] = databaseValue.trim()
         }

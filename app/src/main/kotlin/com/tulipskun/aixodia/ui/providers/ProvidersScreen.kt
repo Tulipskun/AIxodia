@@ -55,8 +55,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.ui.settings.ProviderFilter
@@ -71,6 +74,9 @@ private val adapters = listOf("openai", "anthropic", "opencode", "gemini")
 @Composable
 fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
+    // setString, not stringResource: the messages below are built inside
+    // suspend blocks, where a composable call is not allowed.
+    val ctx = LocalContext.current
     var providers by remember { mutableStateOf<List<ProviderStatus>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -79,7 +85,8 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
     var filter by rememberSaveable { mutableStateOf(ProviderFilter.ALL) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
-    // Providers the user tested in this session, so "ใช้ไม่ได้" and "ยังไม่ทดสอบ" stay honest.
+    // Providers the user tested in this session, so "broken" and "untested"
+    // stay honest.
     var tested by remember { mutableStateOf(setOf<String>()) }
 
     LaunchedEffect(Unit) {
@@ -101,9 +108,14 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ผู้ให้บริการ") },
+                title = { Text(stringResource(R.string.providers_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "ย้อนกลับ") }
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
                 },
                 actions = {
                     IconButton(
@@ -113,22 +125,26 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
                             scope.launch {
                                 val fresh = history.refreshProviders()
                                 if (fresh.isEmpty()) {
-                                    message = "daemon ไม่ได้ตอบ ตรวจว่า ai-engine ยังรันอยู่"
+                                    message = ctx.getString(R.string.provider_daemon_no_reply)
                                 } else {
                                     providers = fresh
                                     tested = fresh.map { it.id }.toSet()
-                                    message = "ทดสอบแล้ว ${fresh.count { it.reachable }} จาก ${fresh.size} ใช้ได้"
+                                    message = ctx.getString(
+                                        R.string.providers_tested,
+                                        fresh.count { it.reachable },
+                                        fresh.size,
+                                    )
                                 }
                                 busy = false
                             }
                         },
-                    ) { Icon(Icons.Default.Refresh, contentDescription = "ทดสอบทั้งหมด") }
+                    ) { Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.test_all)) }
                 },
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { adding = true }) {
-                Icon(Icons.Default.Add, contentDescription = "เพิ่ม provider")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_provider))
             }
         },
     ) { pad ->
@@ -141,8 +157,13 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
 
             Text(
-                if (!loaded) "กำลังโหลด…"
-                else "${counts.all} ผู้ให้บริการ · ${providers.sumOf { it.keyCount }} key · ${counts.working} ใช้ได้",
+                if (!loaded) stringResource(R.string.loading)
+                else stringResource(
+                    R.string.providers_summary,
+                    counts.all,
+                    providers.sumOf { it.keyCount },
+                    counts.working,
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 8.dp),
@@ -153,7 +174,7 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
                     value = query,
                     onValueChange = { query = it },
                     singleLine = true,
-                    placeholder = { Text("ค้นหาชื่อ, adapter หรือ endpoint") },
+                    placeholder = { Text(stringResource(R.string.search_providers)) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -165,10 +186,10 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 listOf(
-                    Triple(ProviderFilter.ALL, "ทั้งหมด", counts.all),
-                    Triple(ProviderFilter.WORKING, "ใช้ได้", counts.working),
-                    Triple(ProviderFilter.UNTESTED, "ยังไม่ทดสอบ", counts.untested),
-                    Triple(ProviderFilter.BROKEN, "ใช้ไม่ได้", counts.broken),
+                    Triple(ProviderFilter.ALL, stringResource(R.string.filter_all), counts.all),
+                    Triple(ProviderFilter.WORKING, stringResource(R.string.filter_working), counts.working),
+                    Triple(ProviderFilter.UNTESTED, stringResource(R.string.filter_untested), counts.untested),
+                    Triple(ProviderFilter.BROKEN, stringResource(R.string.filter_broken), counts.broken),
                 ).forEach { (value, label, n) ->
                     FilterChip(
                         selected = filter == value,
@@ -191,7 +212,7 @@ fun ProvidersScreen(history: HistoryApi, onBack: () -> Unit) {
 
             when {
                 loaded && visible.isEmpty() && providers.isNotEmpty() ->
-                    EmptyState("ไม่มีรายการที่ตรงกับตัวกรอง")
+                    EmptyState(stringResource(R.string.providers_no_match))
             }
 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -258,10 +279,13 @@ private fun ProviderCard(p: ProviderStatus, tested: Boolean, onClick: () -> Unit
         else -> MaterialTheme.colorScheme.outline
     }
     val statusText = when {
-        working && p.workingModel.isNotBlank() -> "ใช้ได้ · ${p.workingModel}"
-        working -> "ใช้ได้ · ${p.modelCount} โมเดล"
-        broken -> "ใช้ไม่ได้ · ${p.lastError.ifBlank { "ไม่ทราบสาเหตุ" }}"
-        else -> "ยังไม่ทดสอบ"
+        working && p.workingModel.isNotBlank() -> stringResource(R.string.provider_status_working_model, p.workingModel)
+        working -> stringResource(R.string.provider_status_working_count, p.modelCount)
+        broken -> stringResource(
+            R.string.provider_status_broken,
+            p.lastError.ifBlank { stringResource(R.string.provider_status_unknown) },
+        )
+        else -> stringResource(R.string.provider_status_untested)
     }
     Card(
         onClick = onClick,
@@ -274,7 +298,8 @@ private fun ProviderCard(p: ProviderStatus, tested: Boolean, onClick: () -> Unit
             Column(Modifier.weight(1f)) {
                 Text(p.id, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${p.adapter} · ${if (p.builtin) "built-in · ไม่ต้องใช้ key" else "${p.keyCount} key"}",
+                    if (p.builtin) stringResource(R.string.provider_meta_builtin, p.adapter)
+                    else stringResource(R.string.provider_meta_keys, p.adapter, p.keyCount),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -301,6 +326,7 @@ private fun ProviderDetailSheet(
     onTested: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     var newKey by rememberSaveable { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -325,32 +351,36 @@ private fun ProviderDetailSheet(
             if (provider.builtin) {
                 Text(
                     if (provider.id == "Opencode") {
-                        "provider นี้ติดมากับ engine — แก้ไข/ลบไม่ได้\n" +
-                            "OpenCode เปิดโมเดลฟรีให้แอปของตัวเองเท่านั้น ผ่าน app นี้จึงมักถูกปฏิเสธ ต้องใส่ key ของคุณเพื่อใช้โมเดลที่คิดเงิน"
+stringResource(R.string.builtin_opencode_note)
                     } else {
-                        "provider นี้ติดมากับ engine — โหมดไม่ต้อง login: ใช้ได้ทันทีโดยไม่ต้องใส่ key และแก้ไข/ลบไม่ได้\n" +
-                            "โมเดลฟรีตอบได้ประมาณ 1 ข้อความต่อ 30 วินาที ถ้าติดจำกัด ให้รอแล้วส่งอีกครั้ง"
+stringResource(R.string.builtin_free_note)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                Text("key ${provider.keyCount} อัน", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "key ถูกเก็บไว้ที่ daemon และอ่านกลับไม่ได้ ลบแล้วต้องใส่ใหม่",
+                    stringResource(R.string.provider_keys_count, provider.keyCount),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    stringResource(R.string.provider_keys_stored),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 (1..provider.keyCount).forEach { position ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("key $position", modifier = Modifier.weight(1f))
+                        Text(
+                            stringResource(R.string.key_n, position),
+                            modifier = Modifier.weight(1f),
+                        )
                         TextButton(onClick = {
                             scope.launch {
                                 val result = history.changeKeys(provider.id, remove = listOf(position - 1))
                                 note = result
                                 history.providers().firstOrNull { it.id == provider.id }?.let(onChanged)
                             }
-                        }) { Text("ลบ") }
+                        }) { Text(stringResource(R.string.delete)) }
                     }
                 }
 
@@ -358,7 +388,7 @@ private fun ProviderDetailSheet(
                     value = newKey,
                     onValueChange = { newKey = it },
                     singleLine = true,
-                    label = { Text("เพิ่ม key") },
+                    label = { Text(stringResource(R.string.add_key)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
@@ -371,7 +401,7 @@ private fun ProviderDetailSheet(
                             history.providers().firstOrNull { it.id == provider.id }?.let(onChanged)
                         }
                     },
-                ) { Text("เพิ่ม key") }
+                ) { Text(stringResource(R.string.add_key)) }
             }
 
             HorizontalDivider()
@@ -384,18 +414,24 @@ private fun ProviderDetailSheet(
                         val status = history.refreshProvider(provider.id)
                         testing = false
                         if (status == null) {
-                            note = "ทดสอบไม่สำเร็จ daemon ไม่ตอบ"
+                            note = ctx.getString(R.string.provider_test_failed)
                         } else {
                             onChanged(status)
                             onTested()
-                            note = if (status.reachable) "ใช้ได้ ${status.modelCount} โมเดล" else "ใช้ไม่ได้: ${status.lastError}"
+                            note = if (status.reachable) {
+                                ctx.getString(R.string.provider_working_models, status.modelCount)
+                            } else {
+                                ctx.getString(R.string.provider_broken_reason, status.lastError)
+                            }
                         }
                     }
                 },
-            ) { Text(if (testing) "กำลังทดสอบ…" else "ทดสอบ provider นี้") }
+            ) { Text(stringResource(if (testing) R.string.testing else R.string.test_provider)) }
 
             if (!provider.builtin) {
-                OutlinedButton(onClick = { confirmDelete = true }) { Text("ลบ provider") }
+                OutlinedButton(onClick = { confirmDelete = true }) {
+                    Text(stringResource(R.string.delete_provider))
+                }
             }
         }
     }
@@ -403,8 +439,8 @@ private fun ProviderDetailSheet(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("ลบ ${provider.id}?") },
-            text = { Text("ลบ provider และ key ทั้งหมดของมัน กู้คืนไม่ได้") },
+            title = { Text(stringResource(R.string.delete_provider_title, provider.id)) },
+            text = { Text(stringResource(R.string.delete_provider_body)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
@@ -413,9 +449,11 @@ private fun ProviderDetailSheet(
                         note = result
                         onRemoved()
                     }
-                }) { Text("ลบ") }
+                }) { Text(stringResource(R.string.delete)) }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("ยกเลิก") } },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+            },
         )
     }
 }
@@ -428,6 +466,7 @@ private fun AddProviderSheet(
     onAdded: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     var id by rememberSaveable { mutableStateOf("") }
     var adapter by rememberSaveable { mutableStateOf(adapters.first()) }
     var endpoint by rememberSaveable { mutableStateOf("") }
@@ -444,19 +483,23 @@ private fun AddProviderSheet(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("เพิ่ม provider", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                stringResource(R.string.add_provider),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
             OutlinedTextField(value = id, onValueChange = { id = it }, singleLine = true,
-                label = { Text("ชื่อ (เช่น nousresearch)") }, modifier = Modifier.fillMaxWidth())
-            Text("รูปแบบ API", style = MaterialTheme.typography.labelLarge)
+                label = { Text(stringResource(R.string.provider_name_label)) }, modifier = Modifier.fillMaxWidth())
+            Text(stringResource(R.string.api_shape), style = MaterialTheme.typography.labelLarge)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 adapters.forEach { name ->
                     FilterChip(selected = adapter == name, onClick = { adapter = name }, label = { Text(name) })
                 }
             }
             OutlinedTextField(value = endpoint, onValueChange = { endpoint = it }, singleLine = true,
-                label = { Text("Endpoint (https://…)") }, modifier = Modifier.fillMaxWidth())
+                label = { Text(stringResource(R.string.provider_endpoint_label)) }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = key, onValueChange = { key = it }, singleLine = true,
-                label = { Text("Key (ไม่บังคับ — ว่างได้ถ้าผู้ให้บริการไม่ต้องใช้ key)") },
+                label = { Text(stringResource(R.string.provider_key_optional)) },
                 modifier = Modifier.fillMaxWidth())
             if (error.isNotBlank()) {
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -470,10 +513,10 @@ private fun AddProviderSheet(
                         val result = history.addProvider(id.trim(), adapter, endpoint.trim(), keys)
                         saving = false
                         val exists = history.providers().any { it.id == id.trim() }
-                        if (exists) onAdded("เพิ่ม ${id.trim()} แล้ว") else error = result
+                        if (exists) onAdded(ctx.getString(R.string.provider_added, id.trim())) else error = result
                     }
                 },
-            ) { Text(if (saving) "กำลังบันทึก…" else "บันทึก") }
+            ) { Text(stringResource(if (saving) R.string.saving else R.string.save)) }
         }
     }
 }

@@ -352,14 +352,15 @@ private fun Legend(dot: Color, @StringRes labelRes: Int, value: List<Pair<String
 }
 
 /**
- * The one size the legend and the total share: the harness draws the line at 26
- * px on a 2.8125 px/dp screen, which is 9.2sp, and the words around the figures
- * one step under it.
+ * The one size the legend and the total share. 12sp is the floor a readout has
+ * to clear to be legible at arm's length; the earlier 8-9sp fitted the strip on
+ * one line by making the numbers unreadable, which is the wrong trade for the
+ * only place the session's cost is written down.
  */
 @Composable
 private fun legendStyle() =
     MaterialTheme.typography.labelSmall.copy(
-        fontSize = 9.sp,
+        fontSize = 12.sp,
         lineHeight = 12.sp,
         fontFamily = FontFamily.Monospace,
     )
@@ -377,14 +378,14 @@ private fun legendText(value: List<Pair<String, String>>, word: String): Annotat
             withStyle(
                 SpanStyle(
                     color = bright,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     fontFamily = FontFamily.Monospace,
                 ),
             ) { append(part.first + part.second) }
         }
         append(" ")
-        withStyle(SpanStyle(color = dim, fontSize = 8.sp, fontFamily = FontFamily.Monospace)) {
+        withStyle(SpanStyle(color = dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)) {
             append(word)
         }
     }
@@ -405,7 +406,7 @@ private fun spanText(parts: List<Pair<String, String>>): AnnotatedString {
                 withStyle(
                     SpanStyle(
                         color = bright,
-                        fontSize = 9.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Monospace,
                     ),
@@ -414,13 +415,13 @@ private fun spanText(parts: List<Pair<String, String>>): AnnotatedString {
             withStyle(
                 SpanStyle(
                     color = bright,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     fontFamily = FontFamily.Monospace,
                 ),
             ) { append(part.first) }
             if (part.second.isNotEmpty()) {
-                withStyle(SpanStyle(color = dim, fontSize = 8.sp, fontFamily = FontFamily.Monospace)) {
+                withStyle(SpanStyle(color = dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)) {
                     append(part.second)
                 }
             }

@@ -31,13 +31,17 @@ import com.tulipskun.aixodia.data.model.AgentRoute
  * Shared building blocks for the settings screen — keeps connection /
  * provider / agent sections visually consistent like a typical app settings page.
  */
+/**
+ * A one-line outcome above the settings list.
+ *
+ * [error] is passed in, not guessed: this used to scan the message for Thai
+ * negation words and "HTTP", so an English failure without those tokens was
+ * painted as a success — a green banner over a failed save. Only the code that
+ * knows the outcome can classify it.
+ */
 @Composable
-fun StatusBanner(text: String) {
+fun StatusBanner(text: String, error: Boolean = false) {
     val scheme = MaterialTheme.colorScheme
-    val error = text.contains("ไม่", ignoreCase = true) ||
-        text.contains("HTTP", ignoreCase = true) ||
-        text.contains("ผิด", ignoreCase = true) ||
-        text.contains("ล้ม", ignoreCase = true)
     Surface(
         color = if (error) scheme.errorContainer else scheme.secondaryContainer,
         contentColor = if (error) scheme.onErrorContainer else scheme.onSecondaryContainer,

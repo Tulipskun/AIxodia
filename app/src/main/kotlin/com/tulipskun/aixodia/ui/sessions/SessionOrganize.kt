@@ -8,12 +8,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -37,8 +38,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.model.ChatSession
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
@@ -49,6 +55,8 @@ import java.util.concurrent.TimeUnit
  */
 data class SessionGroup(
     val label: String,
+    /** The same label as a resource, so a translation does not have to parse it. */
+    val labelRes: Int,
     val sessions: List<ChatSession>,
 )
 
@@ -82,10 +90,10 @@ fun groupSessionsByDate(sessions: List<ChatSession>, nowMs: Long = System.curren
         }
     }
     return buildList {
-        if (today.isNotEmpty()) add(SessionGroup("Today", today))
-        if (yesterday.isNotEmpty()) add(SessionGroup("Yesterday", yesterday))
-        if (week.isNotEmpty()) add(SessionGroup("Last 7 days", week))
-        if (older.isNotEmpty()) add(SessionGroup("Older", older))
+        if (today.isNotEmpty()) add(SessionGroup("Today", R.string.group_today, today))
+        if (yesterday.isNotEmpty()) add(SessionGroup("Yesterday", R.string.group_yesterday, yesterday))
+        if (week.isNotEmpty()) add(SessionGroup("Last 7 days", R.string.group_week, week))
+        if (older.isNotEmpty()) add(SessionGroup("Older", R.string.group_older, older))
     }
 }
 
@@ -125,90 +133,102 @@ fun SessionDrawerContent(
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
         ) {
-            Column(
+            // Lazy, not a Column that composes every row: a few hundred chats
+            // were all built and measured on every open, and the search filter
+            // walked the whole set on the main thread.
+            LazyColumn(
                 Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxWidth(),
             ) {
-                Text(
-                    "Chats",
-                    modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 4.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "${sessions.size} sessions",
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                OutlinedButton(
-                    onClick = onNewChat,
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("  New chat")
-                }
-
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .fillMaxWidth(),
-                    placeholder = { Text("Search chats…") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                    },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.medium,
-                )
-
-                HorizontalDivider(Modifier.padding(vertical = 12.dp))
-
-                if (sessions.isEmpty()) {
-                    Column(
-                        Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            Icons.Outlined.ChatBubbleOutline,
-                            contentDescription = null,
-                            modifier = Modifier.size(36.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                item(key = "header") {
+                    Column {
+                        Text(
+                            stringResource(R.string.drawer_chats),
+                            modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 4.dp),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "No chats yet",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            "Press \"New chat\" to start talking to the agent",
+                            pluralStringResource(R.plurals.drawer_sessions, sessions.size, sessions.size),
+                            modifier = Modifier.padding(horizontal = 20.dp),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                } else if (groups.isEmpty()) {
-                    Text(
-                        "No chats match \"$query\"",
-                        Modifier.padding(20.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                }
+                item(key = "new") {
+                    OutlinedButton(
+                        onClick = onNewChat,
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  " + stringResource(R.string.new_chat))
+                    }
+                }
+                item(key = "search") {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp)
+                            .fillMaxWidth(),
+                        placeholder = { Text(stringResource(R.string.drawer_search)) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
                     )
+                }
+                item(key = "divider") { HorizontalDivider(Modifier.padding(vertical = 12.dp)) }
+                if (sessions.isEmpty()) {
+                    item(key = "empty") {
+                        Column(
+                            Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                Icons.Outlined.ChatBubbleOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(36.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                stringResource(R.string.drawer_empty_title),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                stringResource(R.string.drawer_empty_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else if (groups.isEmpty()) {
+                    item(key = "nomatch") {
+                        Text(
+                            stringResource(R.string.drawer_no_match, query),
+                            Modifier.padding(20.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 } else {
                     groups.forEach { group ->
-                        Text(
-                            group.label,
-                            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        group.sessions.forEach { s ->
+                        item(key = "g-" + group.label) {
+                            Text(
+                                stringResource(group.labelRes),
+                                modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        items(group.sessions, key = { it.id }) { s ->
                             SessionRow(
                                 s = s,
                                 active = s.id == activeId,
@@ -245,6 +265,10 @@ fun SessionRow(
             .clip(MaterialTheme.shapes.medium)
             .background(bg)
             .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
+            // The active chat was a tint, a dot and a weight — three visuals and
+            // no semantics, so a screen reader heard two identical rows.
+            .semantics { selected = active }
+            .defaultMinSize(minHeight = 48.dp)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -265,7 +289,7 @@ fun SessionRow(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                s.lastSnippet.ifBlank { "No messages yet" },
+                s.lastSnippet.ifBlank { stringResource(R.string.no_messages_yet) },
                 maxLines = 1,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -290,20 +314,20 @@ fun ChatActionsSheet(
         text = {
             Column {
                 Text(
-                    if (session.lastSnippet.isBlank()) "No messages yet"
+                    if (session.lastSnippet.isBlank()) stringResource(R.string.no_messages_yet)
                     else session.lastSnippet.take(80),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onRename) { Text("Rename") } },
+        confirmButton = { TextButton(onClick = onRename) { Text(stringResource(R.string.rename)) } },
         dismissButton = {
             Row {
                 TextButton(onClick = onDelete) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
                 }
-                TextButton(onClick = onDismiss) { Text("Close") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
             }
         },
     )
@@ -318,21 +342,21 @@ fun RenameChatDialog(
     var field by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename chat") },
+        title = { Text(stringResource(R.string.rename_chat_title)) },
         text = {
             OutlinedTextField(
                 value = field,
                 onValueChange = { field = it },
-                label = { Text("Chat name") },
+                label = { Text(stringResource(R.string.chat_name)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(field) }) { Text("Save") }
+            TextButton(onClick = { onConfirm(field) }) { Text(stringResource(R.string.save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
 }
@@ -345,17 +369,17 @@ fun DeleteChatDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete this chat?") },
+        title = { Text(stringResource(R.string.delete_chat_title)) },
         text = {
-            Text("Chat \"$title\" and all its history will be deleted locally and on D1")
+            Text(stringResource(R.string.delete_chat_body, title))
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Delete", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
 }

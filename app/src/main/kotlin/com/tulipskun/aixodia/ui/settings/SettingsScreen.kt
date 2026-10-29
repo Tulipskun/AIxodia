@@ -10,13 +10,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,54 +22,37 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,9 +84,6 @@ import com.tulipskun.aixodia.data.remote.DiscoveryState
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import com.tulipskun.aixodia.update.UpdateManager
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -142,6 +120,8 @@ fun SettingsScreen(
     var token by rememberSaveable(curToken) { mutableStateOf(curToken) }
     var showToken by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
+    // Set where the outcome is known, never inferred from the wording later.
+    var msgIsError by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var providers by remember { mutableStateOf<List<ProviderStatus>>(emptyList()) }
@@ -159,12 +139,6 @@ fun SettingsScreen(
     // exactly those and leaves the rest of the stored values where they are.
     var clearedMain by remember { mutableStateOf<List<String>>(emptyList()) }
     var showAgentDialog by remember { mutableStateOf(false) }
-    var adding by remember { mutableStateOf(false) }
-    var replacing by remember { mutableStateOf<ProviderStatus?>(null) }
-    var deleting by remember { mutableStateOf<ProviderStatus?>(null) }
-    var pickingKeyFor by remember { mutableStateOf<ProviderStatus?>(null) }
-    var confirmingRemove by remember { mutableStateOf<Pair<ProviderStatus, Int>?>(null) }
-    var testingId by remember { mutableStateOf<String?>(null) }
 
     // load reports whether the daemon answered. A failed read keeps the list it
     // already had and names the failure: a screen that empties itself and then
@@ -185,6 +159,7 @@ fun SettingsScreen(
             }
         } else {
             msg = "Failed to load providers: ${loaded.exceptionOrNull()?.message ?: "unknown"}"
+            msgIsError = true
         }
         runCatching { history.models() }.getOrNull()?.let { catalogue = it }
         runCatching { history.agentSettings() }.getOrNull()?.let {
@@ -233,7 +208,11 @@ fun SettingsScreen(
             )
         },
     ) { pad ->
-        Box(Modifier.fillMaxSize()) {
+        // The IME is not part of contentWindowInsets, and the activity is
+        // edge-to-edge, so adjustResize no longer shrinks this window: without
+        // this the token and provider fields sat under the keyboard with no way
+        // to scroll them clear.
+        Box(Modifier.fillMaxSize().imePadding()) {
             Column(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -244,7 +223,7 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-            if (msg.isNotBlank()) StatusBanner(msg)
+            if (msg.isNotBlank()) StatusBanner(msg, msgIsError)
 
             if (page == SettingsPage.Main) {
                 SettingsNavRow("Connection", "") { page = SettingsPage.Connection }
@@ -285,9 +264,11 @@ fun SettingsScreen(
                                 if (target == null) {
                                     msg = "D1 lookup failed: " +
                                         (found.exceptionOrNull()?.message ?: "unknown")
+                                    msgIsError = true
                                 } else {
                                     val chats = runCatching { history.ping() }.getOrDefault(0)
                                     msg = "OK — ${target.accountName}/${target.databaseName} · $chats sessions"
+                                    msgIsError = false
                                     load(false)
                                 }
                                 busy = false
@@ -299,8 +280,10 @@ fun SettingsScreen(
                         onClick = {
                             busy = true; msg = ""
                             scope.launch {
-                                msg = runCatching { "OK — ${history.ping()} sessions" }
+                                val tested = runCatching { "OK — ${history.ping()} sessions" }
                                     .getOrElse { "Failed: ${it.message}" }
+                                msg = tested
+                                msgIsError = tested.startsWith("Failed")
                                 busy = false
                             }
                         },
@@ -339,6 +322,7 @@ fun SettingsScreen(
                             scope.launch {
                                 settings.saveDaemon(address)
                                 msg = "Daemon address saved"
+                                msgIsError = false
                                 busy = false
                             }
                         },
@@ -354,6 +338,7 @@ fun SettingsScreen(
                             settings.saveDaemon(tunnel)
                             address = tunnel
                             msg = "Using daemon URL"
+                            msgIsError = false
                         }
                     },
                 )
@@ -432,6 +417,7 @@ fun SettingsScreen(
                         onClick = {
                             val parsed = TokenField.parse(fieldSpec)
                             if (parsed.isEmpty()) {
+                                msgIsError = true
                                 msg = "Unknown field name — allowed: " +
                                     TokenField.entries.joinToString(", ") { it.name }
                                 return@Button
@@ -496,232 +482,8 @@ fun SettingsScreen(
             },
         )
     }
-    if (adding) {
-        AddProviderDialog(
-            onDismiss = { adding = false },
-            onAdd = { id, adapter, endpoint, key ->
-                adding = false
-                scope.launch {
-                    msg = history.addProvider(id, adapter, endpoint, listOf(key))
-                    load(true)
-                }
-            },
-        )
-    }
-
-    replacing?.let { p ->
-        ReplaceKeysDialog(
-            provider = p,
-            onDismiss = { replacing = null },
-            onReplace = { keys ->
-                replacing = null
-                scope.launch {
-                    msg = history.changeKeys(p.id, replace = keys)
-                    load(false)
-                }
-            },
-        )
-    }
-
-    pickingKeyFor?.let { p ->
-        AlertDialog(
-            onDismissRequest = { pickingKeyFor = null },
-            title = { Text("Delete which key of ${p.id}?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    repeat(p.keyCount) { index ->
-                        val position = p.keyCount - index
-                        TextButton(
-                            onClick = { confirmingRemove = p to position },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Delete key #$position") }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { pickingKeyFor = null }) { Text("Cancel") } },
-        )
-    }
-
-    confirmingRemove?.let { (provider, position) ->
-        AlertDialog(
-            onDismissRequest = { confirmingRemove = null },
-            title = { Text("Delete key #$position of ${provider.id}?") },
-            text = {
-                Text(
-                    "Deletion cannot be undone; the daemon will forget this provider's test results. The number refers to the key's position in the list, not the key value.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingRemove = null
-                    pickingKeyFor = null
-                    scope.launch {
-                        msg = history.changeKeys(provider.id, remove = listOf(position - 1))
-                        load(false)
-                    }
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { confirmingRemove = null }) { Text("Cancel") } },
-        )
-    }
-
-    deleting?.let { p ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("Delete provider ${p.id}?") },
-            text = { Text("All keys of ${p.id} will be removed from the daemon and D1 and from the agent options.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    deleting = null
-                    scope.launch {
-                        msg = history.removeProvider(p.id)
-                        load(false)
-                    }
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
-        )
-    }
 }
 
-@Composable
-private fun ProviderCard(
-    provider: ProviderStatus,
-    tested: Boolean,
-    onAddKey: (String) -> Unit,
-    onReplaceKeys: () -> Unit,
-    onPickKeyToRemove: () -> Unit,
-    onTest: () -> Unit,
-    testing: Boolean,
-    onDelete: () -> Unit,
-) {
-    var key by rememberSaveable { mutableStateOf("") }
-    val scheme = MaterialTheme.colorScheme
-    Card(
-        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainer),
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(provider.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                StatusPill(provider, tested)
-            }
-            Text(
-                "${provider.adapter} · ${provider.keyCount} keys · ${provider.modelCount} models",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
-            if (provider.workingModel.isNotBlank()) {
-                Text(
-                    "Working model: ${provider.workingModel}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
-                )
-            }
-            Text(
-                provider.endpoint,
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
-            if (provider.lastError.isNotBlank()) {
-                Surface(
-                    color = scheme.errorContainer,
-                    contentColor = scheme.onErrorContainer,
-                    shape = MaterialTheme.shapes.small,
-                ) {
-                    Text(
-                        provider.lastError,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(10.dp),
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val clip = LocalClipboardManager.current
-                LabelledField(
-                    value = key,
-                    onValueChange = { key = it },
-                    label = "Add key",
-                    modifier = Modifier.weight(1f),
-                    trailing = {
-                        IconButton(onClick = {
-                            clip.getText()?.text?.let { if (it.isNotBlank()) key = it.trim() }
-                        }) { Icon(Icons.Default.ContentCopy, contentDescription = "Paste key from clipboard") }
-                    },
-                )
-                FilledTonalIconButton(
-                    onClick = { onAddKey(key.trim()); key = "" },
-                    enabled = key.isNotBlank(),
-                    modifier = Modifier.padding(start = 8.dp),
-                ) { Icon(Icons.Default.Key, contentDescription = "Add key") }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                TextButton(onClick = onTest, enabled = !testing) {
-                    if (testing) {
-                        Text("Testing…")
-                    } else {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text("  Test")
-                    }
-                }
-                TextButton(onClick = onReplaceKeys) { Text("Replace keys") }
-                TextButton(
-                    onClick = onPickKeyToRemove,
-                    enabled = provider.keyCount > 0,
-                ) { Text("Delete key") }
-                TextButton(onClick = onDelete) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = scheme.error,
-                    )
-                    Text("  Delete", color = scheme.error)
-                }
-            }
-            Text(
-                "Keys cannot be edited in place because the daemon does not return values — add a new key, delete by position, or replace all keys",
-                style = MaterialTheme.typography.labelSmall,
-                color = scheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatusPill(provider: ProviderStatus, tested: Boolean) {
-    val scheme = MaterialTheme.colorScheme
-    val (label, bg, fg) = when {
-        !provider.probed && !tested -> Triple(
-            "Untested",
-            scheme.surfaceVariant,
-            scheme.onSurfaceVariant,
-        )
-        provider.reachable -> Triple(
-            "OK · ${provider.modelCount} models",
-            scheme.primaryContainer,
-            scheme.onPrimaryContainer,
-        )
-        else -> Triple("Broken", scheme.errorContainer, scheme.onErrorContainer)
-    }
-    Surface(color = bg, contentColor = fg, shape = MaterialTheme.shapes.extraSmall) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-    }
-}
 
 /** The pill text a provider row or picker row shows for a status. */
 private fun ProviderStatus.statusLine(tested: Boolean = false): String = when {
@@ -907,87 +669,6 @@ private fun selectedModel(
     return modelsByProvider[route.provider]?.firstOrNull { it.id == route.model }
 }
 
-@Composable
-private fun AddProviderDialog(
-    onDismiss: () -> Unit,
-    onAdd: (String, String, String, String) -> Unit,
-) {
-    var id by rememberSaveable { mutableStateOf("") }
-    var adapter by rememberSaveable { mutableStateOf("openai") }
-    var endpoint by rememberSaveable { mutableStateOf("") }
-    var key by rememberSaveable { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add provider") },
-        text = {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                LabelledField(
-                    value = id, onValueChange = { id = it },
-                    label = "Name", placeholder = "my-gateway",
-                )
-                LabelledField(
-                    value = endpoint, onValueChange = { endpoint = it },
-                    label = "endpoint", placeholder = "https://api.example.com/v1",
-                    singleLine = false, minLines = 2,
-                )
-                LabelledField(
-                    value = key, onValueChange = { key = it },
-                    label = "Key",
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-                Text("adapter", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("openai", "anthropic", "gemini", "opencode").forEach { option ->
-                        FilterChip(
-                            selected = adapter == option,
-                            onClick = { adapter = option },
-                            label = { Text(option) },
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onAdd(id.trim(), adapter, endpoint.trim(), key.trim()) },
-                enabled = id.isNotBlank() && endpoint.startsWith("https://") && key.isNotBlank(),
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun ReplaceKeysDialog(
-    provider: ProviderStatus,
-    onDismiss: () -> Unit,
-    onReplace: (List<String>) -> Unit,
-) {
-    var text by rememberSaveable { mutableStateOf("") }
-    val keys = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Replace keys of ${provider.id}") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LabelledField(
-                    value = text, onValueChange = { text = it },
-                    label = "key",
-                    hint = "One per line · currently ${provider.keyCount}",
-                    singleLine = false, minLines = 3,
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onReplace(keys) }, enabled = keys.isNotEmpty()) { Text("Replace") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
 
 @Composable
 private fun NodeCard(

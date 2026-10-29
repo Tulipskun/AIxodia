@@ -76,6 +76,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick as semanticsOnClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.text.KeyboardOptions
@@ -101,6 +106,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -121,6 +127,8 @@ private val Danger = Color(0xFFFF8A8A)
  * repeat window. The first pause is the keyboard's: long enough that a quick
  * tap never doubles, short enough that a held arrow feels live.
  */
+private const val WRITE_CHUNK = 16 * 1024
+
 private const val KEY_REPEAT_FIRST_MS = 400L
 private const val KEY_REPEAT_MS = 100L
 
@@ -263,6 +271,19 @@ fun TerminalWindow(
     val atBottom = remember { mutableStateOf(true) }
     val selecting = remember { mutableStateOf(false) }
     val verticalDrag = remember { mutableStateOf(false) }
+
+    // TalkBack cannot see a custom-canvas terminal: the grid is drawn with no
+    // nodes at all, so the whole screen was silent and a screen-reader user
+    // could type into output they could not read. The visible rows are mirrored
+    // into the view's content description while the window is open; the keys
+    // stay the only controls, which is the same surface a sighted reader has.
+    val spokenRows = remember { mutableStateOf("") }
+    LaunchedEffect(ui.active) {
+        while (true) {
+            spokenRows.value = ui.active?.buffer?.spokenTail().orEmpty()
+            delay(700)
+        }
+    }
 
     // One emulator per tab, not one for the window. A tab keeps receiving its
     // shell's bytes while another tab is on screen, so switching only swaps
@@ -461,7 +482,8 @@ fun TerminalWindow(
                     .fillMaxSize()
                     // The system bars set the floor and the ceiling. The nav bar
                     // keeps its strip or it covers the composer.
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .semantics { contentDescription = spokenRows.value },
                 factory = { ctx ->
                     val root = LinearLayout(ctx).apply {
                         orientation = LinearLayout.VERTICAL
@@ -653,7 +675,19 @@ private suspend fun pumpTabOutput(
                 b
             }
             if (batch.isEmpty()) continue
-            withContext(Dispatchers.Main) { emulator.write(batch) }
+            // Parsing stays on the main thread — the emulator hands each change
+            // straight to the view — but a large `cat` no longer blocks a whole
+            // frame: the batch is fed in slices and the thread yields between
+            // them, so frames land while a build log scrolls.
+            withContext(Dispatchers.Main) {
+                var at = 0
+                while (at < batch.size) {
+                    val end = minOf(at + WRITE_CHUNK, batch.size)
+                    emulator.write(batch.copyOfRange(at, end))
+                    at = end
+                    if (at < batch.size) yield()
+                }
+            }
         }
     } finally {
         pump.cancel()
@@ -1052,7 +1086,7 @@ private fun IconKey(
         Box(
             Modifier
                 .fillMaxWidth()
-                .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp)
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center,
         ) {
@@ -1083,7 +1117,7 @@ private fun KeyChip(
         Box(
             Modifier
                 .then(if (wide) Modifier.fillMaxWidth() else Modifier)
-                .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp)
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .padding(horizontal = if (wide) 4.dp else 8.dp),
             contentAlignment = Alignment.Center,
         ) {
@@ -1113,6 +1147,18 @@ private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier
             .fillMaxWidth()
+            // A raw pointerInput has no node to focus and no click action, so
+            // TalkBack, switch access and a keyboard could not press these
+            // arrows at all. Touch keeps the hold-to-repeat gesture; this is the
+            // same key for every input that cannot hold.
+            .semantics {
+                role = Role.Button
+                contentDescription = label
+                semanticsOnClick(label = label) {
+                    currentClick()
+                    true
+                }
+            }
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
@@ -1139,7 +1185,7 @@ private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .defaultMinSize(minWidth = 44.dp, minHeight = 32.dp),
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
