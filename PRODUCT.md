@@ -48,7 +48,7 @@ The second distinguishing mechanism is the credential model: one Cloudflare API 
 ## Brand Commitments
 
 - The name is AIxodia across the engine, app, CLI and relay.
-- Voice is terse and technical: labels are short and often lowercase, identifiers and units are exact (`seq`, `pid`, `cached`/`new`/`out`), and full sentences appear only where something needs explaining. English carries the shared technical vocabulary and the status words; Thai is reserved for the connection notices that explain a failure in the operator's language — a deliberate split recorded in `res/values` / `res/values-en`.
+- Voice is terse and technical: labels are short and often lowercase, identifiers and units are exact (`seq`, `pid`, `cached`/`new`/`out`), and full sentences appear only where something needs explaining. English carries the shared technical vocabulary — the default in `res/values`, with a small `values-en` subset refining the connection notices and terminal states; the operator's language may override those via the system locale.
 - The interaction model is messenger-shaped by commitment, not accident: a Discord-like session drawer and Telegram-like bubbles, with the composer pinned under the thread.
 - The app is a control surface for one technical operator, not a consumer product; density and precision are part of its identity.
 

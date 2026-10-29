@@ -52,9 +52,7 @@ db/             Cloudflare D1 schema + migrations (applied with wrangler, no Wor
 tunnel** (`ai/transport/mobile/tunnel.go`); the random trycloudflare URL is
 written into D1 by the daemon itself. The app reads that row directly — no
 Worker and no `/api/node` round trip — and its status dot reads "Offline" once
-the heartbeat is older than 90s, with the banner's reason in Thai (the
-operator's language) while shared technical vocabulary stays English. `ai`
-keeps no local state: config and sessions live in D1, and
+the heartbeat is older than 90s. `ai` keeps no local state: config and sessions live in D1, and
 the Cloudflare API token (sent in the WS hello, memory-only) is the daemon's
 credential too.
 

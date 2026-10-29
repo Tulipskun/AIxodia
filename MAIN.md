@@ -46,13 +46,14 @@ PLAN:
             rememberSaveable overlays/drafts, scrollable setup sheet,
             Snackbar copy feedback, navigationBars∪ime inset union, connection
             word kept as Online/Connecting/Offline strings (README's "ai
-            ออฟไลน์" quote was stale — corrected there and in PRODUCT.md's
-            voice line: English carries status words, Thai the failure
-            notices).
-[IN_PROCESS] Toolchain: JDK 17 + /opt/android-sdk, compileDebugKotlin then
-            testDebugUnitTest; record Paparazzi goldens
-            (:app:recordPaparazziDebug) so the repo carries rendered-output
-            evidence for the first time.
+            ออฟไลน์" quote was stale — removed there; PRODUCT.md's voice line
+            corrected to what the resources actually ship: English default in
+            res/values, values-en refines the notices and terminal states).
+[COMPLETED] Toolchain: JDK 17 + /opt/android-sdk, compileDebugKotlin +
+            testDebugUnitTest (247 tests, 0 failures) + assembleDebug green;
+            Paparazzi goldens recorded (:app:recordPaparazziDebug) and
+            verify-passed — 8 PNGs committed under app/src/test/snapshots,
+            rendered-output evidence for the first time.
 [COMPLETED] DESIGN.md written from the implemented tokens (scan mode) with the
             .impeccable/design.json sidecar; README auth section and PRODUCT.md
             credential line synced to TokenCipher + backup exclusion.
