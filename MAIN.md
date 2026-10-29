@@ -1,4 +1,7 @@
 GOAL:
+[IN_PROCESS] Fix the crash on pressing send (operator: "แอพ crash ตอนกดส่งข้อความ"),
+            then commit, push and cut the rolling `latest` release.
+
 [COMPLETED] Audit the Android UI (impeccable `audit`, native variant): a11y,
             performance, theming, platform conformance, adaptivity. Document
             findings only; no fixes in this pass. Score 12/20 (Acceptable),
@@ -8,6 +11,21 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[IN_PROCESS] Send-crash fix (this pass): every liveBlocks write now runs under a
+            Mutex in ChatViewModel. WS frames mutate the live timeline on
+            Dispatchers.IO while send()/beginLiveTurn/clearLiveTurn tear it down
+            on the main thread; the plain read-modify-write lost updates, so two
+            items could share a LazyColumn key ("Key was already used" kills the
+            app mid-turn — same class as 515e9ec) or an emptying clear raced a
+            frame re-adding a block. beginRequest/settleOpenRequest/openRequest/
+            settleRequest/onBlockFrame(REASONING+TEXT)/startLiveTool/
+            completeLiveTool/onTrace(compact + tool_call + tool_result +
+            reasoning) all go through mutateLiveBlocks; turn clears stay direct
+            assignments so a torn-down turn never waits behind queued frames.
+            compileDebugKotlin + :app:testDebugUnitTest (247 tests) +
+            assembleDebug BUILD SUCCESSFUL on JDK17 + /opt/android-sdk.
+            NOT verified on a phone — no handset and no KVM here.
+
 [COMPLETED] Session 2026-10-29 (impeccable finish pass): verified every
             P0–P3 fix already in the working tree against its finding, wrote
             DESIGN.md + .impeccable/design.json from the implemented tokens,

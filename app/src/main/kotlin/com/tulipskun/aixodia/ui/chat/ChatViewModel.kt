@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Locale
 
 /**
@@ -158,6 +160,20 @@ class ChatViewModel(
      * a second card, and a turn that runs the same tool four times must keep
      * four.
      */
+    /**
+     * Every liveBlocks write runs here. Frames arrive on Dispatchers.IO while
+     * send()/switchChat run on the main thread; a plain read-modify-write of
+     * the StateFlow lost updates between them, and the LazyColumn then drew two
+     * items under one key — "Key was already used" kills the app mid-turn.
+     */
+    private val liveBlocksMutex = Mutex()
+
+    private suspend fun mutateLiveBlocks(block: (List<LiveBlock>) -> List<LiveBlock>) {
+        liveBlocksMutex.withLock {
+            liveBlocks.value = block(liveBlocks.value)
+        }
+    }
+
     private fun upsertStep(blocks: List<LiveBlock>, step: ToolStep): List<LiveBlock> {
         val at = blocks.indexOfFirst { it is LiveBlock.Act && it.step.key == step.key }
         if (at < 0) return blocks + LiveBlock.Act(step)
@@ -177,15 +193,19 @@ class ChatViewModel(
      * keeps sinking to the bottom.
      */
     private fun beginRequest(now: Long = SystemClock.elapsedRealtime()) {
-        // The next request only starts once every tool of the round has
-        // finished: a result that lands while a parallel call is still running
-        // must not open the next request early.
-        if (liveBlocks.value.any { it is LiveBlock.Act && !it.step.done }) return
-        // One open wait per request: parallel results that all arrive late must
-        // not stack a second "Sending request to provider…" onto the same one.
-        val last = liveBlocks.value.lastOrNull()
-        if (last is LiveBlock.Think && last.phase == ThinkPhase.WAITING) return
-        liveBlocks.value = liveBlocks.value + LiveBlock.Think(phase = ThinkPhase.WAITING, startedAtMs = now)
+        viewModelScope.launch {
+            mutateLiveBlocks { blocks ->
+                // The next request only starts once every tool of the round has
+                // finished: a result that lands while a parallel call is still running
+                // must not open the next request early.
+                if (blocks.any { it is LiveBlock.Act && !it.step.done }) return@mutateLiveBlocks blocks
+                // One open wait per request: parallel results that all arrive late must
+                // not stack a second "Sending request to provider…" onto the same one.
+                val last = blocks.lastOrNull()
+                if (last is LiveBlock.Think && last.phase == ThinkPhase.WAITING) return@mutateLiveBlocks blocks
+                blocks + LiveBlock.Think(phase = ThinkPhase.WAITING, startedAtMs = now)
+            }
+        }
     }
 
     /**
@@ -195,18 +215,21 @@ class ChatViewModel(
      * rather than left as a "Thought" over an empty body.
      */
     private fun settleOpenRequest(now: Long = SystemClock.elapsedRealtime()) {
-        val blocks = liveBlocks.value
-        val at = blocks.indexOfLast { it is LiveBlock.Think }
-        if (at < 0) return
-        val think = blocks[at] as LiveBlock.Think
-        if (think.phase == ThinkPhase.DONE) return
-        val out = blocks.toMutableList()
-        if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
-            out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
-        } else {
-            out.removeAt(at)
+        viewModelScope.launch {
+            mutateLiveBlocks { blocks ->
+                val at = blocks.indexOfLast { it is LiveBlock.Think }
+                if (at < 0) return@mutateLiveBlocks blocks
+                val think = blocks[at] as LiveBlock.Think
+                if (think.phase == ThinkPhase.DONE) return@mutateLiveBlocks blocks
+                val out = blocks.toMutableList()
+                if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
+                    out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
+                } else {
+                    out.removeAt(at)
+                }
+                out
+            }
         }
-        liveBlocks.value = out
     }
 
     /**
@@ -541,7 +564,9 @@ class ChatViewModel(
                         status.value = ""
                         liveText.value = ""
                         discardDeltas()
-                        liveBlocks.value = emptyList()
+                        // Clear through the mutex so a frame still queued behind
+                        // it cannot re-add a block to a turn just torn down.
+                        viewModelScope.launch { mutateLiveBlocks { emptyList() } }
                         liveThinkingMs.value = 0L
                         liveReasoning.value = ""
                         reasoningActive.value = false
@@ -746,24 +771,27 @@ class ChatViewModel(
                 reasoningActive.value = true
                 // The reasoning belongs to the request named on the block, not
                 // to the turn as a whole: it grows that request's own block.
-                val blocks = liveBlocks.value
-                val at = blocks.indexOfFirst { it is LiveBlock.Think && it.id == block.id }
-                liveBlocks.value = if (at >= 0) {
-                    val think = blocks[at] as LiveBlock.Think
-                    val out = blocks.toMutableList()
-                    out[at] = think.copy(
-                        phase = ThinkPhase.THINKING,
-                        reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
-                        startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
-                    )
-                    out
-                } else {
-                    blocks + LiveBlock.Think(
-                        id = block.id,
-                        phase = ThinkPhase.THINKING,
-                        reasoning = chunk.takeLast(32 * 1024),
-                        startedAtMs = now,
-                    )
+                viewModelScope.launch {
+                    mutateLiveBlocks { blocks ->
+                        val at = blocks.indexOfFirst { it is LiveBlock.Think && it.id == block.id }
+                        if (at >= 0) {
+                            val think = blocks[at] as LiveBlock.Think
+                            val out = blocks.toMutableList()
+                            out[at] = think.copy(
+                                phase = ThinkPhase.THINKING,
+                                reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
+                                startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
+                            )
+                            out
+                        } else {
+                            blocks + LiveBlock.Think(
+                                id = block.id,
+                                phase = ThinkPhase.THINKING,
+                                reasoning = chunk.takeLast(32 * 1024),
+                                startedAtMs = now,
+                            )
+                        }
+                    }
                 }
             }
             Block.TOOL -> {
@@ -776,14 +804,17 @@ class ChatViewModel(
                     // restates its block replaces it in place. Appending would
                     // leave the same words on screen twice, and the second copy
                     // is the one the thread scrolls to.
-                    val blocks = liveBlocks.value
-                    val at = if (block.id.isBlank()) -1 else
-                        blocks.indexOfFirst { it is LiveBlock.Say && it.id == block.id }
-                    liveBlocks.value = if (at >= 0) {
-                        val said = blocks[at] as LiveBlock.Say
-                        blocks.toMutableList().also { it[at] = said.copy(text = block.text) }
-                    } else {
-                        blocks + LiveBlock.Say(block.text, System.currentTimeMillis(), block.id)
+                    viewModelScope.launch {
+                        mutateLiveBlocks { blocks ->
+                            val at = if (block.id.isBlank()) -1 else
+                                blocks.indexOfFirst { it is LiveBlock.Say && it.id == block.id }
+                            if (at >= 0) {
+                                val said = blocks[at] as LiveBlock.Say
+                                blocks.toMutableList().also { it[at] = said.copy(text = block.text) }
+                            } else {
+                                blocks + LiveBlock.Say(block.text, System.currentTimeMillis(), block.id)
+                            }
+                        }
                     }
                 }
             }
@@ -800,21 +831,34 @@ class ChatViewModel(
      * of position. The optimistic block send invented is adopted, not doubled.
      */
     private fun openRequest(id: String, now: Long) {
-        if (liveBlocks.value.any { it is LiveBlock.Act && !it.step.done }) return
-        val blocks = liveBlocks.value
-        val waiting = blocks.indexOfLast { it is LiveBlock.Think && it.phase == ThinkPhase.WAITING }
-        if (waiting >= 0) {
-            val think = blocks[waiting] as LiveBlock.Think
-            if (think.id == id) return
-            if (think.id.isBlank()) {
-                val out = blocks.toMutableList()
-                out[waiting] = think.copy(id = id, startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now)
-                liveBlocks.value = out
-                return
+        viewModelScope.launch {
+            mutateLiveBlocks { blocks ->
+                if (blocks.any { it is LiveBlock.Act && !it.step.done }) return@mutateLiveBlocks blocks
+                val waiting = blocks.indexOfLast { it is LiveBlock.Think && it.phase == ThinkPhase.WAITING }
+                if (waiting >= 0) {
+                    val think = blocks[waiting] as LiveBlock.Think
+                    if (think.id == id) return@mutateLiveBlocks blocks
+                    if (think.id.isBlank()) {
+                        val out = blocks.toMutableList()
+                        out[waiting] = think.copy(id = id, startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now)
+                        return@mutateLiveBlocks out
+                    }
+                    // The round on screen is a different request that already
+                    // spoke: close it before this one opens its own wait.
+                    val settled = blocks.toMutableList()
+                    val t = settled[waiting] as LiveBlock.Think
+                    if (t.phase == ThinkPhase.THINKING && t.reasoning.isNotBlank()) {
+                        settled[waiting] = t.copy(phase = ThinkPhase.DONE, endedAtMs = now)
+                    } else {
+                        settled.removeAt(waiting)
+                    }
+                    return@mutateLiveBlocks settled + LiveBlock.Think(
+                        id = id, phase = ThinkPhase.WAITING, startedAtMs = now,
+                    )
+                }
+                blocks + LiveBlock.Think(id = id, phase = ThinkPhase.WAITING, startedAtMs = now)
             }
-            settleRequest(think.id, now)
         }
-        liveBlocks.value = liveBlocks.value + LiveBlock.Think(id = id, phase = ThinkPhase.WAITING, startedAtMs = now)
     }
 
     /**
@@ -824,18 +868,21 @@ class ChatViewModel(
      * dropped rather than left as a thought over an empty body.
      */
     private fun settleRequest(id: String, now: Long = SystemClock.elapsedRealtime()) {
-        val blocks = liveBlocks.value
-        val at = blocks.indexOfLast { it is LiveBlock.Think && (it.id == id || it.id.isBlank()) }
-        if (at < 0) return
-        val think = blocks[at] as LiveBlock.Think
-        if (think.phase == ThinkPhase.DONE) return
-        val out = blocks.toMutableList()
-        if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
-            out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
-        } else {
-            out.removeAt(at)
+        viewModelScope.launch {
+            mutateLiveBlocks { blocks ->
+                val at = blocks.indexOfLast { it is LiveBlock.Think && (it.id == id || it.id.isBlank()) }
+                if (at < 0) return@mutateLiveBlocks blocks
+                val think = blocks[at] as LiveBlock.Think
+                if (think.phase == ThinkPhase.DONE) return@mutateLiveBlocks blocks
+                val out = blocks.toMutableList()
+                if (think.phase == ThinkPhase.THINKING && think.reasoning.isNotBlank()) {
+                    out[at] = think.copy(phase = ThinkPhase.DONE, endedAtMs = now)
+                } else {
+                    out.removeAt(at)
+                }
+                out
+            }
         }
-        liveBlocks.value = out
     }
 
     /** A tool call the engine announced: the round spoke, so it settles. */
@@ -848,12 +895,15 @@ class ChatViewModel(
         // What came before this tool is its own turn, now and after.
         flushDeltas()
         val said = liveText.value.trim()
-        if (said.isNotEmpty()) {
-            liveBlocks.value = liveBlocks.value +
-                LiveBlock.Say(said, System.currentTimeMillis())
-            liveText.value = ""
+        liveText.value = ""
+        viewModelScope.launch {
+            mutateLiveBlocks { blocks ->
+                val withSay = if (said.isNotEmpty()) {
+                    blocks + LiveBlock.Say(said, System.currentTimeMillis())
+                } else blocks
+                upsertStep(withSay, toolStepFor(block, "", now))
+            }
         }
-        liveBlocks.value = upsertStep(liveBlocks.value, toolStepFor(block, "", now))
         traceNote("${block.name}…")
     }
 
@@ -866,21 +916,25 @@ class ChatViewModel(
     private fun completeLiveTool(block: Block) {
         liveThinkingMs.value = 0L
         val key = block.id.ifBlank { block.name }
-        val known = liveBlocks.value.filterIsInstance<LiveBlock.Act>()
-            .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
-        liveBlocks.value = liveBlocks.value.map { item ->
-            if (item is LiveBlock.Act && item.step.key == key) {
-                item.copy(
-                    step = item.step.copy(
-                        args = humanToolArgs(block.args).ifBlank { known },
-                        result = block.result,
-                        isError = block.isError,
-                        done = true,
-                        durationMs = block.durationMs,
-                    ),
-                )
-            } else {
-                item
+        viewModelScope.launch {
+            mutateLiveBlocks { blocks ->
+                val known = blocks.filterIsInstance<LiveBlock.Act>()
+                    .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
+                blocks.map { item ->
+                    if (item is LiveBlock.Act && item.step.key == key) {
+                        item.copy(
+                            step = item.step.copy(
+                                args = humanToolArgs(block.args).ifBlank { known },
+                                result = block.result,
+                                isError = block.isError,
+                                done = true,
+                                durationMs = block.durationMs,
+                            ),
+                        )
+                    } else {
+                        item
+                    }
+                }
             }
         }
         val note = if (block.isError) "${block.name} failed" else "${block.name} done"
@@ -921,12 +975,16 @@ class ChatViewModel(
         // The engine trimmed the prompt. The marker lands where it happened in
         // the thread; the digest says what fell out of the window.
         if (f.stage == "compact") {
-            liveBlocks.value = liveBlocks.value + LiveBlock.Compact(
-                keptTurns = f.keptTurns,
-                droppedTurns = f.droppedTurns,
-                summary = f.compactSummary,
-                atMs = SystemClock.elapsedRealtime(),
-            )
+            viewModelScope.launch {
+                mutateLiveBlocks { blocks ->
+                    blocks + LiveBlock.Compact(
+                        keptTurns = f.keptTurns,
+                        droppedTurns = f.droppedTurns,
+                        summary = f.compactSummary,
+                        atMs = SystemClock.elapsedRealtime(),
+                    )
+                }
+            }
             return
         }
         // The engine's display block, when the frame has one: it names the
@@ -943,23 +1001,26 @@ class ChatViewModel(
                 // the turn as a whole: it grows that request's own block, and a
                 // new request opens a new block.
                 val now = SystemClock.elapsedRealtime()
-                val blocks = liveBlocks.value
-                val at = blocks.indexOfLast { it is LiveBlock.Think }
-                liveBlocks.value = if (at >= 0) {
-                    val think = blocks[at] as LiveBlock.Think
-                    val out = blocks.toMutableList()
-                    out[at] = think.copy(
-                        phase = ThinkPhase.THINKING,
-                        reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
-                        startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
-                    )
-                    out
-                } else {
-                    blocks + LiveBlock.Think(
-                        phase = ThinkPhase.THINKING,
-                        reasoning = chunk.takeLast(32 * 1024),
-                        startedAtMs = now,
-                    )
+                viewModelScope.launch {
+                    mutateLiveBlocks { blocks ->
+                        val at = blocks.indexOfLast { it is LiveBlock.Think }
+                        if (at >= 0) {
+                            val think = blocks[at] as LiveBlock.Think
+                            val out = blocks.toMutableList()
+                            out[at] = think.copy(
+                                phase = ThinkPhase.THINKING,
+                                reasoning = (think.reasoning + chunk).takeLast(32 * 1024),
+                                startedAtMs = think.startedAtMs.takeIf { it > 0L } ?: now,
+                            )
+                            out
+                        } else {
+                            blocks + LiveBlock.Think(
+                                phase = ThinkPhase.THINKING,
+                                reasoning = chunk.takeLast(32 * 1024),
+                                startedAtMs = now,
+                            )
+                        }
+                    }
                 }
             }
             "tool_call", "tool_running" -> {
@@ -970,18 +1031,21 @@ class ChatViewModel(
                 // What came before this tool is its own turn, now and after.
                 flushDeltas()
                 val said = liveText.value.trim()
-                if (said.isNotEmpty()) {
-                    liveBlocks.value = liveBlocks.value +
-                        LiveBlock.Say(said, System.currentTimeMillis())
-                    liveText.value = ""
+                liveText.value = ""
+                viewModelScope.launch {
+                    mutateLiveBlocks { blocks ->
+                        val withSay = if (said.isNotEmpty()) {
+                            blocks + LiveBlock.Say(said, System.currentTimeMillis())
+                        } else blocks
+                        upsertStep(withSay, ToolStep(
+                            id = f.toolCall?.id.orEmpty(),
+                            name = name,
+                            args = humanToolArgs(f.toolCall?.arguments.orEmpty()),
+                            durationMs = f.toolDurationMs,
+                            startedAtMs = SystemClock.elapsedRealtime(),
+                        ))
+                    }
                 }
-                liveBlocks.value = upsertStep(liveBlocks.value, ToolStep(
-                        id = f.toolCall?.id.orEmpty(),
-                        name = name,
-                        args = humanToolArgs(f.toolCall?.arguments.orEmpty()),
-                        durationMs = f.toolDurationMs,
-                        startedAtMs = SystemClock.elapsedRealtime(),
-                    ))
                 traceNote("$name…")
             }
             "tool_result" -> {
@@ -1000,21 +1064,25 @@ class ChatViewModel(
                 // Rebuilding it from the frame alone is how a live step lost the
                 // command it was running and showed a bare "bash · 2.6s" while
                 // the same step in the stored thread showed the whole line.
-                val known = liveBlocks.value.filterIsInstance<LiveBlock.Act>()
-                    .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
-                liveBlocks.value = liveBlocks.value.map { block ->
-                    if (block is LiveBlock.Act && block.step.key == key) {
-                        block.copy(
-                            step = block.step.copy(
-                                args = f.toolCall?.arguments.orEmpty().ifBlank { known },
-                                result = result,
-                                isError = f.toolResult?.isError ?: false,
-                                done = true,
-                                durationMs = f.toolDurationMs,
-                            )
-                        )
-                    } else {
-                        block
+                viewModelScope.launch {
+                    mutateLiveBlocks { blocks ->
+                        val known = blocks.filterIsInstance<LiveBlock.Act>()
+                            .firstOrNull { it.step.key == key }?.step?.args.orEmpty()
+                        blocks.map { block ->
+                            if (block is LiveBlock.Act && block.step.key == key) {
+                                block.copy(
+                                    step = block.step.copy(
+                                        args = f.toolCall?.arguments.orEmpty().ifBlank { known },
+                                        result = result,
+                                        isError = f.toolResult?.isError ?: false,
+                                        done = true,
+                                        durationMs = f.toolDurationMs,
+                                    )
+                                )
+                            } else {
+                                block
+                            }
+                        }
                     }
                 }
                 status.value = if (f.toolResult?.isError == true) "$name failed" else "$name done"
