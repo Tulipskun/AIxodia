@@ -1,5 +1,6 @@
 GOAL:
-[IN_PROCESS] Fix the crash on pressing send (operator: "แอพ crash ตอนกดส่งข้อความ"),
+[COMPLETED] Fix the crash on pressing send (operator: "แอพ crash ตอนกดส่งข้อความ"),
+            then commit, push and cut the rolling `latest` release.
             then commit, push and cut the rolling `latest` release.
 
 [COMPLETED] Audit the Android UI (impeccable `audit`, native variant): a11y,
@@ -11,7 +12,7 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
-[IN_PROCESS] Send-crash fix (this pass): every liveBlocks write now runs under a
+[COMPLETED] Send-crash fix (this pass): every liveBlocks write now runs under a
             Mutex in ChatViewModel. WS frames mutate the live timeline on
             Dispatchers.IO while send()/beginLiveTurn/clearLiveTurn tear it down
             on the main thread; the plain read-modify-write lost updates, so two
@@ -24,7 +25,11 @@ PLAN:
             assignments so a torn-down turn never waits behind queued frames.
             compileDebugKotlin + :app:testDebugUnitTest (247 tests) +
             assembleDebug BUILD SUCCESSFUL on JDK17 + /opt/android-sdk.
-            NOT verified on a phone — no handset and no KVM here.
+            Shipped: 3ce0de1 pushed to main; scripts/release.sh cut the rolling
+            `latest` at 06:12:49Z (versionName 1.0.202610290612, versionCode
+            1793254369, signature CN=AIxodia OK, AIxodia-version.json commit ==
+            HEAD). NOT verified on a phone — no handset and no KVM here, so the
+            operator's screen is the first real render.
 
 [COMPLETED] Session 2026-10-29 (impeccable finish pass): verified every
             P0–P3 fix already in the working tree against its finding, wrote
