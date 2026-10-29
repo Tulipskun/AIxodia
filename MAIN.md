@@ -1,7 +1,6 @@
 GOAL:
 [COMPLETED] Fix the crash on pressing send (operator: "แอพ crash ตอนกดส่งข้อความ"),
             then commit, push and cut the rolling `latest` release.
-            then commit, push and cut the rolling `latest` release.
 
 [COMPLETED] Audit the Android UI (impeccable `audit`, native variant): a11y,
             performance, theming, platform conformance, adaptivity. Document
