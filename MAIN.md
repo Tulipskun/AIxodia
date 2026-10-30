@@ -263,6 +263,12 @@ NOTE:
   run: 350 tests, 334 pass, the same 16 ARM renderer initialization failures.
 - Add a regression for `liveRows`: one row per block, stable distinct keys,
   and no positional list to index into. LiveKeysTest covers the pairing.
+- Crash fix published: versionName 1.0.202610300051, versionCode 1793321487,
+  commit c33f312d53a719d1c2616af955755b03d93cab14, signer CN=AIxodia
+  (SHA-256 unchanged). Workflow 40982082647 green; its retained x86 reports
+  hold 350 tests, 0 failures, 0 skipped. The fix is proven against the exact
+  frame the trace named, but not yet on the operator's phone — that install is
+  the remaining verification.
   ("แอพเด้งหลังจากกดส่งข้อความ"), with no stack trace supplied. Treat this as a
   new reproduction requirement: keep the verified second-batch fixes, wire the
   per-chat draft/acceptance path, and ship durable crash capture (file + share
