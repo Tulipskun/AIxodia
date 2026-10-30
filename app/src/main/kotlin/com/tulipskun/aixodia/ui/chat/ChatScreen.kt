@@ -129,7 +129,7 @@ import com.tulipskun.aixodia.ui.display.ComposerCommand
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
-import com.tulipskun.aixodia.ui.display.drawerEdgeGuard
+import com.tulipskun.aixodia.ui.display.drawerFloorGuard
 import com.tulipskun.aixodia.ui.display.GoalsCard
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.LiveThink
@@ -648,17 +648,17 @@ fun ChatScreen(
             onDismiss = { showModelPicker = false },
         )
     }
-    // Measured so the drawer's edge band can stop above the bar: a thumb
-    // hooking sideways over the composer or the session strip is reaching for
-    // those, not for the menu.
+    // Measured so the drawer's drag is refused across the bar: a thumb hooking
+    // sideways over the composer or the session strip is reaching for those, not
+    // for the menu. Everywhere else on the page the swipe is full width.
     var bottomBarPx by remember { mutableStateOf(0) }
     ModalNavigationDrawer(
         drawerState = drawer,
         // Its drag is left exactly as Material wrote it — finger-following,
         // settled by travel or a flick, springing back otherwise — because
-        // drawerEdgeGuard on the Scaffold below decides which drags it is
-        // allowed to see: a horizontal swipe begun away from the left edge, or
-        // begun below the top of the composer bar, never reaches this one.
+        // drawerFloorGuard on the Scaffold below decides which drags it is
+        // allowed to see: a horizontal swipe begun on the composer bar, at any
+        // width, never reaches this one.
         drawerContent = {
             // Opening the list is the moment to pull the current chats.
             LaunchedEffect(drawer.currentValue) {
@@ -710,7 +710,7 @@ fun ChatScreen(
         }
     ) {
         Scaffold(
-            modifier = Modifier.drawerEdgeGuard(drawer, bottomBarPx),
+            modifier = Modifier.drawerFloorGuard(drawer, bottomBarPx),
             // Edge to edge: the app bar and the input bar each handle their own
             // system-bar insets, so the thread gets the whole window instead of
             // being inset twice.
@@ -765,8 +765,8 @@ fun ChatScreen(
             bottomBar = {
                 Surface(
                     color = MaterialTheme.colorScheme.background,
-                    // Measured, because the drawer's edge band has to stop where
-                    // this bar begins.
+                    // Measured, because the drawer's drag is refused across
+                    // this bar and nowhere else.
                     modifier = Modifier.onSizeChanged { bottomBarPx = it.height },
                 ) {
                     Column(

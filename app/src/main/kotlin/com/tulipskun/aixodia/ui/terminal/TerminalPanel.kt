@@ -100,7 +100,7 @@ import com.tulipskun.aixodia.term.TerminalEmulator
 import com.tulipskun.aixodia.term.TerminalLiveService
 import com.tulipskun.aixodia.term.TerminalOutput
 import com.tulipskun.aixodia.term.TerminalView
-import com.tulipskun.aixodia.ui.display.drawerEdgeGuard
+import com.tulipskun.aixodia.ui.display.drawerFloorGuard
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
@@ -273,12 +273,12 @@ fun TerminalWindow(
     val selecting = remember { mutableStateOf(false) }
     val verticalDrag = remember { mutableStateOf(false) }
 
-    // The drawer's edge band stops where the footer begins: a thumb hooking
-    // sideways over the keys or the command field is reaching for those, not
-    // for the menu. It is measured from the bottom of the window rather than as
-    // the footer's own height, because with the keyboard up the field is lifted
-    // a whole IME inset off the bottom, and only its top says where the band
-    // has to end.
+    // The drawer's drag is refused across the footer: a thumb hooking sideways
+    // over the keys or the command field is reaching for those, not for the
+    // menu. Over the grid the swipe is full width. It is measured from the
+    // bottom of the window rather than as the footer's own height, because with
+    // the keyboard up the field is lifted a whole IME inset off the bottom, and
+    // only its top says where the refusal has to end.
     var footerBandPx by remember { mutableStateOf(0) }
 
     // TalkBack cannot see a custom-canvas terminal: the grid is drawn with no
@@ -447,8 +447,8 @@ fun TerminalWindow(
 
     // The terminal itself is still one platform ViewGroup, but the chrome no
     // longer sits above it: the session controls live in a drawer so the shell
-    // gets the whole page. A left-to-right swipe begun at the edge of the page
-    // opens it; one begun over the grid does not.
+    // gets the whole page. A left-to-right swipe anywhere over the page opens
+    // it; one begun on the keys or the command field does not.
     ModalNavigationDrawer(
         drawerState = drawerState,
         // The drawer's own drag is the one Material wrote — it follows the
@@ -457,7 +457,7 @@ fun TerminalWindow(
         // completely, since a sideways drift halfway through a scroll must not
         // become a menu swipe, and it does the same while text is selected.
         // Which of those drags it is allowed to see at all is decided by the
-        // guard on the surface below: only a swipe begun at the left edge.
+        // guard on the surface below: none begun on the footer.
         gesturesEnabled = drawerState.isOpen ||
             (!selecting.value && !verticalDrag.value),
         drawerContent = {
@@ -491,12 +491,12 @@ fun TerminalWindow(
             Modifier
                 .fillMaxSize()
                 .background(Ink)
-                // The guard moves nothing: it only refuses a sideways drag that
-                // began away from the left edge, or below the top of the footer,
-                // so the grid keeps its scroll, its selection and its long
-                // press, an edge swipe still drives the drawer with the finger,
-                // and the keys and the command field keep the thumb over them.
-                .drawerEdgeGuard(
+                // The guard moves nothing: it only refuses a sideways drag begun
+                // on the footer, so the grid keeps its scroll, its selection and
+                // its long press, a swipe from anywhere else on the page still
+                // drives the drawer with the finger, and the keys and the command
+                // field keep the thumb over them.
+                .drawerFloorGuard(
                     drawerState,
                     bottomReservedPx = footerBandPx,
                     enabled = !selecting.value && !verticalDrag.value,
