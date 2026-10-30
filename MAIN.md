@@ -1101,11 +1101,11 @@ page-up / up / page-down over left / down / right with up still directly above
 down. Modifier order becomes
 Shift, Ctrl, Alt on the left of the lower row; the whole-line erase and the
 fresh-shell key take the right edge, one per row. The 7th column costs touch
-size: 7 equal weights inside 2dp side padding and no gap leave 50.9dp per key at
-360dp wide (55.6 at 393, 58.1 at 411, 68 at 480), comfortably over Material's
-48dp minimum. The operator chose to spend the separation on the keys: with the
-chips meeting edge to edge a near-miss now fires the key beside it rather than
-landing in a gap, and only the rounded corners mark where one key ends.
+size: 7 equal weights with no side padding and no gap run the full width, the way
+Termux's extra-keys row does: 51.4dp per key at 360dp (56.1 at 393, 58.7 at 411,
+68.6 at 480). Every dp goes to the keys — the chips meet edge to edge, so a
+near-miss fires the key beside it rather than landing in a gap, only the rounded
+corners mark one key from the next, and the end keys sit flush on the screen edge.
 
 NOTE:
 - 2026-10-28T23:46Z: the store-first switch is committed as fc1764b (+ docs
