@@ -1096,14 +1096,12 @@ class TerminalView @JvmOverloads constructor(
                     sendMouse(em, event, button = 0, release = false)
                     sendMouse(em, event, button = 0, release = true)
                 }
-                // Only a still tap asks for the keyboard. A drag is scrolling,
-                // and a tap that dismissed a selection was reading text: both
-                // must leave the IME exactly as it was.
+                // A tap is a tap and nothing more. It used to raise the IME,
+                // which put the keyboard over the grid every time a reader
+                // touched the page to click, scroll back, or simply look. The
+                // command field is where the keyboard belongs, and the chrome
+                // keeps its own keyboard up around it.
                 if (quick && !dragging && !pressDismissedSelection) {
-                    // Full-screen programs (opencode) are exactly where typing
-                    // is needed most. Showing the IME here used to be limited
-                    // to the non-mouse branch, so a tap closed the keyboard.
-                    keepSoftKeyboard()
                     onUserInteraction?.invoke()
                 }
                 return true
@@ -1285,13 +1283,18 @@ class TerminalView @JvmOverloads constructor(
     }
 
     /**
-     * Keep the keyboard up after a tap on the chrome (Ctrl, Alt, a key chip),
-     * but only when it was already up. A key chip is a terminal key, not a text
-     * field: tapping Esc or an arrow must not pull the IME over the grid. When
-     * the keyboard is open, focus has to come back to the grid or the system
-     * hides it as soon as the chip takes focus.
+     * Keep the grid's keyboard up after a tap on the chrome (Ctrl, Alt, a key
+     * chip), but only when the grid owns the IME and it was already up. A key
+     * chip is a terminal key, not a text field: tapping Esc or an arrow must not
+     * pull the IME over the grid. The command field has a keyboard of its own
+     * that it keeps while it is the focused view.
      */
     fun keepSoftKeyboardIfShown() {
+        // Only the grid's own keyboard is ours to keep. When the command field
+        // owns it, taking focus back to the grid is exactly what makes the
+        // system hide the field's IME and the restore below show it again: the
+        // keyboard shut and reopened on every extra key pressed into the field.
+        if (!isFocused) return
         val insets = ViewCompat.getRootWindowInsets(this) ?: return
         if (!insets.isVisible(WindowInsetsCompat.Type.ime())) return
         keepSoftKeyboard()
