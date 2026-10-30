@@ -121,6 +121,22 @@ class TerminalScrollTest {
         dispatchTouchEvent(MotionEvent.obtain(down, down + (steps + 1) * 16L, MotionEvent.ACTION_UP, 540f, toY, 0))
     }
 
+    /** A drag along an arbitrary path, for gestures that are not straight down. */
+    private fun TerminalView.dragAlong(fromX: Float, fromY: Float, toX: Float, toY: Float, steps: Int = 10) {
+        val down = 1_000L
+        dispatchTouchEvent(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, fromX, fromY, 0))
+        for (i in 1..steps) {
+            val t = i.toFloat() / steps
+            dispatchTouchEvent(
+                MotionEvent.obtain(
+                    down, down + i * 16L, MotionEvent.ACTION_MOVE,
+                    fromX + (toX - fromX) * t, fromY + (toY - fromY) * t, 0,
+                ),
+            )
+        }
+        dispatchTouchEvent(MotionEvent.obtain(down, down + (steps + 1) * 16L, MotionEvent.ACTION_UP, toX, toY, 0))
+    }
+
     private fun TerminalView.tap(y: Float) {
         val at = 2_000L
         dispatchTouchEvent(MotionEvent.obtain(at, at, MotionEvent.ACTION_DOWN, 540f, y, 0))
@@ -133,6 +149,31 @@ class TerminalScrollTest {
         tty.view.drag(fromY = 600f, toY = 1200f)
         assertTrue("the page should follow the finger down into history", tty.pan > 0f)
         assertFalse("the page is no longer at the prompt", tty.atBottom.last())
+    }
+
+    /**
+     * A sideways sweep with a thumb is not a level line; it drifts down as the
+     * arc closes. The page used to call that drift a scroll at 45° and keep the
+     * menu shut; now only a clearly vertical drag is the page's.
+     */
+    @Test
+    fun aSlightlyDiagonalSwipeIsTheDrawers() {
+        val tty = tty(lines = 100)
+        var vertical = 0
+        tty.view.onVerticalDrag = { if (it) vertical++ }
+        tty.view.dragAlong(fromX = 300f, fromY = 600f, toX = 600f, toY = 957f)
+        assertEquals("a 50° sweep is not a scroll", 0, vertical)
+        assertEquals("and the page did not move", 0f, tty.pan, 0.5f)
+    }
+
+    @Test
+    fun aClearlyVerticalSwipeStillScrolls() {
+        val tty = tty(lines = 100)
+        var vertical = 0
+        tty.view.onVerticalDrag = { if (it) vertical++ }
+        tty.view.dragAlong(fromX = 400f, fromY = 500f, toX = 600f, toY = 1049f)
+        assertEquals("a 70° sweep is the page's", 1, vertical)
+        assertTrue("and it moved the page", tty.pan > 0f)
     }
 
     @Test

@@ -1056,13 +1056,21 @@ class TerminalView @JvmOverloads constructor(
                 // Decide the axis once. Until the finger lifts, a vertical
                 // scroll stays a scroll even if it drifts sideways later; that
                 // drift used to hand the gesture to the drawer mid-scroll.
-                if (!dragAxisLocked &&
-                    (kotlin.math.abs(totalDy) > touchSlop ||
-                        kotlin.math.abs(dx) > touchSlop)
-                ) {
-                    dragAxisLocked = true
-                    verticalDrag = kotlin.math.abs(totalDy) >= kotlin.math.abs(dx)
-                    if (verticalDrag) onVerticalDrag?.invoke(true)
+                // The page only claims a drag that is clearly vertical — the
+                // drawer is a horizontal gesture and answers the rest.
+                if (!dragAxisLocked) {
+                    when (dragAxis(dx, totalDy, touchSlop.toFloat())) {
+                        DragAxis.Vertical -> {
+                            dragAxisLocked = true
+                            verticalDrag = true
+                            onVerticalDrag?.invoke(true)
+                        }
+                        DragAxis.Horizontal -> {
+                            dragAxisLocked = true
+                            verticalDrag = false
+                        }
+                        null -> Unit
+                    }
                 }
                 if (!dragging && dragAxisLocked) {
                     dragging = true
