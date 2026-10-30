@@ -1093,6 +1093,17 @@ verified unchanged after the move. NOT compiled here: this host carries only
 JDK 21 and no Android SDK 35, and `MAIN.md` records that the build dies under
 JDK 21 in :app:compileDebugJavaWithJavac — so `:app:testDebugUnitTest` and
 assembleDebug still have to run where the SDK lives.
+[IN_PROCESS] TerminalKeys grows to two rows of seven (operator: "esc tab cmd
+page-up up page-down del-all / shift ctrl alt left down right exec"). Page keys
+are new: PgUp sends ESC[5~ and PgDn ESC[6~ on a tap, non-repeating, flanking the
+up arrow so the navigation cluster reads page-up / up / page-down over
+left / down / right with up still directly above down. Modifier order becomes
+Shift, Ctrl, Alt on the left of the lower row; the whole-line erase and the
+fresh-shell key take the right edge, one per row. The 7th column costs touch
+size: 7 equal weights inside 4dp side padding and 4dp gaps leave 46.9dp per key
+at 360dp wide (51.6 at 393, 54.1 at 411, 64 at 480), so the bar only misses
+Material's 48dp minimum on a 360dp-wide phone — trimming the padding and the gap
+bought back 2.9dp over the 8dp/6dp bar.
 
 NOTE:
 - 2026-10-28T23:46Z: the store-first switch is committed as fc1764b (+ docs

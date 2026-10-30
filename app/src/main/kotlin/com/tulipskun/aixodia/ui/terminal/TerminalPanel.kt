@@ -1017,24 +1017,21 @@ private fun TerminalKeys(
     onShiftSpent: () -> Unit,
     onKey: (ByteArray) -> Unit,
 ) {
-    // Exactly two rows, six keys each. The arrows own the middle now: the
-    // left, down and right arrows take the lower row's 3rd, 4th and 5th slots
-    // and the up arrow sits in the upper row's 4th, directly above the down
-    // arrow, the way a D-pad reads — they no longer crowd the right edge,
-    // where the thumb had to reach past the screen for them. Ctrl and Alt keep
-    // the left of the lower row and Shift takes its far right end: Shift only
-    // ever pairs with Tab, and an edge column is the right home for a key
-    // wanted far less than Ctrl or Alt. The refresh key replaces the running
-    // shell with a fresh login shell in place — exec $SHELL — which is how a
-    // wedged or half-configured session gets a clean one without a new tab,
-    // and the whole-line erase (Ctrl-U then Ctrl-K, so it works from the
-    // middle too) stays an icon on the upper row. Every arrow holds and
-    // repeats; page-walking through output one tap at a time is no option.
+    // Exactly two rows, seven keys each. The navigation cluster owns the
+    // middle: page-up, up and page-down sit above left, down and right, so the
+    // up arrow stays directly above the down arrow and the thumb finds all six
+    // without reaching for an edge. The modifiers hold the left of the lower
+    // row in the order Shift, Ctrl, Alt. The two job keys share the right edge:
+    // the whole-line erase (Ctrl-U then Ctrl-K, so it works from the middle
+    // too) sits above the one that replaces the running shell with a fresh
+    // login shell in place — exec $SHELL — which is how a wedged or
+    // half-configured session gets a clean one without a new tab. Every arrow
+    // holds and repeats; the page keys send ESC[5~ and ESC[6~ on a tap.
     val tab = if (shiftOn) "\u001b[Z".toByteArray() else byteArrayOf(9)
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Column(
@@ -1043,7 +1040,7 @@ private fun TerminalKeys(
         ) {
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Box(Modifier.weight(1f)) {
                     KeyChip("Esc", wide = true, onClick = { onKey(byteArrayOf(27)) })
@@ -1060,14 +1057,13 @@ private fun TerminalKeys(
                     KeyChip("CMD", wide = true, onClick = { onKey(byteArrayOf(16)) })
                 }
                 Box(Modifier.weight(1f)) {
+                    KeyChip("PgUp", wide = true, onClick = { onKey("\u001b[5~".toByteArray()) })
+                }
+                Box(Modifier.weight(1f)) {
                     HoldableKeyChip("\u2191", onClick = { onKey("\u001b[A".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
-                    IconKey(
-                        icon = Icons.Default.Refresh,
-                        contentDescription = "New login shell",
-                        onClick = { onKey("exec \$SHELL\r".toByteArray()) },
-                    )
+                    KeyChip("PgDn", wide = true, onClick = { onKey("\u001b[6~".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
                     IconKey(
@@ -1079,8 +1075,11 @@ private fun TerminalKeys(
             }
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                Box(Modifier.weight(1f)) {
+                    KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
+                }
                 Box(Modifier.weight(1f)) {
                     KeyChip("Ctrl", active = ctrlOn, wide = true, onClick = onCtrl)
                 }
@@ -1097,7 +1096,11 @@ private fun TerminalKeys(
                     HoldableKeyChip("\u2192", onClick = { onKey("\u001b[C".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
+                    IconKey(
+                        icon = Icons.Default.Refresh,
+                        contentDescription = "New login shell",
+                        onClick = { onKey("exec \$SHELL\r".toByteArray()) },
+                    )
                 }
             }
         }
