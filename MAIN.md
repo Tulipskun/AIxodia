@@ -1,4 +1,35 @@
 GOAL:
+[COMPLETED] The operator's two-part order (operator: "ปรับการเลื่อนเปิด app drawer
+             เป็นเต็มหน้าจอเหมือนเดิม โดยค้นหา skill ux ui ที่มีผู้ใช้งานจริงมาประกอบ
+             และแก้ bug เวลา resize terminal มันเลื่อนหน้าจอจากบนลงล่างใหม่ตลอดเวลา
+             ที่ resize"): give the drawer swipe back the whole page, with real-world
+             UX practice behind it, and stop a terminal resize re-scrolling the page
+             from the top. (a) The left 15% band is gone. `EdgeDrawer.kt`
+             (`drawerEdgeGuard`, `isDrawerEdgePress`, `isInDrawerEdgeBand`,
+             `DRAWER_EDGE_SHARE`) is deleted and `DrawerFloor.kt` replaces it:
+             `drawerFloorGuard` refuses the drawer a drag begun on the measured
+             bottom bar — the chat composer and session strip, the terminal's key
+             rows and command field — and only there, so every other horizontal
+             swipe on the page opens the menu the way Material wrote it. That
+             matches how a drawer works on a gesture-navigation phone: the true
+             screen edge belongs to the system back swipe, `DrawerLayout` and
+             `SeekBar` are documented as opting out of it on their own through
+             `View.setSystemGestureExclusionRects`, and Compose's
+             `ModalNavigationDrawer` has no such exclusion — a band hugging the
+             border competes with the system, a drag begun a hand's width inside
+             the screen does not. The no-flash rule moved with the refusal: a
+             floor gesture is consumed at its first move, sooner than Material's
+             own drag threshold, so either the menu opens or nothing moves.
+             (b) `TerminalView.resizeToView()` no longer answers a resize with
+             `resetScroll()`; the keyboard opening pushed a reader's history off
+             the screen every single time. The buffer already hands a shrinking
+             live screen's top rows to the history above it and the
+             screen-change callback adds that height back to the page, so
+             holding the position is now just a matter of not throwing it away.
+             compileDebugKotlin, assembleDebug and the full unit suite green:
+             364 tests, 0 failures, 0 skipped — three new resize regression tests
+             in TerminalScrollTest and DrawerFloorTest in place of EdgeDrawerTest.
+
 [COMPLETED] The defect as the operator actually described it (operator: "การปัด
              หน้าจอส่วนที่ไม่ได้ตั้งไว้มันเปิด app drawer ขึ้นมาชั่วขณะ แทนที่จะไม่
              ทำงานเลย ตั้งค่าให้ถูกต้องไม่ได้หรือไง"): a sideways swipe begun off the
@@ -80,6 +111,18 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[COMPLETED] Full-width drawer swipe: delete `EdgeDrawer.kt` and its band tests,
+            add `DrawerFloor.kt` with `isOnDrawerFloor` + `drawerFloorGuard`,
+            repoint ChatScreen and TerminalPanel at it, replace EdgeDrawerTest
+            with DrawerFloorTest.
+[COMPLETED] Terminal resize: drop the `resetScroll()` out of
+            `resizeToView()`, re-anchor `lastHistoryRows` to the history the
+            resize left behind and clamp, then prove it with three
+            TerminalScrollTest cases — a page reading history keeps its row at
+            the top of the screen when the bar appears and when it goes away,
+            and a reader on the prompt stays there.
+[IN_PROCESS] Ship as two `ui:` commits pushed together (no `[skip ci]` on the
+             tip of that push), then the docs record behind them.
 [COMPLETED] Refuse the drawer the drag: `drawerEdgeGuard` consumes every
             unconsumed move of a non-band gesture at the first event, so
             Material's own drag threshold is never reached. `DrawerEdgeSlop`,
@@ -237,6 +280,28 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T05:26Z: the band was the wrong idea, not a wrong number. Android's
+  own gesture-navigation guidance gives the left and right screen edges to the
+  system back swipe, and says `DrawerLayout` and `SeekBar` opt out of that
+  collision automatically via `View.setSystemGestureExclusionRects`; a Compose
+  `ModalNavigationDrawer` has no such hook, so the 15% band was asking the app to
+  argue with the system over the one strip where the system always wins. Real
+  side-drawer apps answer the swipe where the thumb lands — a hand's width inside
+  the screen — and that is also what `gesturesEnabled` was written for. The
+  refusal therefore moved from *how far left* a drag started to *what it started
+  on*: only the bottom bar keeps its own drags, everything above it is the
+  drawer's at full width. `EdgeDrawer.kt` is deleted, not disabled.
+- 2026-10-30T05:26Z: the terminal's re-scroll on resize was one call, not a
+  layout problem. `resizeToView()` ended with `resetScroll()`, which zeroes the
+  page and re-anchors the history count. The compensation for a shorter live
+  screen was already there and already fired — `TerminalBuffer.resize` pushes
+  its top rows into the history in document order, `em.resize` reports the screen
+  change, and `onContentChanged` adds `(newRows - lastHistoryRows) * cellHeight`
+  back to the page, which holds every row's pixel position exactly — and then
+  `resetScroll()` ran and threw all of it away. Deleting the reset is the whole
+  fix; the test pins the *document anchor* (`scrollback.size - pan/cellHeight`)
+  rather than the pan, because the pan is supposed to grow by the rows the buffer
+  moved.
 - 2026-10-30T04:58Z: `latest` carries the guard fix — versionName
   1.0.202610300456, versionCode 1793336215, commit 2c1b795, APK 20,874,070
   bytes, signer CN=AIxodia.
