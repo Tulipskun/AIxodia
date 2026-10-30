@@ -230,7 +230,18 @@ NOTE:
   eligibility allows offline text but never offline files/uploads/busy, a
   surviving draft route is re-pinned after a successful promotion, and
   RunSocket events/stop are gated by the run and chat that own them.
-- ChatScreen now reads the per-chat draft from `vm.drafts`, sends through
+- Published d90020d build verified: versionName 1.0.202610300025,
+  versionCode 1793319912, version asset commit d90020d5ab8ae81f4b4ced10
+  1128903c97d76949, signer CN=AIxodia SHA-256 652f0b4ae06b92cfbed47df335d1a
+  7216b9e54640ae41c0aa26ae66f0be849a6. The x86 runner's retained reports
+  hold 348 tests, 0 failures, 0 skipped, so the goals-card, eligibility,
+  draft-route, ownership and draft wiring all render and pass there too.
+- The crash itself is still unexplained: this build does not claim to fix it.
+  CrashLog only exists from d90020d onward, so the operator must install this
+  APK and then reproduce once; the NEXT occurrence will leave
+  filesDir/last-crash.txt, readable from Settings -> About -> Share last crash
+  log, and that stack is what the follow-up fix follows.
+- ChatScreen reads the per-chat draft from `vm.drafts`, sends through
   `sendDraft()` (clear after acceptance only), consumes the persisted selection
   via `openSavedChat()` instead of re-opening its own echo, and draws the
   header title and drawer highlight from `activeSession`. The focused batch
