@@ -1031,7 +1031,7 @@ private fun TerminalKeys(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Column(
@@ -1040,7 +1040,7 @@ private fun TerminalKeys(
         ) {
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 Box(Modifier.weight(1f)) {
                     KeyChip("Esc", wide = true, onClick = { onKey(byteArrayOf(27)) })
@@ -1075,7 +1075,7 @@ private fun TerminalKeys(
             }
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 Box(Modifier.weight(1f)) {
                     KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
