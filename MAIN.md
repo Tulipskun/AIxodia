@@ -29,6 +29,13 @@ GOAL:
              compileDebugKotlin, assembleDebug and the full unit suite green:
              364 tests, 0 failures, 0 skipped — three new resize regression tests
              in TerminalScrollTest and DrawerFloorTest in place of EdgeDrawerTest.
+             Shipped: 23bad55 + f5139e5 pushed together, release run 41008343071
+             green, `latest` at versionName 1.0.202610300527 / versionCode
+             1793338027, version.json commit == f5139e5, and the downloaded
+             AIxodia.apk (20,874,078 bytes) verifies as CN=AIxodia. Still
+             operator-screen questions: whether a full-width swipe now opens the
+             menu from wherever the thumb lands without stealing a scroll, and
+             whether a keyboard open leaves the history row being read in place.
 
 [COMPLETED] The defect as the operator actually described it (operator: "การปัด
              หน้าจอส่วนที่ไม่ได้ตั้งไว้มันเปิด app drawer ขึ้นมาชั่วขณะ แทนที่จะไม่
@@ -121,8 +128,9 @@ PLAN:
             TerminalScrollTest cases — a page reading history keeps its row at
             the top of the screen when the bar appears and when it goes away,
             and a reader on the prompt stays there.
-[IN_PROCESS] Ship as two `ui:` commits pushed together (no `[skip ci]` on the
-             tip of that push), then the docs record behind them.
+[COMPLETED] Ship as two `ui:` commits pushed together (no `[skip ci]` on the
+            tip of that push), then the docs record behind them: 23bad55 +
+            f5139e5 → run 41008343071 → `latest` 1.0.202610300527.
 [COMPLETED] Refuse the drawer the drag: `drawerEdgeGuard` consumes every
             unconsumed move of a non-band gesture at the first event, so
             Material's own drag threshold is never reached. `DrawerEdgeSlop`,
@@ -280,6 +288,16 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T05:31Z: `latest` carries both — versionName 1.0.202610300527,
+  versionCode 1793338027, commit f5139e5, APK 20,874,078 bytes, signer
+  CN=AIxodia. The two `ui:` commits went out in ONE push with no `[skip ci]` on
+  its tip, which is what the trap note at 04:30Z asked for, and the run built.
+- 2026-10-30T05:31Z: the drawer entries above are history, not the current
+  design. 24a5dd0's left-15% band and 2c1b795's non-band first-move refusal are
+  both gone from the placement half of that idea; only the refusal at the first
+  move survived, and it now applies to the bottom bar at any width. Anything
+  MAIN.md says about an edge band should be read as superseded by the entry at
+  the head of GOAL.
 - 2026-10-30T05:26Z: the band was the wrong idea, not a wrong number. Android's
   own gesture-navigation guidance gives the left and right screen edges to the
   system back swipe, and says `DrawerLayout` and `SeekBar` opt out of that
