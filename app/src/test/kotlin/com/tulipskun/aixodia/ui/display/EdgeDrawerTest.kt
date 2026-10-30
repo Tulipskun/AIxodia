@@ -5,15 +5,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The two questions the edge guard asks about a drag, answered on their own:
- * where did the finger come down, and is this drag sideways? Everything the
- * drawer is still allowed to do — and everything it must not be handed — is one
- * of these returning false.
+ * The one question the edge guard asks about a drag: where did the finger come
+ * down? Everything the drawer is still allowed to do — and everything it must
+ * not be handed, down to the first millimetre of a peek — is that answer.
  */
 class EdgeDrawerTest {
-    // A 1000px wide surface, so the band is its left 150px, and a 30px slop.
+    // A 1000px wide surface, so the band is its left 150px.
     private fun inBand(downX: Float, width: Int = 1000) = isInDrawerEdgeBand(downX, width)
-    private fun sideways(dx: Float, dy: Float) = isSidewaysDrag(dx, dy, 30f)
 
     @Test fun theBandIsTheLeftFifteenPercent() = assertTrue(DRAWER_EDGE_SHARE == 0.15f)
 
@@ -50,13 +48,10 @@ class EdgeDrawerTest {
     @Test fun nothingReservedKeepsTheFullHeight() =
         assertTrue(isDrawerEdgePress(12f, 1999f, 1000, 2000, 0))
 
-    @Test fun aDragPastTheSlopSidewaysIsASwipe() = assertTrue(sideways(120f, 4f))
-
-    @Test fun aDragShorterThanTheSlopIsStillAHold() = assertFalse(sideways(29f, 0f))
-
-    @Test fun aScrollIsNotASwipe() = assertFalse(sideways(40f, 400f))
-
-    @Test fun aSwipeBackToTheEdgeIsStillSideways() = assertTrue(sideways(-120f, 8f))
-
-    @Test fun aDiagonalDriftOffAVerticalScrollIsNotASwipe() = assertFalse(sideways(35f, 60f))
+    @Test fun aTerminalFooterOfTwoRowsStillLeavesTheGridTheEdge() {
+        // 2000px tall, the terminal floor measured at 620px from the bottom of
+        // the window: the last row above it is still a swipe for the menu.
+        assertTrue(isDrawerEdgePress(12f, 1380f, 1000, 2000, 620))
+        assertFalse(isDrawerEdgePress(12f, 1381f, 1000, 2000, 620))
+    }
 }
