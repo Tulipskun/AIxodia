@@ -191,7 +191,7 @@ GOAL:
 [IN_PROCESS] Fix every audit finding, P0 through P3, and take the result all
             the way to the rolling `latest` release.
 
-[IN_PROCESS] Fix the terminal's two display bugs (operator: "แก้ bug การแสดงผลใน
+[COMPLETED] Fix the terminal's two display bugs (operator: "แก้ bug การแสดงผลใน
             Terminal ไม่ถูกต้องในบางครั้ง หลังจากการ reconnect เห็นหน้าจอว่าง
             ต้องเปิด/ปิดแป้นพิมพ์ก่อน 1 ครั้งถึงจะเห็นหน้าจอ เมื่อ engine restart
             แท็บ ที่ควรปิดไปแล้วยังอยู่").
@@ -223,8 +223,19 @@ PLAN:
 [COMPLETED] App: persist closed tab ids, retry the DELETE while the engine
             still lists them, prune them when it stops, and close listed-but-
             unattached ids on endAllTabs. 378 unit tests, 0 failures, 0 skipped
-            (two new in TerminalSocketTest), assembleDebug green. Not yet on a
-            handset — the operator's screen is the first real render.
+            (two new in TerminalSocketTest), assembleDebug green.
+            Shipped: engine ce14ece pushed first (CI 41120799551 and Release
+            41120799779 green; the daemon self-updated at 20:23:41Z), then the
+            app 4cb4c7e on its own (Release APK 41120805630 green). `latest`
+            at versionName 1.0.202610302009 / versionCode 1793390986,
+            AIxodia-version.json commit == 4cb4c7e, APK 20,890,454 bytes
+            verifies as CN=AIxodia. The engine half was proved live on this
+            host, not just in a unit test: a fresh shell got `echo
+            REKTEST-MARKER`, the WebSocket was dropped, and a same-size
+            reattach (no resize, keyboard never involved) received 328 binary
+            bytes carrying the marker, then DELETE answered 204 and took the
+            tmux session with it. The app half is not handset-verified yet —
+            the operator's phone is where a close-then-restart will show it.
 [COMPLETED] Take the tmux status bar off the phone's grid and carry what it
             showed in the drawer: chain `set-option -t <name> status off` into the
             engine's `new-session`, quiet adopted sessions at boot, and print each
