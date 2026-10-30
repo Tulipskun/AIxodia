@@ -11,12 +11,12 @@ GOAL:
             last applied seq, and the existing reconnect path recovers the turn.
             Then commit, push and let the release workflow cut `latest`.
 
-[IN_PROCESS] Session 2026-10-30 (drawer + goals placement): the side drawer may
+[COMPLETED] Session 2026-10-30 (drawer + goals placement): the side drawer may
              open only from a swipe that starts inside the left ~15% of the
              screen, and the goal/plan card belongs in the strip above the
-             composer rather than at the very top of the chat. Both implemented
-             and verified on this host (360 tests green, debug APK assembles);
-             no commit or release was asked for, so pushing awaits the operator.
+             composer rather than at the very top of the chat. Implemented,
+             verified on this host (360 tests, 0 failures) and shipped as the
+             rolling `latest` at 24a5dd0.
 
 [IN_PROCESS] Session 2026-10-29 (display/logic review): fix verified AIxodia
              display bugs and flawed UI state logic, with regression coverage.
@@ -127,7 +127,7 @@ PLAN:
             .impeccable/design.json sidecar; README auth section and PRODUCT.md
             credential line synced to TokenCipher + backup exclusion.
 [IN_PROCESS] Commit, push to main (release).
-[IN_PROCESS] Drawer + goals placement (2026-10-30): the side drawer opens only
+[COMPLETED] Drawer + goals placement (2026-10-30): the side drawer opens only
              from a swipe begun in the left 15% of the page — ui/display/
              EdgeDrawer.kt holds the band, the slop and the passive watcher,
              wired onto ChatScreen's Scaffold and TerminalPanel's content
@@ -148,7 +148,7 @@ PLAN:
              screen can say whether 15% is a comfortable band, and TerminalPanel
              has no menu button, so if the platform view swallows the edge drag
              the terminal drawer would lose its only opening gesture.
-[IN_PROCESS] Commit, push and publish this placement batch as the operator
+[COMPLETED] Commit, push and publish this placement batch as the operator
              explicitly asked; verify the workflow, the released APK and the
              version asset before calling it available. The one open question
              is the terminal window, which has no menu button at all: there the
@@ -157,6 +157,16 @@ PLAN:
              that surface needs its own affordance.
 
 NOTE:
+- 2026-10-30T03:25Z: the drawer-edge + goals-strip batch is committed as
+  24a5dd0, pushed to main, and published. Release run 40997112296 is green
+  (unit + renderer gate BUILD SUCCESSFUL, then build/sign/publish); the rolling
+  `latest` now carries versionName 1.0.202610300324, versionCode 1793330693,
+  AIxodia-version.json commit == 24a5dd027fd817a7895fed37fd163e9a094ce061, and
+  the downloaded AIxodia.apk verifies as the stable signer CN=AIxodia
+  (SHA-256 652f0b4ae06b92cfbed47df335d1a7216b9e54640ae41c0aa26ae66f0be849a6),
+  package com.tulipskun.aixodia, minSdk 26. Not verified on a handset: whether
+  15% feels like the right band, and whether the terminal window's edge drag
+  survives its AndroidView, are both operator-screen questions.
 - 2026-10-30 (this host): the container changed under the work — it is x86_64
   now and had no Android SDK. Installed one at /opt/android-sdk (cmdline-tools
   19.0, platform 35, build-tools 35.0.0, platform-tools) and the suite runs here
