@@ -26,6 +26,24 @@ internal fun isInDrawerEdgeBand(downX: Float, widthPx: Int): Boolean =
     downX <= widthPx * DRAWER_EDGE_SHARE
 
 /**
+ * Is a press at ([downX],[downY]) inside the drawer's edge band on a surface
+ * [widthPx] wide whose bottom [bottomReservedPx] belongs to another control?
+ *
+ * The band is the left slice of the surface, cut short by whatever is pinned to
+ * its bottom: a swipe begun over the composer, the session strip or the goals
+ * card is a reach for those, not for the menu, and the full-height band the
+ * drawer uses for itself cannot see the difference.
+ */
+internal fun isDrawerEdgePress(
+    downX: Float,
+    downY: Float,
+    widthPx: Int,
+    heightPx: Int,
+    bottomReservedPx: Int,
+): Boolean = isInDrawerEdgeBand(downX, widthPx) &&
+    downY <= (heightPx - bottomReservedPx).coerceAtLeast(0)
+
+/**
  * Is this drag sideways — further left or right than up or down, and far enough
  * that it is a swipe rather than a tap or a scroll drifting off the vertical?
  */
@@ -50,18 +68,37 @@ internal fun isSidewaysDrag(dx: Float, dy: Float, slopPx: Float): Boolean =
  * a child already took — a code block sliding sideways, a terminal selecting
  * text — are seen through, not consumed.
  *
+ * [bottomReservedPx] shortens the band by the height of the bar pinned to the
+ * bottom of the surface. Without it a thumb hooking sideways over the composer
+ * or the session strip opened the menu, because the band was measured across the
+ * full height and only ever asked *how far left* a press came down.
+ *
  * The guard steps aside while the drawer is open, so the drag that closes it
  * still works from wherever the thumb happens to be.
  */
 @Composable
-fun Modifier.drawerEdgeGuard(drawer: DrawerState, enabled: Boolean = true): Modifier {
+fun Modifier.drawerEdgeGuard(
+    drawer: DrawerState,
+    bottomReservedPx: Int = 0,
+    enabled: Boolean = true,
+): Modifier {
     val closed = drawer.isClosed
     val slopPx = with(LocalDensity.current) { DrawerEdgeSlop.toPx() }
-    return pointerInput(closed, enabled, slopPx) {
+    return pointerInput(closed, enabled, slopPx, bottomReservedPx) {
         if (!enabled || !closed) return@pointerInput
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
-            if (isInDrawerEdgeBand(down.position.x, size.width)) return@awaitEachGesture
+            if (
+                isDrawerEdgePress(
+                    downX = down.position.x,
+                    downY = down.position.y,
+                    widthPx = size.width,
+                    heightPx = size.height,
+                    bottomReservedPx = bottomReservedPx,
+                )
+            ) {
+                return@awaitEachGesture
+            }
             while (true) {
                 val event = awaitPointerEvent()
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break

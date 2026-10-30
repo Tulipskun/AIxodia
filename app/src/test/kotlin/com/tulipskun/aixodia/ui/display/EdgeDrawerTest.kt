@@ -31,6 +31,25 @@ class EdgeDrawerTest {
         assertFalse(inBand(70f, width = 400))
     }
 
+    // A 1000 x 2000 surface whose bottom 400px is the composer bar: the band
+    // runs down the left edge only as far as that bar begins.
+    private fun press(downX: Float, downY: Float, reserved: Int = 400) =
+        isDrawerEdgePress(downX, downY, 1000, 2000, reserved)
+
+    @Test fun aPressBesideTheThreadIsTheEdge() = assertTrue(press(12f, 300f))
+
+    @Test fun theLastRowOfTheThreadIsStillTheEdge() = assertTrue(press(12f, 1600f))
+
+    @Test fun aPressOverTheComposerBarIsNotTheEdge() = assertFalse(press(12f, 1601f))
+
+    @Test fun aPressDeepInTheComposerBarIsNotTheEdge() = assertFalse(press(12f, 1900f))
+
+    @Test fun aBarThatIsTheWholeSurfaceLeavesNoBandAtAll() =
+        assertFalse(isDrawerEdgePress(0f, 1f, 1000, 300, 400))
+
+    @Test fun nothingReservedKeepsTheFullHeight() =
+        assertTrue(isDrawerEdgePress(12f, 1999f, 1000, 2000, 0))
+
     @Test fun aDragPastTheSlopSidewaysIsASwipe() = assertTrue(sideways(120f, 4f))
 
     @Test fun aDragShorterThanTheSlopIsStillAHold() = assertFalse(sideways(29f, 0f))
