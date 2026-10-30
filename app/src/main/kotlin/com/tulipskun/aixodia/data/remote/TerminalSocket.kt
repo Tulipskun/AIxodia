@@ -426,6 +426,11 @@ class TerminalSocket(
         // dropLink issues the engine-side close for every id (the control frame
         // may have no socket behind it if the tab had already ended).
         links.values.toList().forEach { dropLink(it, kill = true) }
+        // A tab the window listed before any link attached has no stream to
+        // close, and its shell is on the engine just the same. Closing the
+        // terminal while the engine is down would otherwise leave every one of
+        // them to be handed back as tabs when it comes up again.
+        _sessions.value.filter { it !in links.keys }.forEach { forgetClosed(it, kill = true) }
         links.clear()
         activeLink = null
         _sessions.value = emptyList()
@@ -503,6 +508,14 @@ class TerminalSocket(
         } catch (t: Throwable) {
             emptyMap()
         }
+        // Tabs closed in an earlier process are still closed: their DELETE may
+        // have been lost, and the engine's list is the only thing that can say
+        // the shell is gone.
+        try {
+            closingIds.addAll(settings.currentTerminalClosedIds())
+        } catch (t: Throwable) {
+            Log.w(TAG, "closed tab ids unreadable", t)
+        }
         _activeSessionId.value = savedActive
         _sessions.value = savedIds
         _sessionPids.value = savedPids
@@ -522,8 +535,9 @@ class TerminalSocket(
      * what makes a reconnect land on the right shell — or on one new tab when
      * every shell really is gone.
      */
-    private suspend fun syncSessions(): Boolean =
-        sessionSync.withLock {
+    private suspend fun syncSessions(): Boolean {
+        var owed: List<String> = emptyList()
+        val answered = sessionSync.withLock {
             val rows = when (val shells = withTimeoutOrNull(5_000) { history.terminalShells() }) {
                 is TerminalShells.Listed -> shells.rows
                 // An engine that cannot list still answered: there is nothing to
@@ -551,7 +565,11 @@ class TerminalSocket(
             // (the control frame and the DELETE are in flight). Keeping it out
             // of the tab list is what stops a closed tab from reattaching; the
             // tombstone is dropped as soon as the engine agrees it is gone.
-            closingIds.retainAll(ids.toSet())
+            val (done, stillListed) = splitClosed(ids.toSet(), closingIds.toSet())
+            if (done.isNotEmpty()) {
+                closingIds.removeAll(done)
+                settings.saveTerminalClosedIds(closingIds.sorted())
+            }
             ids.removeAll(closingIds)
             pids.keys.retainAll(ids.toSet())
             titles.keys.retainAll(ids.toSet())
@@ -573,7 +591,7 @@ class TerminalSocket(
             // A brand-new shell that has not answered ready yet is an explicit
             // choice, not a missing active tab. Do not switch away from it when
             // the periodic list still lacks its id.
-            val pendingNew = synchronized(this) {
+            val pendingNew = synchronized(this@TerminalSocket) {
                 activeLink?.id == "" && activeLink?.state?.value != TermState.ENDED
             }
             if (!pendingNew) {
@@ -584,8 +602,20 @@ class TerminalSocket(
                     else -> ""
                 }
             }
+            owed = stillListed
             true
         }
+        if (!answered) return false
+
+        // The engine still names a shell the user closed, so the close never
+        // reached it — the window for that is an engine restart, and tmux keeps
+        // the shell across one. Retrying here is what stops the closed tab from
+        // coming back with the next list, or after the app is restarted. Laid
+        // off the caller: a dial must not wait on shells that are on their way
+        // out, and the next poll retries whatever a slow DELETE left behind.
+        owed.forEach { id -> scope.launch { runCatching { history.closeTerminal(id) } } }
+        return true
+    }
 
     /**
      * Brings the live links in line with [sessions]: stale sockets are hung up,
@@ -709,7 +739,14 @@ class TerminalSocket(
         sessionModes.remove(id)
         scope.launch {
             settings.removeTerminalSessionId(id)
-            if (kill) runCatching { history.closeTerminal(id) }
+            if (kill) {
+                // Written before the DELETE is even attempted: if the engine is
+                // restarting the DELETE is lost, and the tmux shell it should
+                // have ended would otherwise come back as a tab after the next
+                // list — or after the next launch.
+                settings.addTerminalClosedId(id)
+                runCatching { history.closeTerminal(id) }
+            }
         }
     }
 
@@ -1043,7 +1080,9 @@ class TerminalSocket(
                 settings.saveTerminalSessionId(newId)
                 settings.addTerminalSessionId(newId)
                 if (ev.pid > 0) settings.saveTerminalSessionPid(newId, ev.pid)
-                _sessions.value = settings.currentTerminalSessionIds()
+                // A tab closed while this frame was in flight must not return
+                // through the saved list.
+                _sessions.value = settings.currentTerminalSessionIds().filter { it !in closingIds }
                 _sessionPids.value = settings.currentTerminalSessionPids()
             }
         }
@@ -1112,6 +1151,16 @@ class TerminalSocket(
          */
         private val closingIds: MutableSet<String> =
             java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+        /**
+         * Splits the tombstones against the engine's list. An id the list no
+         * longer names is closed for good and can be forgotten; one it still
+         * names is owed another DELETE, because the first one did not land.
+         */
+        internal fun splitClosed(listed: Set<String>, closed: Set<String>): Pair<Set<String>, List<String>> {
+            val owed = closed.filter { it in listed }
+            return (closed - owed.toSet()) to owed
+        }
 
         /**
          * Maps an HTTP(S) daemon address to the dedicated terminal WebSocket.

@@ -191,7 +191,40 @@ GOAL:
 [IN_PROCESS] Fix every audit finding, P0 through P3, and take the result all
             the way to the rolling `latest` release.
 
+[IN_PROCESS] Fix the terminal's two display bugs (operator: "แก้ bug การแสดงผลใน
+            Terminal ไม่ถูกต้องในบางครั้ง หลังจากการ reconnect เห็นหน้าจอว่าง
+            ต้องเปิด/ปิดแป้นพิมพ์ก่อน 1 ครั้งถึงจะเห็นหน้าจอ เมื่อ engine restart
+            แท็บ ที่ควรปิดไปแล้วยังอยู่").
+            (1) Blank screen after a reconnect: the engine's attach sends the
+            reset and, under tmux, no replay (the ring is dropped), and the pane
+            is repainted by tmux only on SIGWINCH. The engine kicked only an
+            alternate-screen session on a same-size attach, so a plain shell came
+            back to a cleared grid until the keyboard changed the size. Engine
+            fix (aixodia-engine): always kick when the size did not change and
+            tmux is on, and kick after the ready/replay writes so the repaint
+            cannot be broadcast before the subscriber exists. A pty probe of
+            tmux 3.4 proved a same-size SIGWINCH to the pty's foreground group
+            repaints the whole pane, content included; the engine crate now
+            carries that as a test through its own pty.
+            (2) Tabs closed before an engine restart came back: a close was a
+            single DELETE, kept as a process-local tombstone. An engine that is
+            restarting never hears it, tmux keeps the shell, and the next list
+            names it again — so the tab returned with the restarted engine (or
+            with the next app launch). Closed ids are now persisted
+            (`terminal_closed_ids`), stay out of the tab list and out of the
+            list `onReady` republishes, and every list poll re-issues the DELETE
+            for an id the engine still names until it stops; `endAllTabs` also
+            closes listed tabs that never attached.
+
 PLAN:
+[COMPLETED] Engine: kick a reattached pty under tmux even when the size did not
+            change, after ready/replay, and prove it with tmux 3.4 through a pty
+            (engine crate: fmt/clippy clean, 9 tests incl. the pty repaint)
+[COMPLETED] App: persist closed tab ids, retry the DELETE while the engine
+            still lists them, prune them when it stops, and close listed-but-
+            unattached ids on endAllTabs. 378 unit tests, 0 failures, 0 skipped
+            (two new in TerminalSocketTest), assembleDebug green. Not yet on a
+            handset — the operator's screen is the first real render.
 [COMPLETED] Take the tmux status bar off the phone's grid and carry what it
             showed in the drawer: chain `set-option -t <name> status off` into the
             engine's `new-session`, quiet adopted sessions at boot, and print each

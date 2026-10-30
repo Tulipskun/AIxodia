@@ -95,4 +95,26 @@ class TerminalSocketTest {
         assertTrue(json, json.contains("\"cols\":100"))
         assertTrue(json, json.contains("\"rows\":30"))
     }
+
+    @Test
+    fun aClosedTabTheEngineStillListsIsOwedAnotherClose() {
+        // The engine restarting is exactly when a DELETE is lost; tmux keeps the
+        // shell, the next list names it again, and only a retry removes it.
+        val (done, owed) = TerminalSocket.splitClosed(
+            listed = setOf("a", "b"),
+            closed = setOf("b", "c"),
+        )
+        assertEquals(setOf("c"), done)
+        assertEquals(listOf("b"), owed)
+    }
+
+    @Test
+    fun aClosedTabTheEngineDroppedIsForgotten() {
+        val (done, owed) = TerminalSocket.splitClosed(
+            listed = setOf("a"),
+            closed = setOf("b"),
+        )
+        assertEquals(setOf("b"), done)
+        assertTrue(owed.isEmpty())
+    }
 }

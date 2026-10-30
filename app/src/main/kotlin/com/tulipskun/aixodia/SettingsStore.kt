@@ -36,6 +36,11 @@ class SettingsStore(private val ctx: Context) {
     // id -> pid of each live shell, so a tab can say which process it is and a
     // reconnect can show the same identity before the engine's ready frame.
     private val terminalSessionPids = stringPreferencesKey("terminal_session_pids")
+    // Tabs the user closed that the engine still lists. A close is a DELETE the
+    // engine may not hear (it is exactly when it is restarting), and the shell
+    // survives that in tmux; this is what makes the retry — and the fact that
+    // the tab must stay gone — outlive the process.
+    private val terminalClosedIds = stringPreferencesKey("terminal_closed_ids")
     // The daemon's start time, kept so the header's uptime counter has a number
     // the moment the app opens — the D1 query that confirms it has not landed yet.
     private val daemonStartedAt = stringPreferencesKey("daemon_started_at")
@@ -89,6 +94,9 @@ class SettingsStore(private val ctx: Context) {
     /** The cached daemon start time (unix second), 0 when never seen. */
     val terminalSessionIdFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionId] ?: "" }
     val terminalSessionIdsFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionIds] ?: "" }
+    val terminalClosedIdsFlow: Flow<Set<String>> = ctx.ds.data.map {
+        (it[terminalClosedIds] ?: "").split(",").map(String::trim).filter(String::isNotBlank).toSet()
+    }
     val terminalSessionPidsFlow: Flow<Map<String, Int>> = ctx.ds.data.map {
         parseSessionPids(it[terminalSessionPids].orEmpty())
     }
@@ -229,6 +237,23 @@ class SettingsStore(private val ctx: Context) {
 
     suspend fun clearTerminalSessionId() {
         ctx.ds.edit { it.remove(terminalSessionId) }
+    }
+
+    /** Tabs the user closed that the engine has not stopped listing yet. */
+    suspend fun currentTerminalClosedIds(): Set<String> = terminalClosedIdsFlow.first()
+
+    suspend fun addTerminalClosedId(id: String) {
+        val clean = id.trim()
+        if (clean.isEmpty()) return
+        ctx.ds.edit { prefs ->
+            val ids = (prefs[terminalClosedIds] ?: "").split(",").map { it.trim() }.filter { it.isNotBlank() }
+            if (clean !in ids) prefs[terminalClosedIds] = (ids + clean).joinToString(",")
+        }
+    }
+
+    /** Replaces the set once the engine agrees those shells are gone. */
+    suspend fun saveTerminalClosedIds(ids: Collection<String>) {
+        ctx.ds.edit { it[terminalClosedIds] = ids.filter(String::isNotBlank).joinToString(",") }
     }
 
     /**
