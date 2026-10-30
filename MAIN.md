@@ -2,6 +2,17 @@ GOAL:
 [IN_PROCESS] Session 2026-10-29 (display/logic review): fix verified AIxodia
              display bugs and flawed UI state logic, with regression coverage.
 
+[COMPLETED] Second batch: goals-card paging offset, offline/uploading send
+            eligibility, draft-route re-pin, run/stop ownership, per-chat
+            drafts and active-session header/drawer, plus on-device crash
+            capture. Full suite: 348 tests, 332 pass, the same 16 ARM renderer
+            initialization failures; debug APK assembles.
+
+[IN_PROCESS] Diagnose the operator's new report that the shipped build closes
+             right after pressing send ("แอพเด้งหลังจากกดส่งข้อความ"). Capture
+             the next trace via Settings → About → Share last crash log; fix
+             only the frame that trace names.
+
 [COMPLETED] Fix the crash on pressing send (operator: "แอพ crash ตอนกดส่งข้อความ"),
             then commit, push and cut the rolling `latest` release.
 
@@ -21,6 +32,12 @@ PLAN:
 [IN_PROCESS] Run the full unit/snapshot suite and assemble the debug APK.
 [IN_PROCESS] Commit, push and publish the app's rolling `latest` after each
              validated fix batch, as explicitly requested by the operator.
+[COMPLETED] Second-batch full run: 348 tests, 332 passed, 16 failed and all 16
+            are the known ARM renderer initialization failures (8
+            TerminalScrollTest, 3 TerminalViewSnapshots, 5 ScreenSnapshots).
+            assembleDebug succeeded; the 12 real second-batch failures are gone.
+[IN_PROCESS] Ship the batch, verify the published APK and version asset, then
+             ask the operator for the recorded crash trace.
 
 [COMPLETED] Send-crash fix (this pass): every liveBlocks write now runs under a
             Mutex in ChatViewModel. WS frames mutate the live timeline on
@@ -179,6 +196,57 @@ NOTE:
   repository/history and 24-test view-model ownership fixes plus the x86 CI
   test gate. The unexecuted RunSocketOwnershipTest belongs to the next batch
   and is deliberately excluded from this commit/release.
+- First batch committed as da240f5. Push it to main to run the x86 test gate
+  and signed rolling release; verify the workflow and uploaded version asset
+  before saying it is available. Reproduce RunSocket ownership in parallel,
+  against the still-unchanged transport, for the next focused batch.
+- da240f5 pushed successfully to main. The locally built APK verifies as the
+  stable CN=AIxodia signer (SHA-256 652f0b4ae06b92cfbed47df335d1a7216b9e54640
+  ae41c0aa26ae66f0be849a6). Discover the matching release run and watch it once,
+  rather than assuming a successful push means a published APK.
+- The RunSocket baseline first hit fixture compilation issues (a runTest
+  wrapper incorrectly marked suspend, and an overloaded Android API matcher).
+  Correct those fixtures without changing the transport, and add draft,
+  send-eligibility and paging regressions before the second behavior patch.
+- Extract the existing composer/header calculations unchanged for a focused
+  baseline. Offline text and uploading eligibility, and goals-card offsets,
+  must fail before their fixes rather than being asserted only after editing.
+- First release workflow 40976296563 completed successfully for the full
+  da240f5b5a1a6f09bfbf49b86e2a96b93e21eac9 commit. Download its retained test
+  reports and actual release assets to verify counts, provenance and signature.
+- Running the second focused baseline: unchanged RunSocket reducer, 16 draft
+  regressions, composer eligibility, paging geometry and the 24 existing
+  chat-state checks. Only the calculations were extracted; behavior is not
+  fixed yet. No Room schema/database migration is planned for these fixes.
+- Release assets downloaded successfully. The report download hit gh's invalid
+  inherited /data/local/tmp location; retry with TMPDIR=/tmp/opencode rather
+  than changing any tests or host directories. Verify the published APK itself.
+- Published first progress build verified: versionName 1.0.202610292357,
+  versionCode 1793318243; its APK manifest and version asset both name the
+  da240f5 build, with the expected CN=AIxodia stable signer. The x86 artifact
+  includes passing renderer suites and eight rendered PNGs; aggregate the
+  actual XML counts rather than assume they match locally cached test outputs.
+- Second-batch edits in place: goals card counted in paging headers, send
+  eligibility allows offline text but never offline files/uploads/busy, a
+  surviving draft route is re-pinned after a successful promotion, and
+  RunSocket events/stop are gated by the run and chat that own them.
+- ChatScreen now reads the per-chat draft from `vm.drafts`, sends through
+  `sendDraft()` (clear after acceptance only), consumes the persisted selection
+  via `openSavedChat()` instead of re-opening its own echo, and draws the
+  header title and drawer highlight from `activeSession`. The focused batch
+  passes: RunSocketOwnershipTest, ChatViewModelDraftTest, ThreadPagingTest,
+  ComposerSendEligibilityTest and ChatViewModelStateTest all green on JDK17
+  (3m13s, BUILD SUCCESSFUL).
+- Operator reports the shipped build still closes right after pressing send
+  ("แอพเด้งหลังจากกดส่งข้อความ"), with no stack trace supplied. Treat this as a
+  new reproduction requirement: keep the verified second-batch fixes, wire the
+  per-chat draft/acceptance path, and ship durable crash capture (file + share
+  from Settings) so the next occurrence names the exact frame. Do not claim the
+  crash is fixed without evidence.
+- Baseline for the second batch reproduced 12 real failures: 5 RunSocket
+  ownership (old reader labels frames with the newly selected chat), the failed
+  model-pin retry, 3 goals-card paging offsets, and 3 composer eligibility
+  rules. Fix those behind the existing tests, then re-run.
 - Deliberate deviation, recorded rather than silently dropped: "off-main
   terminal parse" became chunked-with-yield parsing ON the main thread
   (TerminalPanel WRITE_CHUNK slices + yield()). emulator.write feeds the view

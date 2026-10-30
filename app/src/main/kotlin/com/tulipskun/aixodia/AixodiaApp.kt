@@ -17,6 +17,7 @@ class AixodiaApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
         container = AppContainer(this)
         // Started here rather than from a screen: the address can change while
         // the app is in the background (a kernel ends, a new one is pushed), and

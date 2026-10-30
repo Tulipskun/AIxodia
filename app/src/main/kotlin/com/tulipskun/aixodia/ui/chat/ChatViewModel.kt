@@ -1580,7 +1580,10 @@ class ChatViewModel(
                 if (online && wasDraft && !repo.ensureRemoteSession(sid, text.trim().take(60))) {
                     throw IllegalStateException("Could not start this chat on the daemon")
                 }
-                if (online && wasDraft && pendingRoute != null) {
+                // A route chosen before the chat existed survives a promotion
+                // that succeeded but whose pin failed. Retrying the send must
+                // pin it too, even though the chat is remote by then.
+                if (online && pendingRoute != null) {
                     val pinned = routeMutex.withLock {
                         repo.setSessionModel(sid, pendingRoute.first, pendingRoute.second)
                     }

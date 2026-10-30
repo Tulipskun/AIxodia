@@ -128,6 +128,9 @@ class RunSocket(
         synchronized(queueLock) {
             queue.removeAll { it.sessionId == sessionId }
         }
+        // Stop owns only the chat on screen. A stale stop from the chat just
+        // left must not cancel the turn that replaced it.
+        if (sessionId != runSession) return false
         val id = runId ?: return false
         scope.launch {
             val cfg = config() ?: return@launch
@@ -420,13 +423,19 @@ class RunSocket(
     }
 
     private fun handle(run: String, event: String, raw: String) {
+        // A stream belongs to one chat. A reader that was cancelled by a switch
+        // can still deliver a line it had already read; labelling that line
+        // with the newly selected chat (or updating its cursor) is how an old
+        // answer appeared in the new thread.
+        val ownedRun = runId ?: return
+        if (run != ownedRun || runSession.isBlank() || runSession != session) return
         val env = runCatching { JSONObject(raw) }.getOrNull() ?: return
         val seq = env.optLong("seq")
         if (seq > lastSeq) lastSeq = seq
         val kind = env.optString("kind").ifBlank { event }
         val data = env.opt("data")
         if (kind == "user") return
-        val frame = RunFrames.map(kind, data, frameSession()) ?: return
+        val frame = RunFrames.map(kind, data, runSession) ?: return
         emit(frame)
         if (kind == "status" && RunFrames.terminal((data as? JSONObject)?.optString("status").orEmpty())) {
             clearRun()

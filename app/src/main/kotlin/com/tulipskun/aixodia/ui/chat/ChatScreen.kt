@@ -284,8 +284,11 @@ fun ChatScreen(
     val vm: ChatViewModel = viewModel {
         ChatViewModel(repo, settings, sessId, context.applicationContext)
     }
+    // The persisted id is only an intent: our own accepted switch is written
+    // back to it, and consuming that echo here is what keeps it from opening
+    // the chat a second time (or undoing a newer navigation).
     LaunchedEffect(sessId) {
-        if (sessId.isNotBlank()) vm.openChat(sessId)
+        if (sessId.isNotBlank()) vm.openSavedChat(sessId)
     }
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
     val sessionUsage by vm.sessionUsage.collectAsStateWithLifecycle(initialValue = null)
@@ -331,7 +334,11 @@ fun ChatScreen(
     ) {
         scope.launch { drawer.close() }
     }
-    var draft by rememberSaveable { mutableStateOf("") }
+    // A draft belongs to the chat it was typed in, not to the screen: switching
+    // away and back must not carry one chat's half-written message into another,
+    // and a rotation must not lose it either. The map lives in SavedStateHandle.
+    val drafts by vm.drafts.collectAsStateWithLifecycle()
+    val draft = drafts[activeSession].orEmpty()
     var pending by remember { mutableStateOf<ChatSession?>(null) }
     var renameTarget by remember { mutableStateOf<ChatSession?>(null) }
     var renameText by rememberSaveable { mutableStateOf("") }
@@ -420,7 +427,7 @@ fun ChatScreen(
     val composerCommands = listOf(
         ComposerCommand(stringResource(R.string.new_chat)) { vm.newChat() },
         ComposerCommand(stringResource(R.string.stop), enabled = busy) { vm.stop() },
-        ComposerCommand(stringResource(R.string.clear_draft), enabled = draft.isNotBlank()) { draft = "" },
+        ComposerCommand(stringResource(R.string.clear_draft), enabled = draft.isNotBlank()) { vm.changeDraft("") },
         ComposerCommand(stringResource(R.string.refresh)) { vm.refresh() },
         ComposerCommand(stringResource(R.string.settings)) { showSettings = true },
     )
@@ -439,7 +446,8 @@ fun ChatScreen(
     // thumb stays there when that page arrives, and the bottom follows new
     // turns only while the reader is already at the bottom.
     val showOlderHeader = hasOlder || loadingOlder
-    val olderHeaderItems = if (showOlderHeader) 1 else 0
+    val goalsPage = objectives?.takeIf { it.goals.isNotEmpty() || it.plans.isNotEmpty() }
+    val olderHeaderItems = threadHeaderItems(showOlderHeader, goalsPage != null)
     var olderAnchor by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var lastScrolledTail by remember { mutableStateOf<String?>(null) }
     // The chat this list has already anchored. A boolean went wrong when the
@@ -646,7 +654,7 @@ fun ChatScreen(
             }
             SessionDrawerContent(
                 sessions = sessions,
-                activeId = sessId,
+                activeId = activeSession,
                 onNewChat = { vm.newChat(); scope.launch { drawer.close() } },
                 onOpen = { id -> vm.openChat(id); scope.launch { drawer.close() } },
                 onLongPress = { pending = it },
@@ -705,7 +713,7 @@ fun ChatScreen(
                     // composer's own bottom row (see ChatComposer).
                     title = {
                         Text(
-                            sessionTitle(sessions, sessId),
+                            sessionTitle(sessions, activeSession),
                             maxLines = 1,
                             style = MaterialTheme.typography.titleMedium,
                         )
@@ -807,7 +815,7 @@ fun ChatScreen(
                         )
                         ChatComposer(
                             draft = draft,
-                            onDraftChange = { draft = it },
+                            onDraftChange = { vm.changeDraft(it) },
                             busy = busy,
                             // The stop square only replaces send once the turn
                             // has said something back — a trace, a word, a tool
@@ -823,7 +831,10 @@ fun ChatScreen(
                                 liveText.isNotBlank() ||
                                 liveBlocks.any { it !is LiveBlock.Think } ||
                                 stats.elapsedMs(nowMs) > 3_000L,
-                            onSend = { vm.send(draft); draft = "" },
+                            // Clear only after the repository accepted the
+                            // question: a send that failed keeps the text the
+                            // reader wrote instead of eating it.
+                            onSend = { vm.sendDraft() },
                             connected = conn == ConnState.ONLINE,
                             onStop = { vm.stop() },
                             commands = composerCommands,
@@ -899,7 +910,6 @@ fun ChatScreen(
                 // The goals and plans this chat's turn is working through, kept
                 // in step with the engine's store. It sits above the thread so
                 // it reads as the turn's ledger, not one more message.
-                val goalsPage = objectives?.takeIf { it.goals.isNotEmpty() || it.plans.isNotEmpty() }
                 if (goalsPage != null) {
                     item(key = "goals-card") {
                         GoalsCard(goalsPage)

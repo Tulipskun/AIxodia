@@ -337,7 +337,7 @@ fun ChatComposer(
     val sendLabel = stringResource(R.string.send)
     val fieldLabel = stringResource(R.string.composer_label)
     val card = MaterialTheme.shapes.extraLarge
-    val canSend = (draft.isNotBlank() || attachments.isNotEmpty()) && connected
+    val canSend = canSendMessage(draft, attachments.isNotEmpty(), busy, connected, uploading)
     var commandMenuOpen by remember { mutableStateOf(false) }
     Column(
         modifier
@@ -495,7 +495,7 @@ fun ChatComposer(
                     DiscControl(
                         label = sendLabel,
                         onClick = onSend,
-                        enabled = canSend && !busy,
+                        enabled = canSend,
                         primary = true,
                     ) { tint ->
                         Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = tint)
@@ -505,6 +505,19 @@ fun ChatComposer(
         }
     }
 }
+
+/** The composer's send-arrow eligibility, independent of rendering. */
+internal fun canSendMessage(
+    draft: String,
+    hasAttachments: Boolean,
+    busy: Boolean,
+    connected: Boolean,
+    uploading: Boolean,
+): Boolean = (draft.isNotBlank() || hasAttachments) &&
+    !uploading &&
+    !busy &&
+    // Text is queued offline; files need the daemon that will receive them.
+    (connected || !hasAttachments)
 
 /**
  * A round, wordless control for the composer's bottom row. What it does is a

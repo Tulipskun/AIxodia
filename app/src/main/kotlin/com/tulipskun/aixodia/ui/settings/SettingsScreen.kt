@@ -66,6 +66,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.BuildConfig
+import com.tulipskun.aixodia.CrashLog
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.ui.display.TokenField
@@ -462,6 +463,22 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 UpdateRow(settings)
+                val ctx = LocalContext.current
+                val crash = remember { CrashLog.latest(ctx) }
+                if (crash != null) {
+                    TextButton(
+                        onClick = {
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, "AIxodia crash log")
+                                putExtra(android.content.Intent.EXTRA_TEXT, crash)
+                            }
+                            ctx.startActivity(
+                                android.content.Intent.createChooser(send, "Share crash log"),
+                            )
+                        },
+                    ) { Text("Share last crash log") }
+                }
             }
             }
         }
