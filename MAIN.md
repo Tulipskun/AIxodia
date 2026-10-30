@@ -1,4 +1,30 @@
 GOAL:
+[COMPLETED] The strip under the grid is the app's own (operator, on the
+            1.0.202610302316 build: "ก็เป็นแถบว่างประมาณ 1 บรรทัดอยู่นี่ไง", with a
+            bash-tab screenshot after `seq 1 43`). The tmux bar is gone and
+            qodercli's own last pane line stays as the program's, but the app was
+            still throwing away part of a row: `resizeToView` floored
+            `rows = height / cellHeight`, so the leftover strip — up to a whole
+            font cell — stayed empty below the last row, between the prompt and
+            the keys. The row count is still the whole cells that fit; each row
+            is now painted at `height / rows`, so the grid ends exactly at the
+            footer. `lineHeight` keeps the font's natural line, so the count can
+            never flap between N and N-1 as a side effect of the stretch (on the
+            handset the share is under a pixel per row at the 41px pitch). The
+            page is re-anchored in the same step: scrollTopPx is read as a row
+            with the old pitch and written back with the new one, in both the
+            resize path and the same-size path, so a reader in the history is not
+            moved by the pitch change. One new TerminalScrollTest case: a 1919px
+            view ends exactly on `rows * cellHeight`, a second settled pass keeps
+            both, and the prompt is still the bottom row. 379 unit tests, 0
+            failures, 0 skipped; assembleDebug green. Shipped: 791cbbd pushed on
+            its own, release run 41144940267 green after one re-run (the first
+            attempt built and signed fine and then died on a transient HTTP 502
+            from the release-asset API), `latest` at versionName 1.0.202610302335
+            / versionCode 1793403348, AIxodia-version.json commit == 791cbbd, APK
+            20,890,454 bytes verified as CN=AIxodia. Not handset-verified: the
+            band is the operator's to judge, and qodercli's own last pane line
+            remains the program's.
 [COMPLETED] Three terminal complaints in one message (operator: "เวลา focus ช่องพิมพ์
             command ใน terminal พอกดปุ่ม extra key แล้วแป้นพิมพ์ปิดเปิดเอง ทำให้การ
             กดหน้าจอ Terminal ไม่ต้องเปิดแป้นพิมพ์ขึ้นมา แล้วก็ aix ที่ย้ายไปแล้ว แต่
