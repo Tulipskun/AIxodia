@@ -1093,7 +1093,7 @@ verified unchanged after the move. NOT compiled here: this host carries only
 JDK 21 and no Android SDK 35, and `MAIN.md` records that the build dies under
 JDK 21 in :app:compileDebugJavaWithJavac — so `:app:testDebugUnitTest` and
 assembleDebug still have to run where the SDK lives.
-[IN_PROCESS] TerminalKeys grows to two rows of seven (operator: "esc tab cmd
+[COMPLETED] TerminalKeys grows to two rows of seven (operator: "esc tab cmd
 page-up up page-down del-all / shift ctrl alt left down right exec"). Page keys
 are new: PgUp sends ESC[5~ and PgDn ESC[6~, both holdable and repeating the way
 the arrows are, flanking the up arrow so the navigation cluster reads
@@ -1106,6 +1106,24 @@ Termux's extra-keys row does: 51.4dp per key at 360dp (56.1 at 393, 58.7 at 411,
 68.6 at 480). Every dp goes to the keys — the chips meet edge to edge, so a
 near-miss fires the key beside it rather than landing in a gap, only the rounded
 corners mark one key from the next, and the end keys sit flush on the screen edge.
+  Published as 1.0.202610301908, versionCode 1793387283, APK 20,890,454 bytes;
+  `latest` == 6723500. Four pushes went up in a row, so the workflow published
+  each in turn before the last one took `latest`.
+[IN_PROCESS] TerminalKeys' look and press behaviour, taken from the Material 3
+specs rather than invented. The 6dp between the two rows is gone (operator's
+ask), so the bar is one block of keys, and every key now runs the M3 press morph
+on a no-bounce spring (dampingRatio 1f, StiffnessMedium, the Compose spring
+presets): the corner opens 8dp → 18dp while the key settles to 94%, and the
+touch target stays full size so a press cannot walk the key out from under the
+finger. The pressed fill is white 10% over InkLine — M3's pressed state layer —
+and Ctrl/Alt/Shift cross-fade fill and label over 200ms rather than moving. Tap
+keys keep Compose's ripple, now clipped to the animated corners. The holdable
+keys (arrows, page keys) had no press feedback at all before: a raw pointerInput
+owns no indication, so they take the morph straight from the gesture. The erase
+key was drawing Icons.Default.ClearAll — three lines, an alignment glyph, not a
+delete — and is Icons.Default.DeleteSweep now. Checked against
+m3.material.io/styles/shape/shape-morph, m3.material.io/components/buttons/specs
+and the Compose spring docs. NOT compiled here: JDK 21 only, no Android SDK 35.
 
 NOTE:
 - 2026-10-28T23:46Z: the store-first switch is committed as fc1764b (+ docs

@@ -10,14 +10,24 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,7 +49,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
@@ -70,6 +80,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -119,6 +130,11 @@ private val InkRaised = Color(0xFF111821)
 private val InkLine = Color(0xFF1A222C)
 private val InkActive = Color(0xFF1E2A38)
 private val InkText = Color(0xFFD7E0EA)
+private val KeyActiveFill = Color(0xFF2A3A4A)
+private val KeyActiveText = Color(0xFFE8F0F8)
+
+/** A pressed state layer is 10% of the foreground: InkLine lifted by white 10%. */
+private val KeyPressedFill = Color(0xFF313841)
 private val InkDim = Color(0xFF8CA0B3)
 private val Signal = Color(0xFF6FE3B0)
 private val Danger = Color(0xFFFF8A8A)
@@ -1036,17 +1052,17 @@ private fun TerminalKeys(
     ) {
         Column(
             Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 Box(Modifier.weight(1f)) {
-                    KeyChip("Esc", wide = true, onClick = { onKey(byteArrayOf(27)) })
+                    KeyChip("Esc", onClick = { onKey(byteArrayOf(27)) })
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("Tab", wide = true, onClick = {
+                    KeyChip("Tab", onClick = {
                         onKey(tab)
                         // Only Tab answers to Shift: once the backtab has gone
                         // out, the latch has nothing left to colour.
@@ -1054,7 +1070,7 @@ private fun TerminalKeys(
                     })
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("CMD", wide = true, onClick = { onKey(byteArrayOf(16)) })
+                    KeyChip("CMD", onClick = { onKey(byteArrayOf(16)) })
                 }
                 Box(Modifier.weight(1f)) {
                     HoldableKeyChip("PgUp", onClick = { onKey("\u001b[5~".toByteArray()) })
@@ -1067,7 +1083,7 @@ private fun TerminalKeys(
                 }
                 Box(Modifier.weight(1f)) {
                     IconKey(
-                        icon = Icons.Default.ClearAll,
+                        icon = Icons.Default.DeleteSweep,
                         contentDescription = "Delete line",
                         onClick = { onKey(byteArrayOf(21, 11)) },
                     )
@@ -1078,13 +1094,13 @@ private fun TerminalKeys(
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 Box(Modifier.weight(1f)) {
-                    KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
+                    KeyChip("Shift", active = shiftOn, onClick = onShift)
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("Ctrl", active = ctrlOn, wide = true, onClick = onCtrl)
+                    KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("Alt", active = altOn, wide = true, onClick = onAlt)
+                    KeyChip("Alt", active = altOn, onClick = onAlt)
                 }
                 Box(Modifier.weight(1f)) {
                     HoldableKeyChip("\u2190", onClick = { onKey("\u001b[D".toByteArray()) })
@@ -1108,22 +1124,62 @@ private fun TerminalKeys(
 }
 
 /**
- * An icon-only key, drawn to the same size as a [KeyChip] so the bar stays
- * even: the fresh-shell key and the whole-line erase are symbols rather than
- * words, and a word would not fit beside the arrows.
+ * One key's container, shared by every chip on the bar. Pressing runs the
+ * Material 3 press morph rather than a hard state flip: the corner radius opens
+ * and the key settles a few percent smaller, both on a no-bounce spring
+ * (m3.material.io/styles/shape/shape-morph — pressed buttons morph shape;
+ * m3.material.io/components/buttons/specs — a pressed state layer is 10% of the
+ * foreground, which is what [KeyPressedFill] is over [InkLine]). A latched
+ * modifier cross-fades its fill and label instead of moving, so a thumb resting
+ * on Ctrl sees the latch without the key sliding under it.
  */
 @Composable
-private fun IconKey(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
+private fun KeySurface(
+    pressed: Boolean,
+    active: Boolean = false,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
 ) {
+    val corner by animateDpAsState(
+        targetValue = if (pressed) 18.dp else 8.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "keyCorner",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "keyScale",
+    )
+    val fill by animateColorAsState(
+        targetValue = when {
+            active -> KeyActiveFill
+            pressed -> KeyPressedFill
+            else -> InkLine
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "keyFill",
+    )
+    val shape = RoundedCornerShape(corner)
     Surface(
-        color = InkLine,
-        shape = RoundedCornerShape(8.dp),
+        color = fill,
+        shape = shape,
+        // The visual shrinks under the thumb; the touch target does not, so a
+        // press never walks the key out from under the tap that started it. The
+        // clip sits outside the caller's clickable so its ripple follows the
+        // corners as they open, instead of drawing a square over them.
         modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(shape)
+            .then(modifier),
     ) {
         Box(
             Modifier
@@ -1131,14 +1187,40 @@ private fun IconKey(
                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                icon,
-                contentDescription = contentDescription,
-                tint = InkText,
-                modifier = Modifier.size(18.dp),
-            )
-        }
+            content = content,
+        )
+    }
+}
+
+/**
+ * An icon-only key: the fresh-shell and whole-line erase keys are symbols rather
+ * than words, and a word would not fit beside the arrows.
+ */
+@Composable
+private fun IconKey(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    KeySurface(
+        pressed = pressed,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = source,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+    ) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = InkText,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -1147,52 +1229,53 @@ private fun IconKey(
 private fun KeyChip(
     label: String,
     active: Boolean = false,
-    wide: Boolean = false,
     onClick: () -> Unit,
 ) {
-    Surface(
-        color = if (active) Color(0xFF2A3A4A) else InkLine,
-        shape = RoundedCornerShape(8.dp),
-        modifier = (if (wide) Modifier.fillMaxWidth() else Modifier)
-            .clickable(onClick = onClick),
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val labelColor by animateColorAsState(
+        targetValue = if (active) KeyActiveText else InkText,
+        animationSpec = tween(durationMillis = 200),
+        label = "keyLabel",
+    )
+    KeySurface(
+        pressed = pressed,
+        active = active,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = source,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClick = onClick,
+            ),
     ) {
-        Box(
-            Modifier
-                .then(if (wide) Modifier.fillMaxWidth() else Modifier)
-                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                .padding(horizontal = if (wide) 4.dp else 8.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (active) Color(0xFFE8F0F8) else InkText,
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = labelColor,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
 /**
- * An arrow: a tap sends it once, and a held thumb repeats it until the finger
- * lifts — nobody walks through a long file one tap at a time. The events wrap
- * the repeat, so a lifted finger (or a canceled gesture, a drag away) ends it
- * between windows without a last stray key; jitter only fills a window sooner.
- * It is drawn to the same size as a [KeyChip] so both rows stay even.
+ * A navigation key: a tap sends it once, and a held thumb repeats it until the
+ * finger lifts — nobody walks through a long file one tap at a time. The events
+ * wrap the repeat, so a lifted finger (or a canceled gesture, a drag away) ends
+ * it between windows without a last stray key; jitter only fills a window
+ * sooner. The raw gesture owns no click action, so TalkBack, switch access and
+ * a keyboard get their own action above; touch keeps the hold-to-repeat.
  */
 @Composable
 private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
     val currentClick by rememberUpdatedState(onClick)
-    Surface(
-        color = InkLine,
-        shape = RoundedCornerShape(8.dp),
+    var pressed by remember { mutableStateOf(false) }
+    KeySurface(
+        pressed = pressed,
         modifier = Modifier
             .fillMaxWidth()
-            // A raw pointerInput has no node to focus and no click action, so
-            // TalkBack, switch access and a keyboard could not press these
-            // arrows at all. Touch keeps the hold-to-repeat gesture; this is the
-            // same key for every input that cannot hold.
             .semantics {
                 role = Role.Button
                 contentDescription = label
@@ -1204,40 +1287,38 @@ private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
-                    currentClick()
-                    // The first grace is what tells a tap from a hold: after
-                    // it the chip fires once per repeat window, and the
-                    // windows are wall-clock marks rather than silences, so
-                    // pointer noise (drift, a start of a drag) cannot starve
-                    // the repeat out. A lift is the only way to end it.
-                    var nextMark = System.currentTimeMillis() + KEY_REPEAT_FIRST_MS
-                    while (true) {
-                        val wait = (nextMark - System.currentTimeMillis()).coerceAtLeast(0L)
-                        val event = withTimeoutOrNull(wait) { awaitPointerEvent() }
-                        if (event == null) {
-                            currentClick()
-                            nextMark = System.currentTimeMillis() + KEY_REPEAT_MS
-                            continue
+                    pressed = true
+                    try {
+                        currentClick()
+                        // The first grace is what tells a tap from a hold: after
+                        // it the chip fires once per repeat window, and the
+                        // windows are wall-clock marks rather than silences, so
+                        // pointer noise (drift, a start of a drag) cannot starve
+                        // the repeat out. A lift is the only way to end it.
+                        var nextMark = System.currentTimeMillis() + KEY_REPEAT_FIRST_MS
+                        while (true) {
+                            val wait = (nextMark - System.currentTimeMillis()).coerceAtLeast(0L)
+                            val event = withTimeoutOrNull(wait) { awaitPointerEvent() }
+                            if (event == null) {
+                                currentClick()
+                                nextMark = System.currentTimeMillis() + KEY_REPEAT_MS
+                                continue
+                            }
+                            if (event.changes.none { it.pressed }) break
                         }
-                        if (event.changes.none { it.pressed }) break
+                    } finally {
+                        pressed = false
                     }
                 }
             },
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                color = InkText,
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = InkText,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
