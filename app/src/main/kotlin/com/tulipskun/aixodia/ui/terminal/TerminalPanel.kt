@@ -24,6 +24,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,9 +93,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick as semanticsOnClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
@@ -133,8 +138,11 @@ private val InkText = Color(0xFFD7E0EA)
 private val KeyActiveFill = Color(0xFF2A3A4A)
 private val KeyActiveText = Color(0xFFE8F0F8)
 
-/** A pressed state layer is 10% of the foreground: InkLine lifted by white 10%. */
-private val KeyPressedFill = Color(0xFF313841)
+/** The arrow glyphs draw smaller than the same size of word, so they carry a size up. */
+private val Arrows = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Medium)
+
+/** A pressed state layer is 10% of the foreground: InkText laid over the bar's own [Ink]. */
+private val KeyPressedFill = Color(0xFF1F2429)
 private val InkDim = Color(0xFF8CA0B3)
 private val Signal = Color(0xFF6FE3B0)
 private val Danger = Color(0xFFFF8A8A)
@@ -1023,7 +1031,7 @@ private fun statusLabel(state: TermState): String = when (state) {
  * Every arrow is holdable: keep a thumb on it and it repeats.
  */
 @Composable
-private fun TerminalKeys(
+internal fun TerminalKeys(
     ctrlOn: Boolean,
     altOn: Boolean,
     shiftOn: Boolean,
@@ -1044,94 +1052,89 @@ private fun TerminalKeys(
     // half-configured session gets a clean one without a new tab. Every arrow
     // and page key holds and repeats: nobody walks a file one tap at a time.
     val tab = if (shiftOn) "\u001b[Z".toByteArray() else byteArrayOf(9)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Column(
-            Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+    Column(Modifier.fillMaxWidth()) {
+        // A hairline owns the boundary with the terminal above: with no key
+        // boxes the bar and the grid would otherwise run into one another.
+        Box(Modifier.fillMaxWidth().height(Dp.Hairline).background(InkLine))
+        Spacer(Modifier.height(6.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                Box(Modifier.weight(1f)) {
-                    KeyChip("Esc", onClick = { onKey(byteArrayOf(27)) })
-                }
-                Box(Modifier.weight(1f)) {
-                    KeyChip("Tab", onClick = {
-                        onKey(tab)
-                        // Only Tab answers to Shift: once the backtab has gone
-                        // out, the latch has nothing left to colour.
-                        if (shiftOn) onShiftSpent()
-                    })
-                }
-                Box(Modifier.weight(1f)) {
-                    KeyChip("CMD", onClick = { onKey(byteArrayOf(16)) })
-                }
-                Box(Modifier.weight(1f)) {
-                    HoldableKeyChip("PgUp", onClick = { onKey("\u001b[5~".toByteArray()) })
-                }
-                Box(Modifier.weight(1f)) {
-                    HoldableKeyChip("\u2191", onClick = { onKey("\u001b[A".toByteArray()) })
-                }
-                Box(Modifier.weight(1f)) {
-                    HoldableKeyChip("PgDn", onClick = { onKey("\u001b[6~".toByteArray()) })
-                }
-                Box(Modifier.weight(1f)) {
-                    IconKey(
-                        icon = Icons.Default.DeleteSweep,
-                        contentDescription = "Delete line",
-                        onClick = { onKey(byteArrayOf(21, 11)) },
-                    )
-                }
+            Box(Modifier.weight(1f)) {
+                KeyChip("Esc", onClick = { onKey(byteArrayOf(27)) })
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                Box(Modifier.weight(1f)) {
-                    KeyChip("Shift", active = shiftOn, onClick = onShift)
-                }
-                Box(Modifier.weight(1f)) {
-                    KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
-                }
-                Box(Modifier.weight(1f)) {
-                    KeyChip("Alt", active = altOn, onClick = onAlt)
-                }
-                Box(Modifier.weight(1f)) {
-                    HoldableKeyChip("\u2190", onClick = { onKey("\u001b[D".toByteArray()) })
-                }
-                Box(Modifier.weight(1f)) {
-                    HoldableKeyChip("\u2193", onClick = { onKey("\u001b[B".toByteArray()) })
-                }
-                Box(Modifier.weight(1f)) {
-                    HoldableKeyChip("\u2192", onClick = { onKey("\u001b[C".toByteArray()) })
-                }
-                Box(Modifier.weight(1f)) {
-                    IconKey(
-                        icon = Icons.Default.Refresh,
-                        contentDescription = "New login shell",
-                        onClick = { onKey("exec \$SHELL\r".toByteArray()) },
-                    )
-                }
+            Box(Modifier.weight(1f)) {
+                KeyChip("Tab", onClick = {
+                    onKey(tab)
+                    // Only Tab answers to Shift: once the backtab has gone
+                    // out, the latch has nothing left to colour.
+                    if (shiftOn) onShiftSpent()
+                })
+            }
+            Box(Modifier.weight(1f)) {
+                KeyChip("CMD", onClick = { onKey(byteArrayOf(16)) })
+            }
+            Box(Modifier.weight(1f)) {
+                HoldableKeyChip("PgUp", onClick = { onKey("\u001b[5~".toByteArray()) })
+            }
+            Box(Modifier.weight(1f)) {
+                HoldableKeyChip("\u2191", labelStyle = Arrows, onClick = { onKey("\u001b[A".toByteArray()) })
+            }
+            Box(Modifier.weight(1f)) {
+                HoldableKeyChip("PgDn", onClick = { onKey("\u001b[6~".toByteArray()) })
+            }
+            Box(Modifier.weight(1f)) {
+                IconKey(
+                    icon = Icons.Default.DeleteSweep,
+                    contentDescription = "Delete line",
+                    onClick = { onKey(byteArrayOf(21, 11)) },
+                )
             }
         }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            Box(Modifier.weight(1f)) {
+                KeyChip("Shift", active = shiftOn, onClick = onShift)
+            }
+            Box(Modifier.weight(1f)) {
+                KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
+            }
+            Box(Modifier.weight(1f)) {
+                KeyChip("Alt", active = altOn, onClick = onAlt)
+            }
+            Box(Modifier.weight(1f)) {
+                HoldableKeyChip("\u2190", labelStyle = Arrows, onClick = { onKey("\u001b[D".toByteArray()) })
+            }
+            Box(Modifier.weight(1f)) {
+                HoldableKeyChip("\u2193", labelStyle = Arrows, onClick = { onKey("\u001b[B".toByteArray()) })
+            }
+            Box(Modifier.weight(1f)) {
+                HoldableKeyChip("\u2192", labelStyle = Arrows, onClick = { onKey("\u001b[C".toByteArray()) })
+            }
+            Box(Modifier.weight(1f)) {
+                IconKey(
+                    icon = Icons.Default.Refresh,
+                    contentDescription = "New login shell",
+                    onClick = { onKey("exec \$SHELL\r".toByteArray()) },
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
     }
 }
 
 /**
- * One key's container, shared by every chip on the bar. Pressing runs the
- * Material 3 press morph rather than a hard state flip: the corner radius opens
- * and the key settles a few percent smaller, both on a no-bounce spring
- * (m3.material.io/styles/shape/shape-morph — pressed buttons morph shape;
- * m3.material.io/components/buttons/specs — a pressed state layer is 10% of the
- * foreground, which is what [KeyPressedFill] is over [InkLine]). A latched
- * modifier cross-fades its fill and label instead of moving, so a thumb resting
- * on Ctrl sees the latch without the key sliding under it.
+ * One key's container, shared by every chip on the bar. A key at rest is only
+ * its label: the bar keeps the terminal's own background, the way Termux's
+ * extra-keys row does, so sixteen filled boxes do not sit on top of the grid
+ * the thumb is reading. A press fills the cell and dips it a few percent, both
+ * settling on a no-bounce spring (m3.material.io/components/buttons/specs — a
+ * pressed state layer is 10% of the foreground, which is [KeyPressedFill]). A
+ * latched modifier keeps its fill and brightens its label instead, so a thumb
+ * resting on Ctrl sees the latch without the key moving under it.
  */
 @Composable
 private fun KeySurface(
@@ -1140,16 +1143,8 @@ private fun KeySurface(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val corner by animateDpAsState(
-        targetValue = if (pressed) 18.dp else 8.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium,
-        ),
-        label = "keyCorner",
-    )
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.94f else 1f,
+        targetValue = if (pressed) 0.96f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMedium,
@@ -1160,35 +1155,42 @@ private fun KeySurface(
         targetValue = when {
             active -> KeyActiveFill
             pressed -> KeyPressedFill
-            else -> InkLine
+            else -> Color.Transparent
         },
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 120),
         label = "keyFill",
     )
-    val shape = RoundedCornerShape(corner)
-    Surface(
-        color = fill,
-        shape = shape,
-        // The visual shrinks under the thumb; the touch target does not, so a
-        // press never walks the key out from under the tap that started it. The
-        // clip sits outside the caller's clickable so its ripple follows the
-        // corners as they open, instead of drawing a square over them.
-        modifier = Modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
+    val shape = RoundedCornerShape(10.dp)
+    // The caller's modifier carries the touch target and owns the whole cell;
+    // the fill is inset inside it, so two latched modifiers side by side stay
+    // two keys instead of merging into one wide pill.
+    Box(
+        Modifier
             .clip(shape)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
             .then(modifier),
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                .padding(horizontal = 4.dp),
-            contentAlignment = Alignment.Center,
-            content = content,
-        )
+        Surface(
+            color = fill,
+            shape = shape,
+            // The fill dips under the thumb; the touch target does not, so a
+            // press never walks the key out from under the tap that started it.
+            modifier = Modifier
+                .matchParentSize()
+                .padding(horizontal = 2.dp, vertical = 1.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center,
+                content = content,
+            )
+        }
     }
 }
 
@@ -1197,7 +1199,7 @@ private fun KeySurface(
  * than words, and a word would not fit beside the arrows.
  */
 @Composable
-private fun IconKey(
+internal fun IconKey(
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
@@ -1219,14 +1221,14 @@ private fun IconKey(
             icon,
             contentDescription = contentDescription,
             tint = InkText,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(16.dp),
         )
     }
 }
 
 /** One tappable key; [active] fills it in while a modifier is latched. */
 @Composable
-private fun KeyChip(
+internal fun KeyChip(
     label: String,
     active: Boolean = false,
     onClick: () -> Unit,
@@ -1252,7 +1254,7 @@ private fun KeyChip(
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelLarge,
             color = labelColor,
             maxLines = 1,
             softWrap = false,
@@ -1269,9 +1271,14 @@ private fun KeyChip(
  * a keyboard get their own action above; touch keeps the hold-to-repeat.
  */
 @Composable
-private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
+internal fun HoldableKeyChip(
+    label: String,
+    labelStyle: TextStyle = MaterialTheme.typography.labelLarge,
+    onClick: () -> Unit,
+) {
     val currentClick by rememberUpdatedState(onClick)
-    var pressed by remember { mutableStateOf(false) }
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
     KeySurface(
         pressed = pressed,
         modifier = Modifier
@@ -1286,8 +1293,9 @@ private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
             }
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    pressed = true
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val press = PressInteraction.Press(down.position)
+                    source.tryEmit(press)
                     try {
                         currentClick()
                         // The first grace is what tells a tap from a hold: after
@@ -1307,14 +1315,14 @@ private fun HoldableKeyChip(label: String, onClick: () -> Unit) {
                             if (event.changes.none { it.pressed }) break
                         }
                     } finally {
-                        pressed = false
+                        source.tryEmit(PressInteraction.Release(press))
                     }
                 }
             },
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.labelMedium,
+            style = labelStyle,
             color = InkText,
             maxLines = 1,
             softWrap = false,

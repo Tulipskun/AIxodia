@@ -1109,21 +1109,34 @@ corners mark one key from the next, and the end keys sit flush on the screen edg
   Published as 1.0.202610301908, versionCode 1793387283, APK 20,890,454 bytes;
   `latest` == 6723500. Four pushes went up in a row, so the workflow published
   each in turn before the last one took `latest`.
-[IN_PROCESS] TerminalKeys' look and press behaviour, taken from the Material 3
-specs rather than invented. The 6dp between the two rows is gone (operator's
-ask), so the bar is one block of keys, and every key now runs the M3 press morph
-on a no-bounce spring (dampingRatio 1f, StiffnessMedium, the Compose spring
-presets): the corner opens 8dp → 18dp while the key settles to 94%, and the
-touch target stays full size so a press cannot walk the key out from under the
-finger. The pressed fill is white 10% over InkLine — M3's pressed state layer —
-and Ctrl/Alt/Shift cross-fade fill and label over 200ms rather than moving. Tap
-keys keep Compose's ripple, now clipped to the animated corners. The holdable
-keys (arrows, page keys) had no press feedback at all before: a raw pointerInput
-owns no indication, so they take the morph straight from the gesture. The erase
-key was drawing Icons.Default.ClearAll — three lines, an alignment glyph, not a
-delete — and is Icons.Default.DeleteSweep now. Checked against
-m3.material.io/styles/shape/shape-morph, m3.material.io/components/buttons/specs
-and the Compose spring docs. NOT compiled here: JDK 21 only, no Android SDK 35.
+[COMPLETED] TerminalKeys' look, judged from a render instead of from the spec.
+             The commit before this one shipped the M3 press morph with rounded
+             keys at a 0 gap, and the operator asked the fair question: was the
+             bar ever rendered before being called pretty? It had not been, so
+             the toolchain was rebuilt on this host (JDK 17 at
+             /usr/lib/jvm/java-17-openjdk-amd64, Android SDK 35 + build-tools
+             35 at /root/android-sdk) and KeysSnapshot renders the bar with
+             Paparazzi at PIXEL_5. What the first frame showed: with 8dp corners
+             and no gap, every pair of neighbours left a dark diamond notch at
+             the row seam, the two rows read as one undifferentiated block, and
+             sixteen InkLine boxes were heavier than the grid above them. Termux
+             was then fetched and looked at: its extra-keys row draws no boxes at
+             all, just labels on the terminal's own background. So a key at rest
+             is transparent with only its label; a press lays down M3's 10% state
+             layer (#1F2429 over Ink) with a 120ms fade and dips to 96% on a
+             no-bounce spring; a latched Ctrl/Alt/Shift keeps its fill but inset
+             2dp inside the cell, so two latched keys side by side stay two keys
+             instead of merging into one wide pill. A Dp.Hairline rule plus 6dp
+             now owns the boundary with the terminal, labels are labelLarge, the
+             arrow glyphs run 22sp (Roboto's arrows draw small at label size) and
+             the two icons 16dp. Holdable keys get their pressed state from the
+             same interaction source the gesture emits into (tryEmit, since
+             AwaitPointerEventScope cannot suspend into emit). KeysSnapshot and
+             its report are committed as a visual check for later changes.
+             Verified: 376 unit tests, 0 failures; assembleDebug green.
+             Known limits: Paparazzi renders one frame and 1.3.5 has no gif
+             writer, so the spring/ripple were checked at their end state, not
+             in motion; layoutlib is not a handset.
 
 NOTE:
 - 2026-10-28T23:46Z: the store-first switch is committed as fc1764b (+ docs
