@@ -1309,16 +1309,19 @@ private fun TerminalSessionBar(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        sessions.forEachIndexed { i, id ->            // The pid is what makes a tab a shell and not a position: closing
+        sessions.forEachIndexed { i, id ->
+            // The pid is what makes a tab a shell and not a position: closing
             // Shell 2 used to renumber Shell 3, so "Shell 1" no longer told
             // you which process a reconnect would land on. The number is for
-            // quick tapping; the pid identifies the process behind it.
+            // quick tapping; the pid and the server's own name for the shell
+            // identify the process behind it.
             val pid = pids[id]
             val pidText = if (pid != null && pid > 0) {
                 stringResource(R.string.terminal_session_pid, pid)
             } else {
                 stringResource(R.string.terminal_session_starting)
             }
+            val subtitle = "$pidText  ·  ${shellHandle(id)}"
             // Only the session that is actually attached is selected. Falling
             // back to "the last tab" when nothing is attached marked a closed
             // tab as the live one.
@@ -1339,7 +1342,7 @@ private fun TerminalSessionBar(
                             socket.switchSession(id)
                             onPicked()
                         },
-                        onLongClick = { onLongPressed(id, "Shell ${i + 1}  ·  $pidText") },
+                        onLongClick = { onLongPressed(id, "Shell ${i + 1}  ·  $subtitle") },
                     ),
             ) {
                 Row(
@@ -1361,7 +1364,7 @@ private fun TerminalSessionBar(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            pidText,
+                            subtitle,
                             style = MaterialTheme.typography.labelSmall,
                             color = InkDim,
                         )
@@ -1383,6 +1386,21 @@ private fun TerminalSessionBar(
             color = InkDim,
         )
     }
+}
+
+/**
+ * What the shell server calls this tab. tmux spent a row of the grid on a
+ * status bar carrying exactly this name, so the drawer names each shell the way
+ * `tmux ls` does instead of leaving that row to the bar.
+ */
+internal fun shellHandle(id: String, maxLength: Int = 16): String {
+    val name = buildString(id.length + 4) {
+        append("aix-")
+        for (c in id) {
+            append(if (c.isLetterOrDigit() && c.code < 128 || c == '-' || c == '_') c else '_')
+        }
+    }
+    return if (name.length <= maxLength) name else name.take(maxLength - 1) + "…"
 }
 
 /** One line under the title: what the shell is, or how it ended. */
