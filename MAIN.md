@@ -1082,6 +1082,17 @@ on the wall clock so pointer noise cannot starve the repeat, ended by lift
   provider's own rate limit, instead of a bare "HTTP 402"
 [COMPLETED] cut the app release via scripts/release.sh; `latest` now targets
 3fdc242, which carries the provider wording and error mapping
+[COMPLETED] TerminalKeys: the arrow cluster comes off the right edge. left,
+down and right take the lower row's 3rd/4th/5th slots and the up arrow the upper
+row's 4th, directly above down — a D-pad centred under the thumb rather than
+jammed against the screen's edge — and Shift moves to the lower row's far right
+end, since it only ever pairs with Tab and is wanted far less than Ctrl or Alt.
+(operator: "ปุ่มลูกศรอยู่ชิดขวาเกินไป ให้อยู่ตรงกลางเยื้องขวา")
+Six keys per row and all four arrow payloads (ESC[A / ESC[D / ESC[B / ESC[C])
+verified unchanged after the move. NOT compiled here: this host carries only
+JDK 21 and no Android SDK 35, and `MAIN.md` records that the build dies under
+JDK 21 in :app:compileDebugJavaWithJavac — so `:app:testDebugUnitTest` and
+assembleDebug still have to run where the SDK lives.
 
 NOTE:
 - 2026-10-28T23:46Z: the store-first switch is committed as fc1764b (+ docs

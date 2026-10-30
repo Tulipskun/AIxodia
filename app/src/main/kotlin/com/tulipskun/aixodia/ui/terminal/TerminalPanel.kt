@@ -1017,10 +1017,14 @@ private fun TerminalKeys(
     onShiftSpent: () -> Unit,
     onKey: (ByteArray) -> Unit,
 ) {
-    // Exactly two rows, six keys each. The modifier chips take the left of
-    // the lower row and the arrows fill the right, and the up arrow sits in
-    // the upper row directly above the down arrow, the way a D-pad reads: the
-    // thumb never has to hunt for it. The refresh key replaces the running
+    // Exactly two rows, six keys each. The arrows own the middle now: the
+    // left, down and right arrows take the lower row's 3rd, 4th and 5th slots
+    // and the up arrow sits in the upper row's 4th, directly above the down
+    // arrow, the way a D-pad reads — they no longer crowd the right edge,
+    // where the thumb had to reach past the screen for them. Ctrl and Alt keep
+    // the left of the lower row and Shift takes its far right end: Shift only
+    // ever pairs with Tab, and an edge column is the right home for a key
+    // wanted far less than Ctrl or Alt. The refresh key replaces the running
     // shell with a fresh login shell in place — exec $SHELL — which is how a
     // wedged or half-configured session gets a clean one without a new tab,
     // and the whole-line erase (Ctrl-U then Ctrl-K, so it works from the
@@ -1056,14 +1060,14 @@ private fun TerminalKeys(
                     KeyChip("CMD", wide = true, onClick = { onKey(byteArrayOf(16)) })
                 }
                 Box(Modifier.weight(1f)) {
+                    HoldableKeyChip("\u2191", onClick = { onKey("\u001b[A".toByteArray()) })
+                }
+                Box(Modifier.weight(1f)) {
                     IconKey(
                         icon = Icons.Default.Refresh,
                         contentDescription = "New login shell",
                         onClick = { onKey("exec \$SHELL\r".toByteArray()) },
                     )
-                }
-                Box(Modifier.weight(1f)) {
-                    HoldableKeyChip("\u2191", onClick = { onKey("\u001b[A".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
                     IconKey(
@@ -1084,9 +1088,6 @@ private fun TerminalKeys(
                     KeyChip("Alt", active = altOn, wide = true, onClick = onAlt)
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
-                }
-                Box(Modifier.weight(1f)) {
                     HoldableKeyChip("\u2190", onClick = { onKey("\u001b[D".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
@@ -1094,6 +1095,9 @@ private fun TerminalKeys(
                 }
                 Box(Modifier.weight(1f)) {
                     HoldableKeyChip("\u2192", onClick = { onKey("\u001b[C".toByteArray()) })
+                }
+                Box(Modifier.weight(1f)) {
+                    KeyChip("Shift", active = shiftOn, wide = true, onClick = onShift)
                 }
             }
         }
