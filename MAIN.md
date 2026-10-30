@@ -155,7 +155,7 @@ PLAN:
              edge swipe is the only way into its drawer, so if the platform
              view swallows the drag the session controls become unreachable and
              that surface needs its own affordance.
-[IN_PROCESS] Drawer feel follow-up (operator: "ไม่ใช่แค่แตะนิดเดียวแล้วเปิด app
+[COMPLETED] Drawer feel follow-up (operator: "ไม่ใช่แค่แตะนิดเดียวแล้วเปิด app
              drawer สิ ทำให้เหมือนเดิมเลย"): the shipped drawerEdgeSwipe watched
              for a 24dp slop and then called open(), so a short flick snapped the
              menu wide instead of dragging it. Replaced by drawerEdgeGuard, which
@@ -173,6 +173,14 @@ PLAN:
              skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T03:51Z: the drawer-feel correction is committed as c13948b and
+  published. Release run 40999489691 green (unit + renderer checks, then
+  build/sign/publish); `latest` is now versionName 1.0.202610300351,
+  versionCode 1793332279, AIxodia-version.json commit ==
+  c13948b4ed62c367d84708505041cdb00ba827e3, and the downloaded AIxodia.apk
+  verifies as CN=AIxodia (SHA-256 652f0b4ae06b92cfbed47df335d1a7216b9e54640ae
+  41c0aa26ae66f0be849a6). The eager-open build (24a5dd0) is superseded, so the
+  only drawer build the operator should install is this one.
 - 2026-10-30T03:25Z: the drawer-edge + goals-strip batch is committed as
   24a5dd0, pushed to main, and published. Release run 40997112296 is green
   (unit + renderer gate BUILD SUCCESSFUL, then build/sign/publish); the rolling
