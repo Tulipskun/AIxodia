@@ -1,4 +1,34 @@
 GOAL:
+[COMPLETED] The keyboard resize is still wrong (operator: "บัคหน้าจอเลื่อนตอน
+             เปิด/ปิดแป้นพิมพ์ยังไม่หายนะ"), and asked where, they picked
+             "เนื้อหายังถูก scroll กลับขึ้นไปข้างบนสุดเหมือนเดิม" — the page still
+             ends up laid out from the top. Two causes, both real, both fixed:
+             (a) `TerminalBuffer.resize` grew a screen by appending the new rows
+             UNDERNEATH its content, so after the keyboard closed the shell's line
+             sat part-way up the page with a band of nothing below it, and the
+             cursor was left counting from the old top. A terminal is read from
+             its bottom edge, so the rows a screen gains belong ABOVE the content
+             — taken back out of the scrollback first, blank space only once the
+             history is spent — and the cursor travels with them. The alternate
+             screen keeps its old top anchor: a full-screen program repaints from
+             its own top-left corner the moment the size lands.
+             (b) The grid did not follow the layout at all while the keyboard was
+             moving: `onSizeChanged` only reposted a resize 140ms after the layout
+             stopped, so every intermediate frame drew the old row count into the
+             new canvas — text at the top of a taller area, or its last rows
+             clipped by a shorter one — and then jumped. Now the grid moves with
+             every frame (cheap: no row allocation unless the width changed) and
+             only the *report down the socket* is throttled to the last size in
+             the burst, which is what the original comment was really protecting.
+             (c) With growth taking rows back out of the history, the page anchor
+             can no longer be a one-directional delta: `onContentChanged` only
+             compensates for a history that grows, so `resizeToView` now captures
+             the document row at the top of the view and re-derives `scrollTopPx`
+             from it, which holds for both directions.
+             369 unit tests, 0 failures, 0 skipped (four new in
+             TerminalEmulatorTest, one in TerminalScrollTest). Ship behind one
+             `ui:` commit pushed on its own.
+
 [COMPLETED] The operator's two-part order (operator: "ปรับการเลื่อนเปิด app drawer
              เป็นเต็มหน้าจอเหมือนเดิม โดยค้นหา skill ux ui ที่มีผู้ใช้งานจริงมาประกอบ
              และแก้ bug เวลา resize terminal มันเลื่อนหน้าจอจากบนลงล่างใหม่ตลอดเวลา
@@ -29,6 +59,9 @@ GOAL:
              compileDebugKotlin, assembleDebug and the full unit suite green:
              364 tests, 0 failures, 0 skipped — three new resize regression tests
              in TerminalScrollTest and DrawerFloorTest in place of EdgeDrawerTest.
+             (Read with the entry above: dropping `resetScroll()` was necessary
+             and was not enough, and only one direction of the resize anchor was
+             right. This is the batch the operator replied "ยังไม่หาย" to.)
              Shipped: 23bad55 + f5139e5 pushed together, release run 41008343071
              green, `latest` at versionName 1.0.202610300527 / versionCode
              1793338027, version.json commit == f5139e5, and the downloaded
@@ -118,6 +151,13 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[COMPLETED] Keyboard resize: anchor the normal buffer's growth to its bottom row
+            (history back down, blanks above, cursor travelling with the rows) and
+            keep the alternate screen top-anchored; move the grid on every
+            `onSizeChanged` and throttle only the socket report; re-derive
+            `scrollTopPx` from the document row at the top of the view.
+[IN_PROCESS] Ship as one `ui:` commit pushed on its own, then the docs record,
+             then verify the published `latest` against its commit and signer.
 [COMPLETED] Full-width drawer swipe: delete `EdgeDrawer.kt` and its band tests,
             add `DrawerFloor.kt` with `isOnDrawerFloor` + `drawerFloorGuard`,
             repoint ChatScreen and TerminalPanel at it, replace EdgeDrawerTest
@@ -288,6 +328,24 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T06:05Z: the first keyboard-resize fix removed one wrong call and
+  left two wrong models standing. `TerminalBuffer.resize` had only ever been
+  bottom-anchored on the way down (top rows to history) and top-anchored on the
+  way up (blanks appended under the content), so a screen returning from the
+  keyboard kept its *rows* but lost its *place*: the shell's line stayed where the
+  old bottom had been, several rows above the new bottom, and the cursor counted
+  from the old top too. That is the "content scrolled back to the top" the
+  operator still sees, and no amount of scroll-offset bookkeeping fixes it,
+  because the page is not scrolled — the content inside it moved.
+- 2026-10-30T06:05Z: the other half was the burst, not the settled size.
+  `onSizeChanged` deliberately waited 140ms after the layout stopped before
+  fitting the grid, to keep a repaint-per-frame SIGWINCH storm away from
+  full-screen programs. What it also did was leave every frame of the keyboard
+  animation drawing the old grid into the new canvas — the whole page at the top
+  of a taller area, blank band under it, then a jump. The two are separable: the
+  grid is cheap to move per frame (no row is reallocated unless the width
+  changed), and only the report down the socket has to be coalesced. The class
+  comment that justified the wait named the socket, not the grid.
 - 2026-10-30T05:31Z: `latest` carries both — versionName 1.0.202610300527,
   versionCode 1793338027, commit f5139e5, APK 20,874,078 bytes, signer
   CN=AIxodia. The two `ui:` commits went out in ONE push with no `[skip ci]` on
