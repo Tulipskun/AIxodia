@@ -26,8 +26,12 @@ GOAL:
              the document row at the top of the view and re-derives `scrollTopPx`
              from it, which holds for both directions.
              369 unit tests, 0 failures, 0 skipped (four new in
-             TerminalEmulatorTest, one in TerminalScrollTest). Ship behind one
-             `ui:` commit pushed on its own.
+             TerminalEmulatorTest, one in TerminalScrollTest), assembleDebug
+             green. Shipped: 94df615 pushed on its own, release run 41012120643
+             green, `latest` at versionName 1.0.202610300608 / versionCode
+             1793340493, version.json commit == 94df615, APK 20,874,078 bytes
+             verified as CN=AIxodia. The operator's screen is still the only
+             handset this has been on.
 
 [COMPLETED] The operator's two-part order (operator: "ปรับการเลื่อนเปิด app drawer
              เป็นเต็มหน้าจอเหมือนเดิม โดยค้นหา skill ux ui ที่มีผู้ใช้งานจริงมาประกอบ
@@ -156,8 +160,9 @@ PLAN:
             keep the alternate screen top-anchored; move the grid on every
             `onSizeChanged` and throttle only the socket report; re-derive
             `scrollTopPx` from the document row at the top of the view.
-[IN_PROCESS] Ship as one `ui:` commit pushed on its own, then the docs record,
-             then verify the published `latest` against its commit and signer.
+[COMPLETED] Ship as one `ui:` commit pushed on its own, then the docs record,
+            then verify the published `latest` against its commit and signer:
+            94df615 → run 41012120643 → `latest` 1.0.202610300608.
 [COMPLETED] Full-width drawer swipe: delete `EdgeDrawer.kt` and its band tests,
             add `DrawerFloor.kt` with `isOnDrawerFloor` + `drawerFloorGuard`,
             repoint ChatScreen and TerminalPanel at it, replace EdgeDrawerTest
