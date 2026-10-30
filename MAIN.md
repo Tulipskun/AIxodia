@@ -11,6 +11,13 @@ GOAL:
             last applied seq, and the existing reconnect path recovers the turn.
             Then commit, push and let the release workflow cut `latest`.
 
+[IN_PROCESS] Session 2026-10-30 (drawer + goals placement): the side drawer may
+             open only from a swipe that starts inside the left ~15% of the
+             screen, and the goal/plan card belongs in the strip above the
+             composer rather than at the very top of the chat. Both implemented
+             and verified on this host (360 tests green, debug APK assembles);
+             no commit or release was asked for, so pushing awaits the operator.
+
 [IN_PROCESS] Session 2026-10-29 (display/logic review): fix verified AIxodia
              display bugs and flawed UI state logic, with regression coverage.
 
@@ -120,7 +127,47 @@ PLAN:
             .impeccable/design.json sidecar; README auth section and PRODUCT.md
             credential line synced to TokenCipher + backup exclusion.
 [IN_PROCESS] Commit, push to main (release).
+[IN_PROCESS] Drawer + goals placement (2026-10-30): the side drawer opens only
+             from a swipe begun in the left 15% of the page — ui/display/
+             EdgeDrawer.kt holds the band, the slop and the passive watcher,
+             wired onto ChatScreen's Scaffold and TerminalPanel's content
+             surface, each ModalNavigationDrawer narrowed to
+             gesturesEnabled = isOpen so the built-in full-width drag no longer
+             claims a swipe begun over content. The goals/plans card moved from
+             the head of the thread into the bar above the composer beside the
+             session strip; threadHeaderItems dropped its goals offset (only
+             the older marker is a lazy item now) and the expanded body is
+             capped at 168dp and scrolls, because a bottom bar takes its height
+             off the conversation. Tests: new EdgeDrawerTest on the predicate,
+             ThreadPagingTest re-aimed at the single-argument geometry.
+             Verified on this host: :app:compileDebugKotlin, :app:testDebugUnitTest
+             (360 tests, 0 failures, 0 skipped — the renderer suites really ran,
+             this host is amd64) and :app:assembleDebug (20.9 MB APK) all green
+             with JDK 21 + /opt/android-sdk. NOT on a handset: the gesture feels
+             right in theory and the predicate is tested, but only the operator's
+             screen can say whether 15% is a comfortable band, and TerminalPanel
+             has no menu button, so if the platform view swallows the edge drag
+             the terminal drawer would lose its only opening gesture.
+[IN_PROCESS] Commit, push and publish this placement batch as the operator
+             explicitly asked; verify the workflow, the released APK and the
+             version asset before calling it available. The one open question
+             is the terminal window, which has no menu button at all: there the
+             edge swipe is the only way into its drawer, so if the platform
+             view swallows the drag the session controls become unreachable and
+             that surface needs its own affordance.
+
 NOTE:
+- 2026-10-30 (this host): the container changed under the work — it is x86_64
+  now and had no Android SDK. Installed one at /opt/android-sdk (cmdline-tools
+  19.0, platform 35, build-tools 35.0.0, platform-tools) and the suite runs here
+  for real on JDK 21. Two things that look like project failures and are not:
+  (a) AGP's JdkImageTransform dies because this sandbox's JVM prints a cgroup
+  warning on **stdout**, which AGP feeds into `jmod --module-version` — run
+  gradle with `JAVA_TOOL_OPTIONS="-XX:-UseContainerSupport"` and it disappears;
+  (b) the old "16 ARM renderer initialization failures" no longer apply on this
+  host, which is why the count below is the whole suite passing. Toolchain line:
+  `ANDROID_HOME=/opt/android-sdk JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+  JAVA_TOOL_OPTIONS=-XX:-UseContainerSupport ./gradlew --no-daemon ...`
 - 2026-10-30T01:59Z: the silent-stream fix is committed as c4b2646, pushed to
   main, and the release workflow cut the rolling `latest` at it — run
   40988922701 green, retained x86 reports hold 353 tests, 0 failures, 0 skipped

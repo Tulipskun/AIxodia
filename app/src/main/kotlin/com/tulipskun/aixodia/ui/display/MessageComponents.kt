@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -52,6 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -1188,12 +1190,6 @@ private fun AttachmentChip(file: AttachmentRef) {
 }
 
 /**
- * The chat's goals and plans, mirrored from the engine after every turn and
- * every goal or plan tool. Collapsed it is one line — title and open count;
- * expanded it is three sections that separate what is in progress from what
- * succeeded and what was dropped.
- */
-/**
  * The semantics a row that opens and closes owes a screen reader: it is a
  * button, and it says whether it is open. Without this the row announced itself
  * as plain text that happened to move things when tapped.
@@ -1208,6 +1204,25 @@ private fun Modifier.expandable(
     stateDescription = if (expanded) collapseLabel else expandLabel
 }
 
+/**
+ * How tall the goals card's expanded body is allowed to get. About a dozen
+ * short rows: enough to read the open work at a glance, small enough that the
+ * bar it lives in never takes more than a fifth of the screen from the thread.
+ */
+private val GoalsBodyMax = 168.dp
+
+/**
+ * The chat's goals and plans, mirrored from the engine after every turn and
+ * every goal or plan tool. Collapsed it is one line — title and open count;
+ * expanded it is three sections that separate what is in progress from what
+ * succeeded and what was dropped.
+ *
+ * It is drawn in the bar above the composer, next to the session's counts: the
+ * goals are part of what the run is doing, and at the top of the thread they sat
+ * where nobody had to be looking. The body is capped and scrolls inside the
+ * card because a bottom bar takes its height off the conversation, and a long
+ * list of finished goals would push the thread up out of the screen.
+ */
 @Composable
 fun GoalsCard(page: com.tulipskun.aixodia.data.remote.ObjectivesPage) {
     var expanded by remember { mutableStateOf(false) }
@@ -1257,7 +1272,12 @@ fun GoalsCard(page: com.tulipskun.aixodia.data.remote.ObjectivesPage) {
                 enter = expandVertically(),
                 exit = shrinkVertically(),
             ) {
-                Column(Modifier.padding(bottom = 6.dp)) {
+                Column(
+                    Modifier
+                        .padding(bottom = 6.dp)
+                        .heightIn(max = GoalsBodyMax)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     GoalsSection(
                         stringResource(R.string.goals_in_progress),
                         page.goals.map { it to "goal" } + page.plans.map { it to "plan" },

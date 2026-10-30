@@ -2,9 +2,12 @@ package com.tulipskun.aixodia.ui.chat
 
 import com.tulipskun.aixodia.data.model.ChatMessage
 
-/** Number of lazy items before the stored messages. */
-internal fun threadHeaderItems(showOlder: Boolean, showGoals: Boolean): Int =
-    (if (showOlder) 1 else 0) + (if (showGoals) 1 else 0)
+/**
+ * Number of lazy items before the stored messages. The older-page marker is the
+ * only one: the goals card lives in the bottom bar now, so it is never an index
+ * in this list and must not be counted when a row is put back where it was.
+ */
+internal fun threadHeaderItems(showOlder: Boolean): Int = if (showOlder) 1 else 0
 
 /** A visible stored row and its pixel position, owned by one visit to its chat. */
 internal data class ThreadPageAnchor(

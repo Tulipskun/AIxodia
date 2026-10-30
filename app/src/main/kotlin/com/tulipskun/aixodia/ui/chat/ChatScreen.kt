@@ -128,6 +128,7 @@ import com.tulipskun.aixodia.ui.display.ComposerCommand
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
+import com.tulipskun.aixodia.ui.display.drawerEdgeSwipe
 import com.tulipskun.aixodia.ui.display.GoalsCard
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.LiveThink
@@ -448,7 +449,7 @@ fun ChatScreen(
     // turns only while the reader is already at the bottom.
     val showOlderHeader = hasOlder || loadingOlder
     val goalsPage = objectives?.takeIf { it.goals.isNotEmpty() || it.plans.isNotEmpty() }
-    val olderHeaderItems = threadHeaderItems(showOlderHeader, goalsPage != null)
+    val olderHeaderItems = threadHeaderItems(showOlderHeader)
     var olderAnchor by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var lastScrolledTail by remember { mutableStateOf<String?>(null) }
     // The chat this list has already anchored. A boolean went wrong when the
@@ -648,6 +649,10 @@ fun ChatScreen(
     }
     ModalNavigationDrawer(
         drawerState = drawer,
+        // Opening is the edge swipe's own job (drawerEdgeSwipe, on the Scaffold
+        // below). The drawer's full-width gesture therefore stays out of the way
+        // until the drawer is open, where that same drag closes it again.
+        gesturesEnabled = drawer.isOpen,
         drawerContent = {
             // Opening the list is the moment to pull the current chats.
             LaunchedEffect(drawer.currentValue) {
@@ -699,6 +704,7 @@ fun ChatScreen(
         }
     ) {
         Scaffold(
+            modifier = Modifier.drawerEdgeSwipe(drawer, scope),
             // Edge to edge: the app bar and the input bar each handle their own
             // system-bar insets, so the thread gets the whole window instead of
             // being inset twice.
@@ -793,6 +799,17 @@ fun ChatScreen(
                                 messageRes = socketErr.takeIf { it != 0 } ?: R.string.offline_title,
                                 onRetry = { vm.refresh() },
                             )
+                        }
+                        // The goals and plans this chat is working through, kept
+                        // in step with the engine's store. They used to sit at the
+                        // head of the thread, where the first scroll took them
+                        // away and they read as one more message; beside the cost
+                        // bar they are part of the session readout and stay on
+                        // screen while the thread moves.
+                        if (goalsPage != null) {
+                            Box(Modifier.padding(bottom = 4.dp)) {
+                                GoalsCard(goalsPage)
+                            }
                         }
                         // What the session has cost, as the engine stored it on
                         // the session. The strip sits above the composer rather
@@ -912,14 +929,6 @@ fun ChatScreen(
                                 }
                             }
                         }
-                    }
-                }
-                // The goals and plans this chat's turn is working through, kept
-                // in step with the engine's store. It sits above the thread so
-                // it reads as the turn's ledger, not one more message.
-                if (goalsPage != null) {
-                    item(key = "goals-card") {
-                        GoalsCard(goalsPage)
                     }
                 }
                 itemsIndexed(rows, key = { _, m -> m.id }) { index, m ->
