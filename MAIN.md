@@ -121,6 +121,19 @@ PLAN:
             credential line synced to TokenCipher + backup exclusion.
 [IN_PROCESS] Commit, push to main (release).
 NOTE:
+- 2026-10-30T01:59Z: the silent-stream fix is committed as c4b2646, pushed to
+  main, and the release workflow cut the rolling `latest` at it — run
+  40988922701 green, retained x86 reports hold 353 tests, 0 failures, 0 skipped
+  (RunSocketStreamTest's three cases included), versionName 1.0.202610300159,
+  versionCode 1793325576, APK 20,874,070 bytes, AIxodia-version.json names the
+  pushed SHA. Not reproduced on a phone: no handset and no KVM here, so the
+  operator's next hung turn is the first real test of the recovery path.
+- Deliberately left alone while fixing this: ChatViewModel's silence watcher is
+  disarmed for the rest of a turn by its very first frame (`turnHeard`), so it
+  only ever unsticks a never-acked turn. That is the documented intent — a slow
+  provider is legitimately frame-silent while it thinks, and the transport fix
+  above now catches the case that actually hung. Tightening that watcher needs a
+  separate "still connected, but stalled" ceiling, not a shorter timeout.
 - 2026-10-29 (display/logic review): baseline Paparazzi failures are a host
   architecture mismatch: layoutlib-runtime-14.0.11-linux ships an AMD64 native
   library that cannot load on this AARCH64 JVM. Do not hide or re-record these
