@@ -1101,10 +1101,10 @@ page-up / up / page-down over left / down / right with up still directly above
 down. Modifier order becomes
 Shift, Ctrl, Alt on the left of the lower row; the whole-line erase and the
 fresh-shell key take the right edge, one per row. The 7th column costs touch
-size: 7 equal weights inside 4dp side padding and 4dp gaps leave 46.9dp per key
-at 360dp wide (51.6 at 393, 54.1 at 411, 64 at 480), so the bar only misses
-Material's 48dp minimum on a 360dp-wide phone — trimming the padding and the gap
-bought back 2.9dp over the 8dp/6dp bar.
+size: 7 equal weights inside 4dp side padding and 2dp gaps leave 48.6dp per key
+at 360dp wide (53.3 at 393, 55.9 at 411, 65.7 at 480) — over Material's 48dp
+minimum, and the 2dp between neighbours is deliberate dead space, so a thumb
+that misses lands nowhere instead of on the key beside it.
 
 NOTE:
 - 2026-10-28T23:46Z: the store-first switch is committed as fc1764b (+ docs
