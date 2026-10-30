@@ -134,6 +134,9 @@ class TerminalView @JvmOverloads constructor(
         }
 
     private var cellWidth = 1f
+    // What the font asks for one line, and what a row is actually painted at.
+    // The row is stretched to divide the view exactly; see resizeToView.
+    private var lineHeight = 1f
     private var cellHeight = 1f
     private var baseline = 0f
 
@@ -225,7 +228,8 @@ class TerminalView @JvmOverloads constructor(
         val ascent = metrics.minOf { it.ascent }
         val descent = metrics.maxOf { it.descent }
         val leading = metrics.maxOf { it.leading }
-        cellHeight = (descent - ascent + leading).coerceAtLeast(1f)
+        lineHeight = (descent - ascent + leading).coerceAtLeast(1f)
+        cellHeight = lineHeight
         baseline = -ascent
     }
 
@@ -287,12 +291,25 @@ class TerminalView @JvmOverloads constructor(
      */
     private fun resizeToView() {
         val em = emulator ?: return
-        if (cellWidth <= 0f || cellHeight <= 0f || width == 0 || height == 0) return
+        if (cellWidth <= 0f || lineHeight <= 0f || width == 0 || height == 0) return
         val cols = (width / cellWidth).toInt().coerceAtLeast(1)
-        val rows = (height / cellHeight).toInt().coerceAtLeast(1)
-        if (cols == em.columns && rows == em.rows) return
+        // The row count is whole cells that fit; the strip left over below the
+        // last row used to stay empty, which read as a blank line above the
+        // keys. Share it out over the rows instead, so the page ends exactly
+        // where the view does.
+        val rows = (height / lineHeight).toInt().coerceAtLeast(1)
+        val oldCellHeight = cellHeight
+        cellHeight = height / rows.toFloat()
         val historyBefore = em.buffer.scrollback.size
-        val topRowBefore = if (scrollTopPx > 0f) historyBefore - scrollTopPx / cellHeight else null
+        val topRowBefore = if (scrollTopPx > 0f) historyBefore - scrollTopPx / oldCellHeight else null
+        if (cols == em.columns && rows == em.rows) {
+            if (topRowBefore != null) {
+                scrollTopPx = (em.buffer.scrollback.size - topRowBefore) * cellHeight
+                clampScroll()
+            }
+            if (cellHeight != oldCellHeight) invalidate()
+            return
+        }
         em.resize(cols, rows)
         onResize?.invoke(cols, rows)
         if (topRowBefore != null) {

@@ -240,6 +240,30 @@ class TerminalScrollTest {
     }
 
     /**
+     * The row count is whole cells that fit, so a height that is not a multiple
+     * of the font's line used to leave the leftover strip empty below the last
+     * row — a blank band between the prompt and the keys. The rows must divide
+     * the view exactly instead, and the count must not flap between tall and
+     * short as a result.
+     */
+    @Test
+    fun theGridFillsTheViewToItsLastPixel() {
+        val tty = tty(lines = 60, tail = "prompt")
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+
+        tty.view.layout(0, 0, 1080, 1919)
+        tty.resizeToView()
+
+        val rows = tty.emulator.rows
+        assertEquals("the rows cover the view exactly", 1919f, rows * tty.cellHeight, 0.01f)
+
+        tty.resizeToView()
+        assertEquals("a second settled pass keeps the same row count", rows, tty.emulator.rows)
+        assertEquals(1919f, tty.emulator.rows * tty.cellHeight, 0.01f)
+        assertEquals("the prompt is still the bottom row", "prompt", tty.lastRowText)
+    }
+
+    /**
      * A flick up or down is a scroll, not a request to type; only a tap may
      * bring the IME up. The fast flick that ends inside the tap window used to
      * open the keyboard in the middle of scrolling.
