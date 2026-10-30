@@ -1,5 +1,5 @@
 GOAL:
-[IN_PROCESS] Fix the terminal opening its drawer when the thumb swipes over the
+[COMPLETED] Fix the terminal opening its drawer when the thumb swipes over the
              command field (operator: "แก้ bug app drawer เปิดเมื่อปัดที่ช่องพิมพ์
              ข้อความใน terminal"). The terminal window's drawerEdgeGuard passes
              no bottomReservedPx, so the left 15% band the drawer owns runs all
@@ -10,7 +10,12 @@ GOAL:
              take it to the rolling `latest` release. Implemented — the terminal
              footer now reports its top to the guard and `drawerEdgeGuard` stops
              the band there; compileDebugKotlin green and the full unit suite is
-             368 tests, 0 failures. Not verified on a handset (none here).
+             368 tests, 0 failures. Shipped: 5604a88 + 82ca7c5 on main, release
+             run 41003618429 green, `latest` now versionName 1.0.202610300435 /
+             versionCode 1793334932, AIxodia-version.json commit == 82ca7c5, and
+             the downloaded AIxodia.apk (20,874,070 bytes) verifies as
+             CN=AIxodia. NOT verified on a handset — no phone here, so the
+             operator's screen is the first real render.
 
 [COMPLETED] Fix the display hanging on "Sending request to provider…" (operator:
             "แก้ bug การแสดงผลค้างที่ sending request to provider"). Cause is in
@@ -61,8 +66,9 @@ PLAN:
             its distance from the bottom of the window to drawerEdgeGuard as
             bottomReservedPx, keep the grid's own edge swipe. compileDebugKotlin
             green; :app:testDebugUnitTest 368 tests, 0 failures.
-[IN_PROCESS] Commit, push and cut the rolling `latest` once the operator
-             confirms the swipe is dead on a phone (or asks for the ship now).
+[COMPLETED] Pushed and shipped: 5604a88 + 82ca7c5 on main, release run
+            41003618429 published the rolling `latest` (versionName
+            1.0.202610300435), APK signature re-verified from the asset.
 [COMPLETED] Review chat rendering, paging, live-event handover and formatting;
             baseline: 247 tests, 231 passed, 16 renderer initialization failures.
 [IN_PROCESS] Reproduce verified defects, apply focused fixes and add regression
@@ -206,6 +212,15 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T04:37Z: `latest` re-downloaded from the release and checked —
+  signer CN=AIxodia, 20,874,070 bytes, builtAt 2026-10-30T04:35:32Z.
+- 2026-10-30T04:30Z: `[skip ci]` is read from the HEAD commit of a push, so
+  pushing the `ui:` fix and the `docs: … [skip ci]` record together in ONE push
+  cancelled the release build for both. The earlier batches pushed the two
+  commits separately, which is why they built. For this one the workflow was
+  started by hand (`gh workflow run release.yml --ref main`, run 41003618429)
+  on main, which carries 5604a88 + 82ca7c5. Push `ui:` alone first, then the
+  docs commit, or drop `[skip ci]` from the tip.
 - 2026-10-30T04:18Z: the bottom-bar correction is committed as 9d16608 and
   published. Release run 41001954525 green (unit + renderer checks, then
   build/sign/publish); `latest` is now versionName 1.0.202610300417,
