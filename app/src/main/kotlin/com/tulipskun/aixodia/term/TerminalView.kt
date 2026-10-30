@@ -233,7 +233,7 @@ class TerminalView @JvmOverloads constructor(
         if (this.emulator !== emulator) clearSelection()
         this.emulator = emulator
         resetScroll()
-        resizeToView()
+        if (resizeToView()) reportSize()
         invalidate()
     }
 
@@ -244,53 +244,70 @@ class TerminalView @JvmOverloads constructor(
     // =======================================================================
 
     /**
-     * The keyboard slides in over several frames and the view is re-measured
-     * on each one. Telling the shell to resize on every frame makes a
-     * full-screen program repaint its whole screen each time, so the reports
-     * are rate-limited instead of sent raw. But waiting for the layout to stop
-     * moving makes the keyboard feel like it is dragging the terminal behind
-     * it, so the floor is one frame: a burst of size changes collapses to one
-     * report per [RESIZE_THROTTLE_MS], and the last one lands as the layout
-     * settles.
+     * The keyboard slides in over several frames and the view is re-measured on
+     * each one. The grid follows every frame, because a grid left at the old
+     * height draws the old page into a new area — the text floats to the top of a
+     * taller canvas (or gets its last rows clipped by a shorter one) and then
+     * jumps when the layout stops. What the frames are not allowed to do is each
+     * carry a resize report down the socket: a full-screen program repaints its
+     * whole screen per SIGWINCH, so only the last size in a burst is sent, once
+     * the layout has been still for [RESIZE_SETTLE_MS].
      */
-    private val pendingResize = Runnable { resizeToView() }
+    private val pendingNotify = Runnable { reportSize() }
     private var sizedAtLeastOnce = false
+
+    private fun reportSize() {
+        val em = emulator ?: return
+        onResize?.invoke(em.columns, em.rows)
+    }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        removeCallbacks(pendingResize)
+        removeCallbacks(pendingNotify)
+        val changed = resizeToView()
         if (sizedAtLeastOnce) {
-            // The keyboard is still moving. Let the layout settle first; the
-            // old grid keeps drawing (clipped, if it is taller) until then.
-            postDelayed(pendingResize, RESIZE_SETTLE_MS)
+            if (changed) postDelayed(pendingNotify, RESIZE_SETTLE_MS)
         } else {
             // The first measurement is not an animation: a terminal that waits
             // to tell the shell its real size starts at 80x24 and grows.
             sizedAtLeastOnce = true
-            resizeToView()
+            if (changed) reportSize()
         }
-        // The canvas fills the new area immediately; the grid catches up.
+        // A size change that moved no whole row still moves the canvas.
         invalidate()
     }
 
-    private fun resizeToView() {
-        val em = emulator ?: return
-        if (cellWidth <= 0f || cellHeight <= 0f || width == 0 || height == 0) return
+    /**
+     * Fit the grid to the view, holding the reader's place in the page. Returns
+     * whether the shell's size actually moved, so a size change that only added a
+     * few pixels of padding does not become a resize report.
+     */
+    private fun resizeToView(): Boolean {
+        val em = emulator ?: return false
+        if (cellWidth <= 0f || cellHeight <= 0f || width == 0 || height == 0) return false
         val cols = (width / cellWidth).toInt().coerceAtLeast(1)
         val rows = (height / cellHeight).toInt().coerceAtLeast(1)
-        if (cols == em.columns && rows == em.rows) return
-        // The page is deliberately not reset here. A resize that jumped back to
-        // the prompt yanked the history off the screen on every keyboard open,
-        // as though the page were being laid out for the first time. What the
-        // buffer does with a shorter live screen — push its top rows into the
-        // history above — is exactly what the screen-change callback below
-        // compensates for, so the rows already on screen keep their place and a
-        // reader sitting on the prompt stays there.
+        if (cols == em.columns && rows == em.rows) return false
+        // Which row of the page sits at the top of the view, in rows of the whole
+        // document: the history above the live screen, then its rows. A resize
+        // moves rows across that boundary in both directions — down into the
+        // history when the screen shortens, back up onto it when it lengthens —
+        // and the screen-change callback em.resize fires only compensates for the
+        // first of those. So the page is anchored to this number and re-derived
+        // from it, rather than left to a delta that stops working half the time.
+        val historyBefore = em.buffer.scrollback.size
+        val topRowBefore = if (scrollTopPx > 0f) historyBefore - scrollTopPx / cellHeight else null
+        // A reader sitting on the prompt passes through here untouched: with the
+        // page at 0 the buffer's own bottom anchoring keeps the prompt the last
+        // row of the view, whether the screen grew or shrank.
         em.resize(cols, rows)
-        onResize?.invoke(cols, rows)
+        if (topRowBefore != null) {
+            scrollTopPx = ((em.buffer.scrollback.size - topRowBefore) * cellHeight).coerceAtLeast(0f)
+        }
         lastHistoryRows = em.buffer.scrollback.size
         clampScroll()
         invalidate()
+        return true
     }
 
 
@@ -1306,7 +1323,7 @@ class TerminalView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        removeCallbacks(pendingResize)
+        removeCallbacks(pendingNotify)
         removeCallbacks(longPress)
         removeCallbacks(restoreKeyboard)
         setSelecting(false)

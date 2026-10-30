@@ -311,6 +311,26 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
         scrollUp(row, scrollBottom, n, fgColor, bgColor)
     }
 
+    /**
+     * Resize the screen, holding its bottom edge still.
+     *
+     * A terminal is read from the bottom: the prompt is the last row and output
+     * leaves off the top. So a screen that gains rows puts them *above* the
+     * content — taking the newest lines back out of the scrollback first, and
+     * blank space only once the history is spent — and a screen that loses rows
+     * loses them off the top. Adding the new rows underneath instead leaves the
+     * prompt floating in the middle of a taller screen with a band of nothing
+     * below it, which is what a keyboard opening and closing looked like: the
+     * page had apparently scrolled itself back to the top.
+     *
+     * The cursor travels with the rows the content gained or lost so it keeps the
+     * same distance from the bottom edge, which is the line the shell believes it
+     * is still writing on.
+     *
+     * The alternate screen is a program's own canvas. It repaints from its
+     * top-left corner the moment the size arrives, so it keeps the top anchor and
+     * nothing is moved between it and a history it does not have.
+     */
     fun resize(newColumns: Int, newRows: Int) {
         columns = newColumns
         rows = newRows
@@ -318,15 +338,27 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
         // History rows are now painted, so they must follow a rotation too;
         // otherwise an old-width row stops short of the right edge.
         for (row in scrollback) row.resize(newColumns)
-        while (lines.size < newRows) lines.add(TerminalRow(newColumns).also { it.reset(defaultFg, defaultBg) })
-        while (lines.size > newRows) {
-            if (keepScrollback) {
+        var shifted = 0
+        if (keepScrollback) {
+            while (lines.size < newRows) {
+                val incoming = if (scrollback.isNotEmpty()) {
+                    scrollback.removeAt(scrollback.lastIndex)
+                } else {
+                    blankRow()
+                }
+                lines.add(0, incoming)
+                shifted++
+            }
+            while (lines.size > newRows) {
                 scrollback.add(lines.removeAt(0))
                 trimScrollback()
-            } else {
-                lines.removeAt(lines.size - 1)
+                shifted--
             }
+        } else {
+            while (lines.size < newRows) lines.add(blankRow())
+            while (lines.size > newRows) lines.removeAt(lines.lastIndex)
         }
+        if (shifted != 0) cursorRow = (cursorRow + shifted).coerceIn(0, newRows - 1)
         scrollTop = 0
         scrollBottom = newRows - 1
         cursorRow = cursorRow.coerceIn(0, newRows - 1)

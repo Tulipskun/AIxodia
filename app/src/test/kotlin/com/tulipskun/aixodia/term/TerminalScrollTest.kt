@@ -61,7 +61,27 @@ class TerminalScrollTest {
         val anchorRow: Int
             get() = emulator.buffer.scrollback.size - (pan / cellHeight).toInt()
 
-        /** The settled layout the app reaches after the keyboard stopped moving. */
+        /**
+         * What the last row of the live screen says — the shell's own line, which
+         * a reader standing at the prompt expects to be the bottom of the page.
+         */
+        val lastRowText: String
+            get() {
+                val row = emulator.buffer.lines.last()
+                val end = row.lastWritten
+                if (end < 0) return ""
+                return buildString {
+                    for (c in 0..end) {
+                        val cp = row.chars[c]
+                        if (cp != 0) appendCodePoint(cp)
+                    }
+                }
+            }
+
+        /**
+         * The grid follows a layout change on the spot; this is the report that
+         * waits for the layout to stop, asked for here rather than posted.
+         */
         fun resizeToView() {
             TerminalView::class.java
                 .getDeclaredMethod("resizeToView")
@@ -195,6 +215,28 @@ class TerminalScrollTest {
 
         assertEquals("a resize does not pull the history down under it", 0f, tty.pan, 0.5f)
         assertFalse("nor does it report the page leaving the prompt", tty.atBottom.any { !it })
+    }
+
+    /**
+     * The other half of the same complaint: a screen that gained rows put them
+     * underneath its content, so after the keyboard closed the shell's line sat
+     * part-way up the page with a band of nothing below it — read as the whole
+     * page having scrolled itself back to the top.
+     */
+    @Test
+    fun theShellsLineStaysTheBottomOfThePage() {
+        val tty = tty(lines = 60, tail = "prompt")
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+        assertEquals("prompt", tty.lastRowText)
+
+        tty.view.layout(0, 0, 1080, 1400)
+        tty.resizeToView()
+        assertEquals("a shorter screen still ends on it", "prompt", tty.lastRowText)
+
+        tty.view.layout(0, 0, 1080, 1920)
+        tty.resizeToView()
+        assertEquals("a taller one grows above it, not under it", "prompt", tty.lastRowText)
+        assertEquals(0f, tty.pan, 0.5f)
     }
 
     /**

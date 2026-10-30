@@ -171,6 +171,71 @@ class TerminalEmulatorTest {
         assertEquals("\u001b[2;3R", out.responses.toString())
     }
 
+    /**
+     * The keyboard is the resize an Android terminal lives through, and it goes
+     * both ways. A screen that gains rows and puts them under the content leaves
+     * the prompt floating in the middle with a band of nothing below it — the
+     * page looks as though it scrolled back to the top — so the new rows belong
+     * above, taken from the history first.
+     */
+    @Test
+    fun aTallerScreenKeepsThePromptOnTheBottomRow() {
+        val (term, _) = emulator(cols = 10, rows = 3)
+        term.send("one\r\ntwo\r\nthree")
+        term.resize(10, 6)
+        assertEquals(6, term.buffer.lines.size)
+        assertEquals(" ", term.textAt(0, 0))
+        assertEquals("o", term.textAt(3, 0))
+        assertEquals("e", term.textAt(5, 4))
+        assertEquals("the cursor keeps its distance from the bottom", 5, term.buffer.cursorRow)
+    }
+
+    @Test
+    fun aTallerScreenBringsTheHistoryBackDown() {
+        val (term, _) = emulator(cols = 10, rows = 3)
+        term.send("a\r\nb\r\nc\r\nd\r\ne")
+        assertEquals(2, term.buffer.scrollback.size)
+        term.resize(10, 5)
+        assertEquals("the rows came back off the history, not out of nowhere", 0, term.buffer.scrollback.size)
+        assertEquals("a", term.textAt(0, 0))
+        assertEquals("e", term.textAt(4, 0))
+        assertEquals(4, term.buffer.cursorRow)
+    }
+
+    @Test
+    fun aShorterScreenLosesItsTopRowToTheHistory() {
+        val (term, _) = emulator(cols = 10, rows = 5)
+        term.send("a\r\nb\r\nc\r\nd\r\ne")
+        term.resize(10, 3)
+        assertEquals(2, term.buffer.scrollback.size)
+        assertEquals("c", term.textAt(0, 0))
+        assertEquals("e", term.textAt(2, 0))
+        assertEquals("the line the shell is on is still under the cursor", 2, term.buffer.cursorRow)
+        // The same screen again, row for row: a keyboard closing is the mirror of
+        // a keyboard opening, not a fresh layout.
+        term.resize(10, 5)
+        assertEquals(0, term.buffer.scrollback.size)
+        assertEquals("a", term.textAt(0, 0))
+        assertEquals("e", term.textAt(4, 0))
+        assertEquals(4, term.buffer.cursorRow)
+    }
+
+    /**
+     * A full-screen program owns its canvas and repaints it from the top-left
+     * corner the moment the size lands, so the alternate screen keeps growing
+     * downward and stays out of a history it does not have.
+     */
+    @Test
+    fun theAlternateScreenKeepsItsOwnAnchor() {
+        val (term, _) = emulator(cols = 10, rows = 3)
+        term.send("\u001b[?1049h")
+        term.send("top")
+        term.resize(10, 5)
+        assertEquals("t", term.textAt(0, 0))
+        assertEquals(" ", term.textAt(4, 0))
+        assertEquals(0, term.buffer.cursorRow)
+    }
+
     @Test
     fun resizeChangesGeometry() {
         val (term, _) = emulator(10, 3)
