@@ -12,14 +12,13 @@ GOAL:
              history is spent — and the cursor travels with them. The alternate
              screen keeps its old top anchor: a full-screen program repaints from
              its own top-left corner the moment the size lands.
-             (b) The grid did not follow the layout at all while the keyboard was
-             moving: `onSizeChanged` only reposted a resize 140ms after the layout
+             (b) [WITHDRAWN the same session — see the entry below] The grid did
+             not follow the layout at all while the keyboard was moving:
+             `onSizeChanged` only reposted a resize 140ms after the layout
              stopped, so every intermediate frame drew the old row count into the
              new canvas — text at the top of a taller area, or its last rows
-             clipped by a shorter one — and then jumped. Now the grid moves with
-             every frame (cheap: no row allocation unless the width changed) and
-             only the *report down the socket* is throttled to the last size in
-             the burst, which is what the original comment was really protecting.
+             clipped by a shorter one — and then jumped. I made the grid move with
+             every frame and left only the socket report throttled.
              (c) With growth taking rows back out of the history, the page anchor
              can no longer be a one-directional delta: `onContentChanged` only
              compensates for a history that grows, so `resizeToView` now captures
@@ -32,6 +31,25 @@ GOAL:
              1793340493, version.json commit == 94df615, APK 20,874,078 bytes
              verified as CN=AIxodia. The operator's screen is still the only
              handset this has been on.
+
+[COMPLETED] That build was worse, not better (operator: "รอบนี้บัคการแสดงผลหนักมาก
+             ให้แก้ bug ไม่ใช่เพิ่ม bug"). The (b) half above is what did it, and it
+             is withdrawn: the grid is back to moving only with the settled size,
+             the report and the grid together as before. Chasing rows through every
+             frame of an IME animation hands them back and forth between the live
+             screen and the history while the shell is still writing to the size it
+             was last told, so output lands against a bottom edge that keeps
+             moving — a stale-but-still page is a smaller sin than a page whose
+             bottom edge crawls. What stays is the model fix, (a) and (c): a
+             resized screen holds its bottom row, the rows it gains come from the
+             history above, and the page anchor is derived in both directions.
+             Verified against `f5139e5` with `git diff`: the geometry path is
+             byte-identical apart from comments, so the only behaviour left in this
+             build that was not in the one before the last is the anchoring.
+             369 unit tests, 0 failures, 0 skipped, assembleDebug green. Shipped:
+             a2167be pushed on its own, release run 41013400792 green, `latest` at
+             versionName 1.0.202610300621 / versionCode 1793341266, version.json
+             commit == a2167be, APK 20,874,070 bytes verified as CN=AIxodia.
 
 [COMPLETED] The operator's two-part order (operator: "ปรับการเลื่อนเปิด app drawer
              เป็นเต็มหน้าจอเหมือนเดิม โดยค้นหา skill ux ui ที่มีผู้ใช้งานจริงมาประกอบ
@@ -155,6 +173,14 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[COMPLETED] Withdraw the per-frame grid resize: restore `pendingResize` to the
+            settled-size path so the grid and the socket report move together.
+[COMPLETED] Ship the withdrawal as one `ui:` commit pushed on its own, verify the
+            published `latest`, then leave the anchoring judgement to the
+            operator's screen. If the anchoring itself is what broke the display,
+            the fallback is one revert of `TerminalBuffer.resize` back to
+            appending below, which returns the old floating prompt and nothing
+            else: a2167be → run 41013400792 → `latest` 1.0.202610300621.
 [COMPLETED] Keyboard resize: anchor the normal buffer's growth to its bottom row
             (history back down, blanks above, cursor travelling with the rows) and
             keep the alternate screen top-anchored; move the grid on every
@@ -333,6 +359,24 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T06:21Z: `latest` is the withdrawal — versionName 1.0.202610300621,
+  versionCode 1793341266, commit a2167be, APK 20,874,070 bytes, signer
+  CN=AIxodia. The `ui:` commit went out alone and the docs record follows it with
+  `[skip ci]`, which does not cancel the in-flight build.
+- 2026-10-30T06:18Z: the per-frame resize was an unforced error, and the shape of
+  the mistake is worth keeping. A terminal has two owners of one number: the local
+  grid and the PTY. The old code kept them equal at all times by only ever moving
+  them together, one beat late. Splitting them — grid now, shell later — buys a
+  smoother animation and spends the invariant, and every byte the shell writes in
+  between is positioned against a bottom edge the shell does not have. When a fix
+  trades an invariant for polish, the polish has to be worth the class of bug it
+  opens; this one was not, because the operator's complaint was where the page
+  *settled*, not how it travelled.
+- 2026-10-30T06:18Z: how to tell which of the two resize halves is on the phone.
+  The withdrawn (b) was about motion during the keyboard animation; the kept (a)
+  and (c) are about the settled layout — the shell's line as the last row of the
+  grid. If the build after this one still misbehaves *while standing still*, the
+  next revert is `TerminalBuffer.resize`, back to appending new rows underneath.
 - 2026-10-30T06:05Z: the first keyboard-resize fix removed one wrong call and
   left two wrong models standing. `TerminalBuffer.resize` had only ever been
   bottom-anchored on the way down (top rows to history) and top-anchored on the
@@ -343,6 +387,9 @@ NOTE:
   operator still sees, and no amount of scroll-offset bookkeeping fixes it,
   because the page is not scrolled — the content inside it moved.
 - 2026-10-30T06:05Z: the other half was the burst, not the settled size.
+  (Superseded by the 06:18Z entry above: this was written as the diagnosis that
+  justified moving the grid per frame, and that remedy was withdrawn the same
+  session.)
   `onSizeChanged` deliberately waited 140ms after the layout stopped before
   fitting the grid, to keep a repaint-per-frame SIGWINCH storm away from
   full-screen programs. What it also did was leave every frame of the keyboard
