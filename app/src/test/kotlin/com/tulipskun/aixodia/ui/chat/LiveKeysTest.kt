@@ -35,6 +35,24 @@ class LiveKeysTest {
         assertEquals(listOf("live-say-n1"), uniqueLiveKeys(blocks))
     }
 
+    @Test fun rowsPairEveryBlockWithItsOwnKey() {
+        val blocks = listOf(
+            LiveBlock.Say("first", atMs = 1_000L),
+            LiveBlock.Think(ThinkPhase.WAITING, startedAtMs = 7L),
+            LiveBlock.Think(ThinkPhase.THINKING, startedAtMs = 7L),
+            LiveBlock.Act(ToolStep(id = "call-1", name = "bash", args = "ls")),
+            LiveBlock.Compact(2, 3, listOf("older"), atMs = 9L),
+            LiveBlock.Say("last", atMs = 1_000L),
+        )
+        val rows = liveRows(blocks)
+        assertEquals(blocks, rows.map { it.block })
+        assertEquals(blocks.size, rows.map { it.key }.distinct().size)
+    }
+
+    @Test fun anEmptyTimelineHasNoRows() {
+        assertTrue(liveRows(emptyList()).isEmpty())
+    }
+
     @Test fun aToolCardIsKeyedByTheCallItBelongsTo() {
         val blocks = listOf(
             LiveBlock.Act(ToolStep(id = "call-1", name = "bash", args = "ls")),

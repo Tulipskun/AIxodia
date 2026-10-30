@@ -248,7 +248,21 @@ NOTE:
   passes: RunSocketOwnershipTest, ChatViewModelDraftTest, ThreadPagingTest,
   ComposerSendEligibilityTest and ChatViewModelStateTest all green on JDK17
   (3m13s, BUILD SUCCESSFUL).
-- Operator reports the shipped build still closes right after pressing send
+- Crash trace received (vivo I2405, Android 16): IndexOutOfBounds at
+  ChatScreen.kt:961, `ArrayList.get(0)` on length 0 inside a LazyColumn item.
+  Root cause: the lazy interval content re-reads `liveBlocks` (a delegated
+  State read) whenever the snapshot changes, but `liveKeys` was computed by
+  `remember(liveBlocks)` during composition. A block that lands between the
+  two — exactly what send does — makes the interval non-empty while the
+  remembered keys are still empty, and `liveKeys[index]` kills the process.
+  This is why serializing writes (3ce0de1) never helped: the crash is the
+  tear, not a lost update. Fix: one `liveRows(liveBlocks)` read inside the
+  content lambda returns key+block pairs, so no parallel list can go stale;
+  `messages` is captured once per rebuild as `rows` for the same reason.
+  Focused tests (LiveKeys, Draft, State) green after the change. Full local
+  run: 350 tests, 334 pass, the same 16 ARM renderer initialization failures.
+- Add a regression for `liveRows`: one row per block, stable distinct keys,
+  and no positional list to index into. LiveKeysTest covers the pairing.
   ("แอพเด้งหลังจากกดส่งข้อความ"), with no stack trace supplied. Treat this as a
   new reproduction requirement: keep the verified second-batch fixes, wire the
   per-chat draft/acceptance path, and ship durable crash capture (file + share

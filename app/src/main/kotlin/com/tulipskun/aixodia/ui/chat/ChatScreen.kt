@@ -316,8 +316,9 @@ fun ChatScreen(
     val footerIds = remember(messages) { turnFooterIds(messages) }
     // One key per live item, handed out so no two of them can ever collide: a
     // repeated key in a lazy list is not a glitch but a crash, and the streaming
-    // blocks were stamped by the millisecond they arrived.
-    val liveKeys = remember(liveBlocks) { uniqueLiveKeys(liveBlocks) }
+    // blocks were stamped by the millisecond they arrived. The rows are built
+    // inside the LazyColumn, from the same read as their keys: remember()-ing
+    // the keys here let them lag the blocks by one recomposition.
     val providers by vm.providers.collectAsStateWithLifecycle()
     val providerStatuses by vm.providerStatuses.collectAsStateWithLifecycle()
     val pickedProvider by vm.selectedProvider.collectAsStateWithLifecycle()
@@ -876,7 +877,13 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
             ) {
-                if (threadLoaded && messages.isEmpty() && liveText.isBlank() && liveBlocks.isEmpty()) {
+                // The lazy list rebuilds its intervals outside this composition
+                // when the snapshot changes, so the message list is read once
+                // per rebuild and every item uses that same read. Reading the
+                // state delegate again inside an item is how `index - 1` could
+                // be asked of a thread that had just switched to an empty one.
+                val rows = messages
+                if (threadLoaded && rows.isEmpty() && liveText.isBlank() && liveBlocks.isEmpty()) {
                     item { EmptyChatState() }
                 }
                 // The top of the loaded window. It is one item whether or not a
@@ -915,10 +922,10 @@ fun ChatScreen(
                         GoalsCard(goalsPage)
                     }
                 }
-                itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
+                itemsIndexed(rows, key = { _, m -> m.id }) { index, m ->
                     MessageBlock(
                         m,
-                        startsAfterUser = index > 0 && messages[index - 1].role == "user",
+                        startsAfterUser = index > 0 && rows[index - 1].role == "user",
                         onCopy = copyMessage,
                         showFooter = m.id in footerIds,
                         tokenFields = tokenFields,
@@ -942,15 +949,17 @@ fun ChatScreen(
                 // pass like this is what keeps the live thread from reshuffling when
                 // the stored rows replace it — every call keeps its card, in the
                 // same place, instead of piling at the bottom.
-                liveBlocks.forEachIndexed { index, block ->
+                val liveRows = liveRows(liveBlocks)
+                liveRows.forEach { row ->
+                    val block = row.block
                     when (block) {
-                        is LiveBlock.Say -> item(key = liveKeys[index]) {
+                        is LiveBlock.Say -> item(key = row.key) {
                             MarkdownText(
                                 text = block.text,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
-                        is LiveBlock.Act -> item(key = liveKeys[index]) {
+                        is LiveBlock.Act -> item(key = row.key) {
                             ToolStepCard(block.step, nowMs)
                         }
                         // Each request's own wait-and-thought, in the place it
@@ -958,7 +967,7 @@ fun ChatScreen(
                         // "Thinking…" and then a finished "Thought for …", so a
                         // turn with three tool rounds reads as three requests
                         // rather than one merged block at the bottom.
-                        is LiveBlock.Think -> item(key = liveKeys[index]) {
+                        is LiveBlock.Think -> item(key = row.key) {
                             val elapsed = when (block.phase) {
                                 ThinkPhase.DONE ->
                                     (block.endedAtMs - block.startedAtMs).coerceAtLeast(0L)
@@ -974,7 +983,7 @@ fun ChatScreen(
                         // Where the engine trimmed its own prompt. It is not a
                         // stored row: it marks the point in the live thread the
                         // older turns fell out of the window.
-                        is LiveBlock.Compact -> item(key = liveKeys[index]) {
+                        is LiveBlock.Compact -> item(key = row.key) {
                             CompactMarker(
                                 keptTurns = block.keptTurns,
                                 droppedTurns = block.droppedTurns,

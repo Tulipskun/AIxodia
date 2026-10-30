@@ -2003,3 +2003,20 @@ internal fun uniqueLiveKeys(blocks: List<ChatViewModel.LiveBlock>): List<String>
         "$base#$n"
     }
 }
+
+/** A live block together with the lazy key it is drawn under. */
+internal data class LiveRow(val key: String, val block: ChatViewModel.LiveBlock)
+
+/**
+ * The live timeline as rows, built from ONE read of the state.
+ *
+ * The keys used to be a second list remembered during composition, while the
+ * lazy list's interval content re-read the blocks when the snapshot changed.
+ * A block arriving between those two reads — which is precisely what send
+ * does — left the interval with items and the remembered key list empty, and
+ * indexing it threw IndexOutOfBounds on the main thread. Pairing each key with
+ * its block at read time leaves nothing positional to go stale: the item count
+ * and every key come from the same snapshot.
+ */
+internal fun liveRows(blocks: List<ChatViewModel.LiveBlock>): List<LiveRow> =
+    uniqueLiveKeys(blocks).mapIndexed { index, key -> LiveRow(key, blocks[index]) }
