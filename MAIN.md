@@ -171,8 +171,32 @@ PLAN:
              terminal, with the guard at each content surface. Verified here:
              compileDebugKotlin + testDebugUnitTest (362 tests, 0 failures, 0
              skipped) + assembleDebug.
+[COMPLETED] Bottom-bar correction (operator: "การเลื่อนจากแถบด้านล่างเปิดหน้า app
+             drawer ได้ไง? มันไม่ควรเกิดขึ้น"): the band was measured on x alone,
+             and the composer, the session strip and the goals card all begin
+             inside the left 15% — so a thumb hooking sideways over the bar
+             still reached the drawer's drag. isDrawerEdgePress now takes the
+             press's y, the surface height and the height of the bar pinned to
+             the bottom, and the band is that left slice cut short above the
+             bar; ChatScreen measures its bottomBar with onSizeChanged and hands
+             the pixel height to the guard. A press over the bar is no press at
+             all, so the guard sees the gesture through and the bar's own
+             children (scrolling the strip, expanding the card, long-pressing
+             the input) keep it. EdgeDrawerTest grows six vertical-limit tests.
+             Verified here: compileDebugKotlin + testDebugUnitTest (368 tests, 0
+             failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T04:18Z: the bottom-bar correction is committed as 9d16608 and
+  published. Release run 41001954525 green (unit + renderer checks, then
+  build/sign/publish); `latest` is now versionName 1.0.202610300417,
+  versionCode 1793333875, AIxodia-version.json commit ==
+  9d1660861af1c9ddfe14abffcb1e936e9b6387fe, and the downloaded AIxodia.apk
+  verifies as CN=AIxodia (SHA-256 652f0b4ae06b92cfbed47df335d1a7216b9e54640ae
+  41c0aa26ae66f0be849a6). Locally: 368 unit tests, 0 failures, 0 skipped. Still
+  operator-screen questions: whether the band now stops where the composer
+  begins on the real handset, whether 15% is a comfortable width, and whether
+  the terminal drawer's edge drag survives its AndroidView.
 - 2026-10-30T03:51Z: the drawer-feel correction is committed as c13948b and
   published. Release run 40999489691 green (unit + renderer checks, then
   build/sign/publish); `latest` is now versionName 1.0.202610300351,
