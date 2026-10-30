@@ -273,6 +273,14 @@ fun TerminalWindow(
     val selecting = remember { mutableStateOf(false) }
     val verticalDrag = remember { mutableStateOf(false) }
 
+    // The drawer's edge band stops where the footer begins: a thumb hooking
+    // sideways over the keys or the command field is reaching for those, not
+    // for the menu. It is measured from the bottom of the window rather than as
+    // the footer's own height, because with the keyboard up the field is lifted
+    // a whole IME inset off the bottom, and only its top says where the band
+    // has to end.
+    var footerBandPx by remember { mutableStateOf(0) }
+
     // TalkBack cannot see a custom-canvas terminal: the grid is drawn with no
     // nodes at all, so the whole screen was silent and a screen-reader user
     // could type into output they could not read. The visible rows are mirrored
@@ -484,11 +492,13 @@ fun TerminalWindow(
                 .fillMaxSize()
                 .background(Ink)
                 // The guard moves nothing: it only refuses a sideways drag that
-                // began away from the left edge, so the grid keeps its scroll,
-                // its selection and its long press, and an edge swipe still
-                // drives the drawer with the finger.
+                // began away from the left edge, or below the top of the footer,
+                // so the grid keeps its scroll, its selection and its long
+                // press, an edge swipe still drives the drawer with the finger,
+                // and the keys and the command field keep the thumb over them.
                 .drawerEdgeGuard(
                     drawerState,
+                    bottomReservedPx = footerBandPx,
                     enabled = !selecting.value && !verticalDrag.value,
                 ),
         ) {
@@ -642,6 +652,16 @@ fun TerminalWindow(
                                 }
                             }
                         }
+                    }
+                    // Every re-layout of the floor is reported upward, so the
+                    // band ends at the keys and the field rather than running
+                    // down through them: the composer grows with a multi-line
+                    // command and the whole footer rides up when the keyboard
+                    // arrives, and neither is a reach for the menu.
+                    footer.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                        val inWindow = IntArray(2)
+                        v.getLocationInWindow(inWindow)
+                        footerBandPx = (v.rootView.height - inWindow[1]).coerceAtLeast(0)
                     }
                     root.addView(
                         footer,
