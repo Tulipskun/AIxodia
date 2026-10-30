@@ -1,5 +1,5 @@
 GOAL:
-[IN_PROCESS] The defect as the operator actually described it (operator: "การปัด
+[COMPLETED] The defect as the operator actually described it (operator: "การปัด
              หน้าจอส่วนที่ไม่ได้ตั้งไว้มันเปิด app drawer ขึ้นมาชั่วขณะ แทนที่จะไม่
              ทำงานเลย ตั้งค่าให้ถูกต้องไม่ได้หรือไง"): a sideways swipe begun off the
              reserved band slides the drawer out a few millimetres and snaps it
@@ -12,7 +12,10 @@ GOAL:
              the band, sooner than the drawer's threshold can elapse, so nothing
              moves; the 24dp slop and `isSidewaysDrag` went with it.
              compileDebugKotlin green, 364 unit tests, 0 failures. Ship as the
-             `ui:` commit pushed on its own, docs record behind it.
+             `ui:` commit pushed on its own, docs record behind it. Done: 2c1b795
+             pushed alone, release run 41005535448 green, `latest` at
+             versionName 1.0.202610300456 / versionCode 1793336215, version.json
+             commit == 2c1b795, APK re-downloaded and verified as CN=AIxodia.
 
 [COMPLETED] Fix the terminal opening its drawer when the thumb swipes over the
              command field (operator: "แก้ bug app drawer เปิดเมื่อปัดที่ช่องพิมพ์
@@ -77,12 +80,13 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
-[IN_PROCESS] Refuse the drawer the drag: `drawerEdgeGuard` consumes every
-             unconsumed move of a non-band gesture at the first event, so
-             Material's own drag threshold is never reached. `DrawerEdgeSlop`,
-             `isSidewaysDrag` and their five tests deleted; one footer-band test
-             added in their place. Push the `ui:` commit alone so the release
-             builds, verify `latest`, then push the docs record with `[skip ci]`.
+[COMPLETED] Refuse the drawer the drag: `drawerEdgeGuard` consumes every
+            unconsumed move of a non-band gesture at the first event, so
+            Material's own drag threshold is never reached. `DrawerEdgeSlop`,
+            `isSidewaysDrag` and their five tests deleted; one footer-band test
+            added in their place. 2c1b795 pushed alone → release run
+            41005535448 published `latest`; docs record followed with
+            `[skip ci]` and did not cancel the in-flight build.
 [COMPLETED] Terminal drawer band: measure the footer in TerminalWindow, hand
             its distance from the bottom of the window to drawerEdgeGuard as
             bottomReservedPx, keep the grid's own edge swipe. compileDebugKotlin
@@ -233,7 +237,10 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
-- 2026-10-30T05:0xZ: the drawer's flash on an off-band swipe was a threshold
+- 2026-10-30T04:58Z: `latest` carries the guard fix — versionName
+  1.0.202610300456, versionCode 1793336215, commit 2c1b795, APK 20,874,070
+  bytes, signer CN=AIxodia.
+- 2026-10-30T05:02Z: the drawer's flash on an off-band swipe was a threshold
   mismatch, not a placement one. Material's `Modifier.draggable` starts moving
   the drawer once the drag passes ITS slop (~8dp platform touch slop), while the
   guard only consumed past ITS own 24dp `DrawerEdgeSlop` — so every refusal began
