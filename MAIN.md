@@ -1095,9 +1095,10 @@ JDK 21 in :app:compileDebugJavaWithJavac — so `:app:testDebugUnitTest` and
 assembleDebug still have to run where the SDK lives.
 [IN_PROCESS] TerminalKeys grows to two rows of seven (operator: "esc tab cmd
 page-up up page-down del-all / shift ctrl alt left down right exec"). Page keys
-are new: PgUp sends ESC[5~ and PgDn ESC[6~ on a tap, non-repeating, flanking the
-up arrow so the navigation cluster reads page-up / up / page-down over
-left / down / right with up still directly above down. Modifier order becomes
+are new: PgUp sends ESC[5~ and PgDn ESC[6~, both holdable and repeating the way
+the arrows are, flanking the up arrow so the navigation cluster reads
+page-up / up / page-down over left / down / right with up still directly above
+down. Modifier order becomes
 Shift, Ctrl, Alt on the left of the lower row; the whole-line erase and the
 fresh-shell key take the right edge, one per row. The 7th column costs touch
 size: 7 equal weights inside 4dp side padding and 4dp gaps leave 46.9dp per key

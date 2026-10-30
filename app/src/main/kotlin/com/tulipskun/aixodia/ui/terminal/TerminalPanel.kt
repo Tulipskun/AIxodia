@@ -1026,7 +1026,7 @@ private fun TerminalKeys(
     // too) sits above the one that replaces the running shell with a fresh
     // login shell in place — exec $SHELL — which is how a wedged or
     // half-configured session gets a clean one without a new tab. Every arrow
-    // holds and repeats; the page keys send ESC[5~ and ESC[6~ on a tap.
+    // and page key holds and repeats: nobody walks a file one tap at a time.
     val tab = if (shiftOn) "\u001b[Z".toByteArray() else byteArrayOf(9)
     Row(
         Modifier
@@ -1057,13 +1057,13 @@ private fun TerminalKeys(
                     KeyChip("CMD", wide = true, onClick = { onKey(byteArrayOf(16)) })
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("PgUp", wide = true, onClick = { onKey("\u001b[5~".toByteArray()) })
+                    HoldableKeyChip("PgUp", onClick = { onKey("\u001b[5~".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
                     HoldableKeyChip("\u2191", onClick = { onKey("\u001b[A".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
-                    KeyChip("PgDn", wide = true, onClick = { onKey("\u001b[6~".toByteArray()) })
+                    HoldableKeyChip("PgDn", onClick = { onKey("\u001b[6~".toByteArray()) })
                 }
                 Box(Modifier.weight(1f)) {
                     IconKey(
