@@ -1,4 +1,44 @@
 GOAL:
+[COMPLETED] Three terminal complaints in one message (operator: "เวลา focus ช่องพิมพ์
+            command ใน terminal พอกดปุ่ม extra key แล้วแป้นพิมพ์ปิดเปิดเอง ทำให้การ
+            กดหน้าจอ Terminal ไม่ต้องเปิดแป้นพิมพ์ขึ้นมา แล้วก็ aix ที่ย้ายไปแล้ว แต่
+            ไม่คืนพื้นที่ด้านล่างของหน้าจอ Terminal").
+            (1) The keyboard blinked shut and open on every extra key pressed
+            into the command field. `keepSoftKeyboardIfShown()` — which every key
+            chip and Ctrl/Alt/Shift calls — took focus back to the grid whenever
+            the IME was visible, and the grid is not the field: losing focus is
+            the system's cue to hide the field's IME, and the restore posted
+            behind it asked for the IME again. It now returns at once unless the
+            grid itself is the focused view, so the field keeps its own keyboard
+            and a chip tapped while it is up changes nothing about focus.
+            (2) A tap on the grid raised the keyboard. The ACTION_UP tap path
+            called `keepSoftKeyboard()` itself; it now only reports the tap
+            (`onUserInteraction`), which is what the click-on-the-page handling
+            and the existing TerminalScrollTest case read. The field is the only
+            thing on the screen that asks for the IME; the grid keeps its
+            `requestFocus()` on press, which never shows the keyboard in touch
+            mode.
+            (3) "The aix row moved but the bottom of the Terminal screen was not
+            given back" is not an aixodia reservation — it was proved live on
+            this host instead of guessed at. The pane is the full client: both
+            live sessions report status off, window = pane = client = 54x43, and
+            every attach in the engine log since the status-off build is 54x43,
+            so the grid has the reclaimed row (no code reserves one: `resizeToView`
+            is `height / cellHeight`, history and chrome are untouched). The
+            blank line that is left is drawn by the running program: qodercli
+            paints to `rows - 1` by design. Live proof: resizing that pane to 41
+            rows moved its content to 40, and back at 43 it returned to 42
+            (capture-pane after each step), and vim in a scratch 43-row pane uses
+            its own last line the same way — tmux hands a program every row; it
+            is the program that leaves the last one empty. Nothing was changed
+            for this item; if the band on the handset is ever more than that one
+            program line, it is something else and needs its own look.
+            378 unit tests, 0 failures, 0 skipped; assembleDebug green.
+            Shipped: 530507f pushed on its own, release run 41143281544 green,
+            `latest` at versionName 1.0.202610302316 / versionCode 1793402197,
+            AIxodia-version.json commit == 530507f, APK 20,890,462 bytes verified
+            as CN=AIxodia. Not handset-verified yet: the operator's phone is
+            where the field's keyboard and the tap will show it.
 [COMPLETED] Move the terminal's status line into the app drawer (operator: "ย้าย
              [aix-t-e61<der> ไปไว้ที่ App drawer", with a screenshot of the phone).
              The row at the bottom of the grid was not the app's chrome at all: it
