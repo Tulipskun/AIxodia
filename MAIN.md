@@ -263,7 +263,12 @@ NOTE:
   run: 350 tests, 334 pass, the same 16 ARM renderer initialization failures.
 - Add a regression for `liveRows`: one row per block, stable distinct keys,
   and no positional list to index into. LiveKeysTest covers the pairing.
-- Crash fix published: versionName 1.0.202610300051, versionCode 1793321487,
+- The operator's x86 box runs the full suite for real: 350 tests, 0 failures,
+  0 skipped, 8 Paparazzi PNGs produced. JDK 21 + SDK 35 installed there; the
+  repo is cloned at b10d3e3 and builds with `JAVA_HOME=...java-21-openjdk-amd64
+  ANDROID_HOME=$HOME/android-sdk ./gradlew --no-daemon :app:testDebugUnitTest`
+  in 1m41s. Use it for renderer verification only: the release signing key
+  stays on this host and is never copied there.
   commit c33f312d53a719d1c2616af955755b03d93cab14, signer CN=AIxodia
   (SHA-256 unchanged). Workflow 40982082647 green; its retained x86 reports
   hold 350 tests, 0 failures, 0 skipped. The fix is proven against the exact
