@@ -1,4 +1,16 @@
 GOAL:
+[COMPLETED] Fix the display hanging on "Sending request to provider…" (operator:
+            "แก้ bug การแสดงผลค้างที่ sending request to provider"). Cause is in
+            the transport, not the card: RunSocket read the run's SSE stream with
+            readTimeout(0), so a stream an idle tunnel had dropped without a
+            close never errored, never reconnected and never delivered the turn's
+            `done` frame — the live Think(WAITING) block ticked forever, busy
+            stayed set and every later send was refused. The stream client now
+            times a read at three of the daemon's 15s heartbeats, which is an
+            ordinary stream failure: state → OFFLINE, backoff redials from the
+            last applied seq, and the existing reconnect path recovers the turn.
+            Then commit, push and let the release workflow cut `latest`.
+
 [IN_PROCESS] Session 2026-10-29 (display/logic review): fix verified AIxodia
              display bugs and flawed UI state logic, with regression coverage.
 

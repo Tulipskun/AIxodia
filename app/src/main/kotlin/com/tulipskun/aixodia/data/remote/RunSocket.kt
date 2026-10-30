@@ -31,6 +31,13 @@ import java.util.concurrent.TimeUnit
 private const val TAG = "RunSocket"
 
 /**
+ * The daemon heartbeats a quiet run stream every 15s (`: ping`), so three of
+ * those without a single byte is not a model still thinking: the stream is dead
+ * while the socket still looks open.
+ */
+internal const val STREAM_READ_TIMEOUT_MS = 45_000L
+
+/**
  * Chat over POST /v1/runs + SSE.
  *
  * A run is created once, then viewed. Closing the app (or this socket) does not
@@ -61,10 +68,16 @@ class RunSocket(
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    // SSE is quiet between tokens longer than any normal HTTP read timeout;
-    // only the daemon's 15s heartbeat has to arrive.
+    // A turn's first token can outlast any ordinary HTTP read timeout, but the
+    // daemon's 15s heartbeat cannot, so the read is timed out rather than left
+    // infinite. Left infinite, a stream an idle tunnel had dropped without a
+    // close was never noticed: no `done` frame ever reached the live turn, so
+    // "Sending request to provider…" stayed on screen ticking and every later
+    // send was refused. A timeout is an ordinary stream failure — the state
+    // goes OFFLINE, the backoff below redials from the last applied sequence,
+    // and the reconnect recovers the turn the daemon may still be running.
     private val streamHttp = http.newBuilder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .readTimeout(STREAM_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
