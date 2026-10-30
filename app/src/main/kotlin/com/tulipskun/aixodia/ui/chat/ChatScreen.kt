@@ -128,7 +128,7 @@ import com.tulipskun.aixodia.ui.display.ComposerCommand
 import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.ErrorCard
-import com.tulipskun.aixodia.ui.display.drawerEdgeSwipe
+import com.tulipskun.aixodia.ui.display.drawerEdgeGuard
 import com.tulipskun.aixodia.ui.display.GoalsCard
 import com.tulipskun.aixodia.ui.display.LiveAnswer
 import com.tulipskun.aixodia.ui.display.LiveThink
@@ -649,10 +649,11 @@ fun ChatScreen(
     }
     ModalNavigationDrawer(
         drawerState = drawer,
-        // Opening is the edge swipe's own job (drawerEdgeSwipe, on the Scaffold
-        // below). The drawer's full-width gesture therefore stays out of the way
-        // until the drawer is open, where that same drag closes it again.
-        gesturesEnabled = drawer.isOpen,
+        // Its drag is left exactly as Material wrote it — finger-following,
+        // settled by travel or a flick, springing back otherwise — because
+        // drawerEdgeGuard on the Scaffold below decides which drags it is
+        // allowed to see: any horizontal swipe begun away from the left edge
+        // never reaches this one.
         drawerContent = {
             // Opening the list is the moment to pull the current chats.
             LaunchedEffect(drawer.currentValue) {
@@ -704,7 +705,7 @@ fun ChatScreen(
         }
     ) {
         Scaffold(
-            modifier = Modifier.drawerEdgeSwipe(drawer, scope),
+            modifier = Modifier.drawerEdgeGuard(drawer),
             // Edge to edge: the app bar and the input bar each handle their own
             // system-bar insets, so the thread gets the whole window instead of
             // being inset twice.

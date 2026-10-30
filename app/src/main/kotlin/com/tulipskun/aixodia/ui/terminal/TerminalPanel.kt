@@ -100,7 +100,7 @@ import com.tulipskun.aixodia.term.TerminalEmulator
 import com.tulipskun.aixodia.term.TerminalLiveService
 import com.tulipskun.aixodia.term.TerminalOutput
 import com.tulipskun.aixodia.term.TerminalView
-import com.tulipskun.aixodia.ui.display.drawerEdgeSwipe
+import com.tulipskun.aixodia.ui.display.drawerEdgeGuard
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
@@ -439,16 +439,19 @@ fun TerminalWindow(
 
     // The terminal itself is still one platform ViewGroup, but the chrome no
     // longer sits above it: the session controls live in a drawer so the shell
-    // gets the whole page. A swipe begun at the left edge of the page opens it.
+    // gets the whole page. A left-to-right swipe begun at the edge of the page
+    // opens it; one begun over the grid does not.
     ModalNavigationDrawer(
         drawerState = drawerState,
-        // Opening is the edge swipe's own job (drawerEdgeSwipe, on the surface
-        // below), the same rule the chat screen follows. Left enabled here, the
-        // drawer claims a horizontal drag from anywhere on the page, which is
-        // what a swipe over a terminal line is not. Closing by drag stays on:
-        // inside an open drawer that gesture is the reader reaching for the
-        // shell, not for the grid.
-        gesturesEnabled = drawerState.isOpen,
+        // The drawer's own drag is the one Material wrote — it follows the
+        // finger and needs real travel to settle open. Once the terminal has
+        // locked a gesture to the vertical axis the drawer steps aside
+        // completely, since a sideways drift halfway through a scroll must not
+        // become a menu swipe, and it does the same while text is selected.
+        // Which of those drags it is allowed to see at all is decided by the
+        // guard on the surface below: only a swipe begun at the left edge.
+        gesturesEnabled = drawerState.isOpen ||
+            (!selecting.value && !verticalDrag.value),
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = Ink,
@@ -480,13 +483,12 @@ fun TerminalWindow(
             Modifier
                 .fillMaxSize()
                 .background(Ink)
-                // The watch is passive: nothing here is consumed, so the grid
-                // keeps its scroll, its selection and its long press. A drag
-                // that has already locked to the vertical axis, or one begun
-                // while text is being selected, never becomes a menu swipe.
-                .drawerEdgeSwipe(
+                // The guard moves nothing: it only refuses a sideways drag that
+                // began away from the left edge, so the grid keeps its scroll,
+                // its selection and its long press, and an edge swipe still
+                // drives the drawer with the finger.
+                .drawerEdgeGuard(
                     drawerState,
-                    drawerScope,
                     enabled = !selecting.value && !verticalDrag.value,
                 ),
         ) {

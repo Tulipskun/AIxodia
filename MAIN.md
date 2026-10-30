@@ -155,6 +155,22 @@ PLAN:
              edge swipe is the only way into its drawer, so if the platform
              view swallows the drag the session controls become unreachable and
              that surface needs its own affordance.
+[IN_PROCESS] Drawer feel follow-up (operator: "ไม่ใช่แค่แตะนิดเดียวแล้วเปิด app
+             drawer สิ ทำให้เหมือนเดิมเลย"): the shipped drawerEdgeSwipe watched
+             for a 24dp slop and then called open(), so a short flick snapped the
+             menu wide instead of dragging it. Replaced by drawerEdgeGuard, which
+             moves nothing. The drawer's own drag (material3 1.3.1 puts it on an
+             ancestor of the content as anchoredDraggable → foundation draggable)
+             follows the finger and settles on travel or a flick, and its slop
+             loop reads the Main pass and aborts on a consumed change — so a
+             guard on the content can veto that drag from underneath, which is
+             exactly what the guard does for a drag begun outside the left 15%
+             band. A drag begun inside the band is untouched and answers the way
+             it did before this batch; gesturesEnabled is back to its default on
+             the chat screen and to the selecting/verticalDrag form on the
+             terminal, with the guard at each content surface. Verified here:
+             compileDebugKotlin + testDebugUnitTest (362 tests, 0 failures, 0
+             skipped) + assembleDebug.
 
 NOTE:
 - 2026-10-30T03:25Z: the drawer-edge + goals-strip batch is committed as
