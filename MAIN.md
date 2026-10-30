@@ -1,4 +1,23 @@
 GOAL:
+[COMPLETED] Move the terminal's status line into the app drawer (operator: "ย้าย
+             [aix-t-e61<der> ไปไว้ที่ App drawer", with a screenshot of the phone).
+             The row at the bottom of the grid was not the app's chrome at all: it
+             was tmux's own status bar — `[aix-t-e61…] 1:qodercli* "◆ …" 07:46
+             30-Oct-26` — spending one row of the phone on a session name, a window
+             name and a clock. The bar is switched off on the engine side (see the
+             engine's MAIN.md: its `set-option` lost a race against the session it
+             was meant to quiet), and what it carried is in the drawer now: every
+             shell row reads `pid 1234 · aix-t-e615791f6…`, the same name `tmux ls`
+             answers to, and the program's window title was already the drawer's
+             WINDOW card. `shellHandle` mirrors the engine's `tmux_name` so the two
+             spell a tab identically. 374 unit tests, 0 failures, 0 skipped (five
+             new in ShellHandleTest), assembleDebug green. Shipped: 1e5b81d pushed
+             on its own, release run 41024334946 green, `latest` at versionName
+             1.0.202610300809 / versionCode 1793347761, version.json commit ==
+             1e5b81d, APK 20,874,074 bytes verified as CN=AIxodia. The engine half
+             went out as ffc2094 with CI green on build, test, fmt and clippy, and
+             both live sessions were quieted by hand on the host.
+
 [COMPLETED] The keyboard resize is still wrong (operator: "บัคหน้าจอเลื่อนตอน
              เปิด/ปิดแป้นพิมพ์ยังไม่หายนะ"), and asked where, they picked
              "เนื้อหายังถูก scroll กลับขึ้นไปข้างบนสุดเหมือนเดิม" — the page still
@@ -173,6 +192,15 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[COMPLETED] Take the tmux status bar off the phone's grid and carry what it
+            showed in the drawer: chain `set-option -t <name> status off` into the
+            engine's `new-session`, quiet adopted sessions at boot, and print each
+            shell's server name in its drawer row.
+[COMPLETED] Ship the drawer row as one `ui:` commit pushed on its own, verify the
+            published `latest`, then let the operator open a fresh tab: the bar
+            only stays off for new shells once the engine build carrying the
+            chained `set-option` is deployed. 1e5b81d → run 41024334946 → `latest`
+            1.0.202610300809; engine ffc2094 → CI and Release engine both green.
 [COMPLETED] Withdraw the per-frame grid resize: restore `pendingResize` to the
             settled-size path so the grid and the socket report move together.
 [COMPLETED] Ship the withdrawal as one `ui:` commit pushed on its own, verify the
@@ -359,6 +387,17 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T08:09Z: `latest` carries the drawer's shell names — versionName
+  1.0.202610300809, versionCode 1793347761, commit 1e5b81d, APK 20,874,074 bytes,
+  signer CN=AIxodia.
+- 2026-10-30T08:07Z: a row of the terminal grid that the app does not draw is
+  still a row of the grid. The line the operator wanted moved — `[aix-t-e61…
+  "◆ …" 07:46 30-Oct-26` — was tmux's status bar, painted by the shell server
+  inside the PTY, which is why no amount of `TerminalPanel` or `TerminalView`
+  searching found it: the app never owned it. The tell was that its session name
+  is the engine's tmux session name (`aix-` + tab id), readable on the host with
+  `tmux -L aixodia list-sessions`. Anything like this belongs to the engine
+  (`/root/aixodia-engine`) first and the app second.
 - 2026-10-30T06:21Z: `latest` is the withdrawal — versionName 1.0.202610300621,
   versionCode 1793341266, commit a2167be, APK 20,874,070 bytes, signer
   CN=AIxodia. The `ui:` commit went out alone and the docs record follows it with
