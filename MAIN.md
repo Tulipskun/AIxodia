@@ -1,4 +1,19 @@
 GOAL:
+[IN_PROCESS] The defect as the operator actually described it (operator: "การปัด
+             หน้าจอส่วนที่ไม่ได้ตั้งไว้มันเปิด app drawer ขึ้นมาชั่วขณะ แทนที่จะไม่
+             ทำงานเลย ตั้งค่าให้ถูกต้องไม่ได้หรือไง"): a sideways swipe begun off the
+             reserved band slides the drawer out a few millimetres and snaps it
+             back — a visible flash — instead of doing nothing at all. The band
+             work below only stopped the drawer SETTLING open: Material begins
+             following the finger at its own ~8dp drag threshold while the guard
+             cut the claim at its own 24dp slop, and that gap is exactly the
+             flash. Fixed by refusing the drawer the drag rather than its outcome:
+             the guard now consumes the first move of any gesture begun outside
+             the band, sooner than the drawer's threshold can elapse, so nothing
+             moves; the 24dp slop and `isSidewaysDrag` went with it.
+             compileDebugKotlin green, 364 unit tests, 0 failures. Ship as the
+             `ui:` commit pushed on its own, docs record behind it.
+
 [COMPLETED] Fix the terminal opening its drawer when the thumb swipes over the
              command field (operator: "แก้ bug app drawer เปิดเมื่อปัดที่ช่องพิมพ์
              ข้อความใน terminal"). The terminal window's drawerEdgeGuard passes
@@ -62,6 +77,12 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[IN_PROCESS] Refuse the drawer the drag: `drawerEdgeGuard` consumes every
+             unconsumed move of a non-band gesture at the first event, so
+             Material's own drag threshold is never reached. `DrawerEdgeSlop`,
+             `isSidewaysDrag` and their five tests deleted; one footer-band test
+             added in their place. Push the `ui:` commit alone so the release
+             builds, verify `latest`, then push the docs record with `[skip ci]`.
 [COMPLETED] Terminal drawer band: measure the footer in TerminalWindow, hand
             its distance from the bottom of the window to drawerEdgeGuard as
             bottomReservedPx, keep the grid's own edge swipe. compileDebugKotlin
@@ -212,6 +233,13 @@ PLAN:
              failures, 0 skipped) + assembleDebug.
 
 NOTE:
+- 2026-10-30T05:0xZ: the drawer's flash on an off-band swipe was a threshold
+  mismatch, not a placement one. Material's `Modifier.draggable` starts moving
+  the drawer once the drag passes ITS slop (~8dp platform touch slop), while the
+  guard only consumed past ITS own 24dp `DrawerEdgeSlop` — so every refusal began
+  as ~16dp of visible drawer. Consuming from the first Move starves the ancestor
+  before it can start; a descendant was asked for that same event earlier, so
+  scrolls, selections and sideways code blocks are untouched.
 - 2026-10-30T04:37Z: `latest` re-downloaded from the release and checked —
   signer CN=AIxodia, 20,874,070 bytes, builtAt 2026-10-30T04:35:32Z.
 - 2026-10-30T04:30Z: `[skip ci]` is read from the HEAD commit of a push, so
