@@ -279,9 +279,18 @@ class TerminalView @JvmOverloads constructor(
         val cols = (width / cellWidth).toInt().coerceAtLeast(1)
         val rows = (height / cellHeight).toInt().coerceAtLeast(1)
         if (cols == em.columns && rows == em.rows) return
+        // The page is deliberately not reset here. A resize that jumped back to
+        // the prompt yanked the history off the screen on every keyboard open,
+        // as though the page were being laid out for the first time. What the
+        // buffer does with a shorter live screen — push its top rows into the
+        // history above — is exactly what the screen-change callback below
+        // compensates for, so the rows already on screen keep their place and a
+        // reader sitting on the prompt stays there.
         em.resize(cols, rows)
         onResize?.invoke(cols, rows)
-        resetScroll()
+        lastHistoryRows = em.buffer.scrollback.size
+        clampScroll()
+        invalidate()
     }
 
 

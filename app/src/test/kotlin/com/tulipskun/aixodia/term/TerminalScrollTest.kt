@@ -22,11 +22,18 @@ class TerminalScrollTest {
     private class Sink : TerminalOutput {
         val sent = StringBuilder()
 
+        /** Wired to the view by the tests that care about a repaint, the way
+         *  the panel wires it in the app. */
+        var onChanged: (() -> Unit)? = null
+
         override fun write(bytes: ByteArray) {
             sent.append(String(bytes, Charsets.ISO_8859_1))
         }
 
-        override fun onScreenChanged() = Unit
+        override fun onScreenChanged() {
+            onChanged?.invoke()
+        }
+
         override fun onTitleChanged(title: String) = Unit
     }
 
@@ -38,6 +45,29 @@ class TerminalScrollTest {
                 .getDeclaredField("scrollTopPx")
                 .apply { isAccessible = true }
                 .getFloat(view)
+
+        /** The height the grid is painting a row at. */
+        val cellHeight: Float
+            get() = TerminalView::class.java
+                .getDeclaredField("cellHeight")
+                .apply { isAccessible = true }
+                .getFloat(view)
+
+        /**
+         * Which row of the whole page — history first, then the live screen —
+         * sits at the top of the view. Holding it across a resize is what it
+         * means for the text a reader is looking at not to move.
+         */
+        val anchorRow: Int
+            get() = emulator.buffer.scrollback.size - (pan / cellHeight).toInt()
+
+        /** The settled layout the app reaches after the keyboard stopped moving. */
+        fun resizeToView() {
+            TerminalView::class.java
+                .getDeclaredMethod("resizeToView")
+                .apply { isAccessible = true }
+                .invoke(view)
+        }
     }
 
     /** A view laid out at a phone-sized page, over a shell that has scrolled. */
@@ -111,6 +141,60 @@ class TerminalScrollTest {
         assertTrue(tty.pan > 0f)
         tty.view.sendTyped("l")
         assertEquals(0f, tty.pan, 0.5f)
+    }
+
+    /**
+     * The keyboard is a resize, and a resize used to be answered by throwing the
+     * page back onto the live screen: the history a reader had pulled up slid
+     * off the top of the view every time a bar appeared. The rows already on
+     * screen have to keep their place instead.
+     */
+    @Test
+    fun readingHistoryHoldsItsPlaceThroughAResize() {
+        val tty = tty(lines = 100)
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+        tty.view.drag(fromY = 900f, toY = 1500f)
+        val before = tty.anchorRow
+        assertTrue("the page is reading history", tty.pan > 0f)
+
+        tty.view.layout(0, 0, 1080, 1400)
+        tty.resizeToView()
+
+        assertEquals("the row at the top of the page never moved", before, tty.anchorRow)
+        assertTrue("and the page is still in the history", tty.pan > 0f)
+    }
+
+    @Test
+    fun aScreenThatGrowsBackHoldsThePageToo() {
+        val tty = tty(lines = 100)
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+        tty.view.drag(fromY = 900f, toY = 1500f)
+        tty.view.layout(0, 0, 1080, 1400)
+        tty.resizeToView()
+        val before = tty.anchorRow
+
+        tty.view.layout(0, 0, 1080, 1920)
+        tty.resizeToView()
+
+        assertEquals(before, tty.anchorRow)
+    }
+
+    /**
+     * Holding the page is about a reader who pulled it up. Someone looking at
+     * the prompt has no page to hold: a shorter screen simply takes its top rows
+     * into the history, the way more output would.
+     */
+    @Test
+    fun aReaderOnThePromptStaysOnThePrompt() {
+        val tty = tty(lines = 100)
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+        assertEquals("the page opens at the live screen", 0f, tty.pan, 0.5f)
+
+        tty.view.layout(0, 0, 1080, 1400)
+        tty.resizeToView()
+
+        assertEquals("a resize does not pull the history down under it", 0f, tty.pan, 0.5f)
+        assertFalse("nor does it report the page leaving the prompt", tty.atBottom.any { !it })
     }
 
     /**
