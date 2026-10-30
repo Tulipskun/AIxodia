@@ -1,4 +1,17 @@
 GOAL:
+[IN_PROCESS] Fix the terminal opening its drawer when the thumb swipes over the
+             command field (operator: "แก้ bug app drawer เปิดเมื่อปัดที่ช่องพิมพ์
+             ข้อความใน terminal"). The terminal window's drawerEdgeGuard passes
+             no bottomReservedPx, so the left 15% band the drawer owns runs all
+             the way down the page through the key rows and the OutlinedTextField
+             — the very surface the chat composer already escapes. Reserve the
+             footer for the footer: its measured height plus the safe-area strip
+             beneath it (the IME once the keyboard is up), then compile, test and
+             take it to the rolling `latest` release. Implemented — the terminal
+             footer now reports its top to the guard and `drawerEdgeGuard` stops
+             the band there; compileDebugKotlin green and the full unit suite is
+             368 tests, 0 failures. Not verified on a handset (none here).
+
 [COMPLETED] Fix the display hanging on "Sending request to provider…" (operator:
             "แก้ bug การแสดงผลค้างที่ sending request to provider"). Cause is in
             the transport, not the card: RunSocket read the run's SSE stream with
@@ -44,6 +57,12 @@ GOAL:
             the way to the rolling `latest` release.
 
 PLAN:
+[COMPLETED] Terminal drawer band: measure the footer in TerminalWindow, hand
+            its distance from the bottom of the window to drawerEdgeGuard as
+            bottomReservedPx, keep the grid's own edge swipe. compileDebugKotlin
+            green; :app:testDebugUnitTest 368 tests, 0 failures.
+[IN_PROCESS] Commit, push and cut the rolling `latest` once the operator
+             confirms the swipe is dead on a phone (or asks for the ship now).
 [COMPLETED] Review chat rendering, paging, live-event handover and formatting;
             baseline: 247 tests, 231 passed, 16 renderer initialization failures.
 [IN_PROCESS] Reproduce verified defects, apply focused fixes and add regression
