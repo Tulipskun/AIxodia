@@ -84,6 +84,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
@@ -121,9 +126,11 @@ import com.tulipskun.aixodia.ui.display.drawerFloorGuard
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -1352,6 +1359,26 @@ private fun TerminalComposer(
     onSend: () -> Unit = {},
 ) {
     var field by remember { mutableStateOf(TextFieldValue("")) }
+    val currentMods by rememberUpdatedState(mods)
+    val delScope = rememberCoroutineScope()
+    var holdJob by remember { mutableStateOf<Job?>(null) }
+
+    // The keyboard's Backspace, when there is nothing in this box to delete.
+    // Focus is here, so the raw key would otherwise only ever edit the field;
+    // an empty field hands it to the shell instead, spending a latched Ctrl or
+    // Alt as the same chord the chips and the hardware path use.
+    fun sendDel() {
+        socket.send(TerminalKeys.backspace(currentMods).toByteArray())
+        if (currentMods.any) onModsConsumed()
+    }
+    fun stopHold() {
+        holdJob?.cancel()
+        holdJob = null
+    }
+    // Leaving the composer mid-hold must not strand the repeat on the shell.
+    DisposableEffect(Unit) {
+        onDispose { stopHold() }
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -1397,7 +1424,43 @@ private fun TerminalComposer(
                     field = next
                 }
             },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .onPreviewKeyEvent { event ->
+                    // A field with content keeps ordinary editing; only an
+                    // empty one gives its Backspace to the shell.
+                    if (event.key != Key.Backspace || field.text.isNotEmpty()) {
+                        return@onPreviewKeyEvent false
+                    }
+                    when (event.type) {
+                        KeyEventType.KeyDown -> {
+                            // Re-arm on every press and delete once for it. A
+                            // hardware key that auto-repeats keeps landing
+                            // presses faster than the grace below, so the timer
+                            // never fires and the OS drives; a soft keyboard
+                            // that sends only one press lets the timer carry
+                            // the hold. Either way a single press never counts
+                            // twice.
+                            holdJob?.cancel()
+                            holdJob = delScope.launch {
+                                // The first grace separates a tap from a hold,
+                                // matching the key chips.
+                                delay(KEY_REPEAT_FIRST_MS)
+                                while (isActive) {
+                                    sendDel()
+                                    delay(KEY_REPEAT_MS)
+                                }
+                            }
+                            sendDel()
+                            true
+                        }
+                        KeyEventType.KeyUp -> {
+                            stopHold()
+                            true
+                        }
+                        else -> false
+                    }
+                },
             placeholder = { Text("Type a command…", color = InkDim) },
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = InkText),
             maxLines = 3,
