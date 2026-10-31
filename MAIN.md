@@ -1,5 +1,5 @@
 GOAL:
-[IN_PROCESS] Chat streaming must reach the phone as it is produced (operator:
+[COMPLETED] Chat streaming must reach the phone as it is produced (operator:
             "การสตรีมไม่แสดงผล การส่งข้อความก็ช้ามาก หรืออาจจะเร็วแต่การ
             แสดงผลไม่ถูกต้องก็ไม่รู้"). Measured raw, byte by byte: the engine
             streams correctly on 127.0.0.1 over HTTP/1.1 and HTTP/2 (events at
@@ -16,7 +16,22 @@ GOAL:
             failures keep the 1s→15s backoff. Engine: `?poll=1` returns the
             backlog and closes even for a live run, with a new test
             (a_poll_answers_a_running_run_and_closes); fmt/clippy clean,
-            aixodia-run 9 passed. App: 402 unit tests, 0 failures, 0 skipped.
+            aixodia-run 9 passed. App: 402 unit tests, 0 failures, 0 skipped,
+            assembleDebug green. Shipped: engine e4ac8a0 (CI 41175592393 and
+            Release 41175592482 green, `aixodia update` swapped pid 1649 in
+            place), then the app 674f691 on its own (Release APK 41180629502
+            green). `latest` at versionName 1.0.202610310728 / versionCode
+            1793431730, AIxodia-version.json commit == 674f691, APK
+            20,890,462 bytes verifies as CN=AIxodia. Proved live through this
+            host's tunnel, not only in the unit test: with `?poll=1` every
+            request answered in 40–170ms and the assistant's words appeared
+            while the run was still generating (backlog growing poll over
+            poll — 6 events at 9.0s, 26 at 11.1s, 43 at 13.7s, done at 17.8s)
+            where the held SSE stream had delivered the same length of turn as
+            one burst 14s after its last event. The nine probe-* sessions the
+            measurements created are deleted. The app half is not
+            handset-verified yet — the operator's phone is where it shows, and
+            it must update to 1.0.202610310728 first.
 [COMPLETED] Switching chats must not redial the daemon (operator: "ต่อมาที่ chat
             การสลับ session ต้อง connect ใหม่ทุกรอบ"; asked which behaviour they
             wanted, answered "ไม่ต้องต่อใหม่ตอนสลับ"). `RunSocket.open` always
