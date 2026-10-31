@@ -1,5 +1,5 @@
 GOAL:
-[IN PROGRESS] A shell tool card must settle when its command finishes, not spin
+[COMPLETED] A shell tool card must settle when its command finishes, not spin
             forever (operator: "การแสดงผลบัคอีกแล้ว", screenshot of a
             `rm /root/test.txt` card stuck on its spinner and a climbing
             "13s" timer while later cards show green and the answer is already
@@ -9,13 +9,21 @@ GOAL:
             the card kept spinning for the rest of the turn. Engine half —
             block.rs `tool_block` now takes an explicit `has_result` and a quiet
             success is STATE_DONE (new test a_quiet_success_is_done_not_running;
-            six call sites across chat.rs/trail.rs/mobile lib.rs pass the
-            stage truth) — built, tests + fmt + clippy clean. App half —
-            ChatViewModel routes Block.TOOL on the frame's `stage`, not the
-            block's state, so a `tool_result` settles the card even against an
-            already-deployed daemon. Self-heals: the app fix alone corrects
-            existing servers.
-[IN PROGRESS] The terminal keyboard's Backspace must delete in the shell when
+            six call sites pass the stage truth) — shipped 98abef7, `aixodia
+            update` swapped the daemon. App half — ChatViewModel routes
+            Block.TOOL on the frame's `stage`, not the block's state, so a
+            `tool_result` settles the card even against a daemon that still
+            mislabels an empty result: self-healing. Shipped as bd9fa1a. A
+            live end-to-end prove through this host's tunnel was blocked
+            upstream, not by the fix: a throwaway session's turn died on
+            "upstream HTTP 429: Free usage limit reached" (the free-tier model
+            quota), so no tool_result was ever produced to observe — that probe
+            session is deleted. The wire schema was confirmed against the live
+            daemon: tool frames carry `data.stage` and `data.block.state`,
+            which is exactly the field the app now trusts. Not handset-verified
+            yet — it shows on the operator's phone once it updates to
+            1.0.202610310815.
+[COMPLETED] The terminal keyboard's Backspace must delete in the shell when
             the composer is empty, and be holdable (operator: "ไม่สามารถกดลบ
             ข้อความใน Terminal ได้ เพราะ focus ที่ช่องพิมพ์ข้อความ แต่ข้อความที่จะ
             ลบอยู่ใน shell เมื่อกดลบในขณะที่ช่องข้อความว่างเปล่าควรจะส่งคำสั่งลบได้
@@ -24,11 +32,16 @@ GOAL:
             to delete there and the key did nothing. TerminalComposer's
             OutlinedTextField gains `onPreviewKeyEvent`: an empty field turns a
             Backspace KeyDown into `TerminalKeys.backspace(mods)` sent to the
-            socket (respecting a latched Ctrl/Alt), consumed so the text box
-            does not also eat it; a hold auto-repeats on the same
-            KEY_REPEAT_FIRST_MS/KEY_REPEAT_MS cadence as the key chips, and OS
-            hardware auto-repeat takes over the moment it starts so there are
-            no doubles.
+            socket (spending a latched Ctrl/Alt), consumed so the text box does
+            not also eat it; the timer re-arms on every press, so a hardware key
+            that auto-repeats is driven by the OS while a soft keyboard's single
+            press is carried by the KEY_REPEAT_FIRST_MS/KEY_REPEAT_MS repeat —
+            a stroke is never counted twice, and the hold is stood down on
+            KeyUp and when the composer leaves composition. Shipped as 1893b1c;
+            assembleDebug green, 402 unit tests, 0 failures. This one is a
+            focus/key-event behaviour the headless build cannot exercise — it
+            needs the handset, on 1.0.202610310815, to confirm the soft
+            keyboard routes Backspace as a key event into the empty field.
 [COMPLETED] Chat streaming must reach the phone as it is produced (operator:
             "การสตรีมไม่แสดงผล การส่งข้อความก็ช้ามาก หรืออาจจะเร็วแต่การ
             แสดงผลไม่ถูกต้องก็ไม่รู้"). Measured raw, byte by byte: the engine
