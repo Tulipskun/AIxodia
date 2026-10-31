@@ -1,4 +1,22 @@
 GOAL:
+[IN_PROCESS] Chat streaming must reach the phone as it is produced (operator:
+            "การสตรีมไม่แสดงผล การส่งข้อความก็ช้ามาก หรืออาจจะเร็วแต่การ
+            แสดงผลไม่ถูกต้องก็ไม่รู้"). Measured raw, byte by byte: the engine
+            streams correctly on 127.0.0.1 over HTTP/1.1 and HTTP/2 (events at
+            0.12s cadence), but the same request through the Cloudflare quick
+            tunnel delivers the entire body in one burst when the run ends
+            (headers at 05:40:25, every frame at 05:40:39). Cloudflare documents
+            that Quick Tunnels do not support SSE: the edge buffers
+            `text/event-stream`. Fix: deliver runs by short `after=` polls
+            (engine gains `?poll=1`, app polls), which ride ordinary HTTP that
+            the tunnel passes through. RunSocket's reader loop is now a poll
+            loop: it asks `after=<lastSeq>&poll=1`, drains a slice, goes
+            straight back for the next one while slices carry events
+            (POLL_HOT_MS = 60) and waits POLL_IDLE_MS = 300 on an empty one;
+            failures keep the 1s→15s backoff. Engine: `?poll=1` returns the
+            backlog and closes even for a live run, with a new test
+            (a_poll_answers_a_running_run_and_closes); fmt/clippy clean,
+            aixodia-run 9 passed. App: 402 unit tests, 0 failures, 0 skipped.
 [COMPLETED] Switching chats must not redial the daemon (operator: "ต่อมาที่ chat
             การสลับ session ต้อง connect ใหม่ทุกรอบ"; asked which behaviour they
             wanted, answered "ไม่ต้องต่อใหม่ตอนสลับ"). `RunSocket.open` always

@@ -31,20 +31,35 @@ import java.util.concurrent.TimeUnit
 private const val TAG = "RunSocket"
 
 /**
- * The daemon heartbeats a quiet run stream every 15s (`: ping`), so three of
- * those without a single byte is not a model still thinking: the stream is dead
- * while the socket still looks open.
+ * The daemon heartbeats a quiet run stream every 15s (`: ping`). Reads are
+ * still timed out so a request a dead tunnel never answers cannot hold the
+ * turn forever.
  */
 internal const val STREAM_READ_TIMEOUT_MS = 45_000L
 
 /**
- * Chat over POST /v1/runs + SSE.
+ * How long to wait between polls. A poll that carried events goes straight
+ * back for the next slice, so text appears at the cadence it is produced; an
+ * empty one waits a beat rather than spending the battery on a silent turn.
+ */
+internal const val POLL_HOT_MS = 60L
+internal const val POLL_IDLE_MS = 300L
+
+/**
+ * Chat over POST /v1/runs + short polls of GET /v1/runs/{id}/events.
+ *
+ * The daemon also offers a live SSE stream, but Cloudflare Quick Tunnels
+ * buffer `text/event-stream` until the origin closes it: through the tunnel a
+ * held stream delivered the whole turn in one burst at the end, so the phone
+ * showed nothing while it was being written. A poll with the sequence cursor
+ * rides an ordinary request/response, which the tunnel passes through, and
+ * each answer carries everything produced since the caller's last sequence.
  *
  * A run is created once, then viewed. Closing the app (or this socket) does not
  * stop the agent: the next [open] finds the remembered run id, asks the daemon
- * for its state, and resumes the event stream from the last sequence this
- * process applied. The final rows also land in history, so a missed tail is
- * repaired by the repository's normal D1 refresh.
+ * for its state, and resumes from the last sequence this process applied. The
+ * final rows also land in history, so a missed tail is repaired by the
+ * repository's normal D1 refresh.
  */
 class RunSocket(
     private val settings: SettingsStore,
@@ -373,7 +388,7 @@ class RunSocket(
         streamJob = scope.launch { stream(id) }
     }
 
-    // ---- SSE ----
+    // ---- events ----
 
     private suspend fun stream(id: String) {
         var backoff = 1_000L
@@ -382,11 +397,11 @@ class RunSocket(
                 _state.value = ConnState.OFFLINE
                 return
             }
+            val before = lastSeq
             val request = Request.Builder()
-                .url("${cfg.base}/v1/runs/$id/events?after=$lastSeq")
+                .url("${cfg.base}/v1/runs/$id/events?after=$lastSeq&poll=1")
                 .header("Authorization", "Bearer ${cfg.token}")
                 .header("Accept", "text/event-stream")
-                .header("Last-Event-ID", lastSeq.toString())
                 .get()
                 .build()
             try {
@@ -433,10 +448,16 @@ class RunSocket(
                 Log.w(TAG, "stream: ${e.message}")
             }
             if (terminal) return
-            // A quiet stream over a flaky tunnel reconnects on its own. The
-            // heartbeat keeps a healthy one from reaching this path.
-            delay(backoff)
-            backoff = (backoff * 2).coerceAtMost(15_000L)
+            if (lastSeq > before) {
+                delay(POLL_HOT_MS)
+            } else if (_state.value == ConnState.ONLINE) {
+                delay(POLL_IDLE_MS)
+            } else {
+                // A failed poll backs off like the old stream did, so a tunnel
+                // that is down is not dialled hundreds of times a minute.
+                delay(backoff)
+                backoff = (backoff * 2).coerceAtMost(15_000L)
+            }
         }
     }
 
