@@ -1,9 +1,13 @@
 GOAL:
-[IN_PROCESS] A tap on the grid must leave the keyboard exactly as it was
+[COMPLETED] A tap on the grid must leave the keyboard exactly as it was
             (operator: "เวลากดหน้าจอ terminal มันปิดแป้นพิมพ์ ต้องไม่ปิดแป้นพิมพ์
             แล้วก็ไม่เปิดแป้นพิมพ์ด้วย"). ACTION_DOWN still called requestFocus(),
             so a tap stole focus from the command field and the field's IME fell
-            shut; the tap no longer takes focus at all.
+            shut; the tap no longer takes focus at all. Shipped f51282c, Release
+            APK 41162207870 green, APK 1.0.202610310258 (versionCode 1793415531)
+            on the rolling `latest` release. Not yet tried on the handset: this
+            host has no SDK, emulator or adb, so the CI build is the only proof
+            that it compiles and the phone is the proof that it behaves.
 [COMPLETED] Give the terminal's key bar a visible edge against the grid, and
             put the lower row's modifiers in the order Ctrl, Shift, Alt
             (operator: "เพิ่มเส้นขอบระหว่างหน้าจอกับ ปุ่มใน Terminal หน่อย แล้วก็
