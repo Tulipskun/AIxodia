@@ -1,5 +1,5 @@
 GOAL:
-[IN_PROCESS] Switching chats must not redial the daemon (operator: "ต่อมาที่ chat
+[COMPLETED] Switching chats must not redial the daemon (operator: "ต่อมาที่ chat
             การสลับ session ต้อง connect ใหม่ทุกรอบ"; asked which behaviour they
             wanted, answered "ไม่ต้องต่อใหม่ตอนสลับ"). `RunSocket.open` always
             went through `follow`, which called `probe` (GET /v1/sessions) on
@@ -10,7 +10,11 @@ GOAL:
             is discovered by the next call, whose failure puts the state OFFLINE
             and re-runs the probe loop. New ownership test: the socket in the
             test resolves to no daemon, so a probe would flip OFFLINE at once —
-            staying ONLINE proves the switch did not redial.
+            staying ONLINE proves the switch did not redial. 401 unit tests, 0
+            failures; assembleDebug green. Shipped 7ebd4d2, Release APK
+            41167750742 green, `latest` at 1.0.202610310416 (versionCode
+            1793420196), version.json commit == 7ebd4d2. Not handset-verified:
+            the operator's taps decide whether the flash is gone.
 [COMPLETED] A latched Ctrl/Alt/Shift must mean the same chord no matter which
             of the terminal's three inputs produced the key, so Ctrl+C works
             (operator: "ใช้ปุ่มเช่น ctrl + c ไม่ได้ ทำให้สมบูรณ์ในทุกเคสเลยได้มั้ย
