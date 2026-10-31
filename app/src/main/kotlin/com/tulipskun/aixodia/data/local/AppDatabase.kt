@@ -146,6 +146,17 @@ interface MessageDao {
     @Query("SELECT COALESCE(MIN(seq), 0) FROM messages WHERE sessionId = :sid")
     suspend fun minSeq(sid: String): Long
 
+    /**
+     * The lowest seq the phone numbered for itself — a row no store has ever
+     * given an id, and that is not waiting to be sent — or 0 when every row is
+     * the store's. A repair read starts below it: the answer the engine had not
+     * stored when its turn closed sits on a seq the phone guessed, and the
+     * store's own copy of that turn, with the tool steps that came between, sits
+     * above where the guessed row left the thread.
+     */
+    @Query("SELECT COALESCE(MIN(seq), 0) FROM messages WHERE sessionId = :sid AND messageId = 0 AND pending = 0")
+    suspend fun inventedFloor(sid: String): Long
+
     @Query("SELECT COUNT(*) FROM messages WHERE sessionId = :sid")
     suspend fun count(sid: String): Int
 

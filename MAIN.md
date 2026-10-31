@@ -8,7 +8,7 @@ GOAL:
             only rows with `seq > 0`, so nothing reached Room — and the closing
             frame dropped the live timeline that had been drawing the reply,
             which is how the bubble vanished until a pull brought it back.
-            Three pieces: the repository keeps an answer no store has numbered
+            The repository keeps an answer no store has numbered
             (`unnumberedAnswer` reads it from either shape — the frame's own
             fields, or the turn handed inside `turns` — and
             `commitUnnumberedAnswer` writes it at the next free seq, skipping a
@@ -25,10 +25,17 @@ GOAL:
             frame the screen settles a turn on, and the screen then reads the
             store's own copy — the newest page, not the rows above the phone's
             guess, which would skip a tool step that landed under it. reconcile
-            adopts the numbered rows on role and text. Covered by
-            UnnumberedAnswerTest (6 cases), RunFramesTest (the two event shapes)
-            and RunSocketPollTest (the frame the turn closes on).
-            `:app:testDebugUnitTest` green at 411 tests, 0 failures, and
+            adopts the numbered rows on role and text. That delayed read is the
+            repair for the ordinary case, and it does not always run: the reader
+            leaves the chat or the phone dies inside those 2.5 seconds, and the
+            next open asked D1 only for rows above the guessed seq, which is how
+            a thread comes back holding one answer twice. So `verify` now starts
+            below the lowest row the phone numbered for itself
+            (`MessageDao.inventedFloor`: no store id, not pending). Covered by
+            UnnumberedAnswerTest (6 cases), RunFramesTest (the two event
+            shapes), RunSocketPollTest (the frame the turn closes on) and
+            InventedRowRepairTest (where the repair read starts).
+            `:app:testDebugUnitTest` green at 414 tests, 0 failures, and
             `assembleDebug` green. Not handset-verified: the bubble through a
             live turn needs the next APK off main, and so do the two fixes below
             it on this list.

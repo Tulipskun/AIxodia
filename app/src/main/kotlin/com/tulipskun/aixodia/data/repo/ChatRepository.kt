@@ -463,12 +463,19 @@ class ChatRepository(
     /** Verifies Room vs D1 and repairs only missing turns (no full re-pull). */
     suspend fun verify(sid: String): Int {
         val localMax = db.messages().maxSeq(sid)
+        // A row the phone numbered itself is not evidence of where the thread
+        // ended: the store may have put that turn further up, with the steps
+        // that produced it below the seq the phone guessed. Asking only above
+        // the guess would answer those steps and leave the thread holding two
+        // copies of one answer.
+        val invented = runCatchingCancellable { db.messages().inventedFloor(sid) }.getOrDefault(0L)
+        val from = if (invented > 0L) invented - 1L else localMax
         val remote = runCatchingCancellable {
             // An empty cache gets the newest page, the same page the screen
             // opens on. Pulling the whole transcript here would fill the gap
             // below that page before the reader ever asked for it.
-            if (localMax <= 0L) history.latest(sid, CHAT_PAGE)
-            else history.turnsAfter(sid, localMax)
+            if (from <= 0L) history.latest(sid, CHAT_PAGE)
+            else history.turnsAfter(sid, from)
         }.getOrDefault(emptyList())
         if (remote.isEmpty()) return 0
         reconcile(sid, remote)
