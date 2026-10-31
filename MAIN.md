@@ -1,4 +1,34 @@
 GOAL:
+[IN PROGRESS] A shell tool card must settle when its command finishes, not spin
+            forever (operator: "การแสดงผลบัคอีกแล้ว", screenshot of a
+            `rm /root/test.txt` card stuck on its spinner and a climbing
+            "13s" timer while later cards show green and the answer is already
+            printed). Root cause: the engine inferred a tool block's state from
+            whether its result text was empty, so a successful command that
+            printed nothing (`rm`, `mkdir`, `cd`) was labelled "running" and
+            the card kept spinning for the rest of the turn. Engine half —
+            block.rs `tool_block` now takes an explicit `has_result` and a quiet
+            success is STATE_DONE (new test a_quiet_success_is_done_not_running;
+            six call sites across chat.rs/trail.rs/mobile lib.rs pass the
+            stage truth) — built, tests + fmt + clippy clean. App half —
+            ChatViewModel routes Block.TOOL on the frame's `stage`, not the
+            block's state, so a `tool_result` settles the card even against an
+            already-deployed daemon. Self-heals: the app fix alone corrects
+            existing servers.
+[IN PROGRESS] The terminal keyboard's Backspace must delete in the shell when
+            the composer is empty, and be holdable (operator: "ไม่สามารถกดลบ
+            ข้อความใน Terminal ได้ เพราะ focus ที่ช่องพิมพ์ข้อความ แต่ข้อความที่จะ
+            ลบอยู่ใน shell เมื่อกดลบในขณะที่ช่องข้อความว่างเปล่าควรจะส่งคำสั่งลบได้
+            ด้วย และควรจะสามารถกดค้างได้ด้วย"). Focus sits on the composer text
+            box, so Backspace edits that box; when it is empty there is nothing
+            to delete there and the key did nothing. TerminalComposer's
+            OutlinedTextField gains `onPreviewKeyEvent`: an empty field turns a
+            Backspace KeyDown into `TerminalKeys.backspace(mods)` sent to the
+            socket (respecting a latched Ctrl/Alt), consumed so the text box
+            does not also eat it; a hold auto-repeats on the same
+            KEY_REPEAT_FIRST_MS/KEY_REPEAT_MS cadence as the key chips, and OS
+            hardware auto-repeat takes over the moment it starts so there are
+            no doubles.
 [COMPLETED] Chat streaming must reach the phone as it is produced (operator:
             "การสตรีมไม่แสดงผล การส่งข้อความก็ช้ามาก หรืออาจจะเร็วแต่การ
             แสดงผลไม่ถูกต้องก็ไม่รู้"). Measured raw, byte by byte: the engine

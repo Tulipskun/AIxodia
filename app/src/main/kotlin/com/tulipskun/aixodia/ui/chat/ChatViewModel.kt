@@ -840,7 +840,15 @@ class ChatViewModel(
                 }
             }
             Block.TOOL -> {
-                if (block.state == "done" || block.state == "error") completeLiveTool(block)
+                // A tool_result frame settles the step even when the tool
+                // returned nothing. The engine infers a block's state from
+                // whether its result text is empty, so a successful command
+                // that printed nothing (`rm`, `mkdir`, `cd`) arrives labelled
+                // "running" and would leave the card spinning for the rest of
+                // the turn. The stage is what actually says the call is over.
+                val settled = block.state == "done" || block.state == "error" ||
+                    f.stage == "tool_result"
+                if (settled) completeLiveTool(block)
                 else startLiveTool(block, now)
             }
             Block.TEXT -> {
