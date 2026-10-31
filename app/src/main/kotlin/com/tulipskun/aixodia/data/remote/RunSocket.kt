@@ -99,27 +99,32 @@ class RunSocket(
     private fun follow(sessionId: String) {
         probeJob?.cancel()
         probeJob = scope.launch {
-            var wait = 0L
-            while (scope.isActive) {
-                if (wait > 0) delay(wait)
-                if (probe()) {
-                    if (session != sessionId) return@launch
-                    val current = runId
-                    if (current != null && runSession == sessionId) {
-                        // This process already owns the stream; reconnecting it
-                        // from zero here would replay deltas into a live turn
-                        // that already has them.
-                        if (streamJob?.isActive != true) {
-                            terminal = false
-                            startStream(current)
-                        }
-                    } else {
-                        resumeRemembered(sessionId)
-                        pump()
-                    }
-                    return@launch
+            // A live connection serves every chat. Probing again on each switch
+            // only flashed CONNECTING on every tap for a link that was already
+            // up; the new chat's run is attached below, and a link that really
+            // dropped is found by the next call, whose failure re-probes.
+            if (_state.value != ConnState.ONLINE) {
+                var wait = 0L
+                while (scope.isActive) {
+                    if (wait > 0) delay(wait)
+                    if (probe()) break
+                    wait = 5_000L
                 }
-                wait = 5_000L
+                if (!scope.isActive || _state.value != ConnState.ONLINE) return@launch
+            }
+            if (session != sessionId) return@launch
+            val current = runId
+            if (current != null && runSession == sessionId) {
+                // This process already owns the stream; reconnecting it
+                // from zero here would replay deltas into a live turn
+                // that already has them.
+                if (streamJob?.isActive != true) {
+                    terminal = false
+                    startStream(current)
+                }
+            } else {
+                resumeRemembered(sessionId)
+                pump()
             }
         }
     }

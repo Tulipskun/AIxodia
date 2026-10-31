@@ -8,6 +8,7 @@ import com.tulipskun.aixodia.data.model.AiOutput
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -114,6 +115,20 @@ class RunSocketOwnershipTest {
         assertEquals(null, field(socket, "runId"))
         assertEquals(listOf("A"), frames.map { it.sessionId })
         assertEquals(listOf("done"), frames.map { it.kind })
+    }
+
+    @Test
+    fun `opening another chat on a live connection never redials`() = socketTest { socket, _ ->
+        socket.switchSession("B")
+        @Suppress("UNCHECKED_CAST")
+        val state = field(socket, "_state") as MutableStateFlow<ConnState>
+        state.value = ConnState.ONLINE
+        socket.open("B", 0)
+        // This socket's settings resolve to no daemon at all, so a probe started
+        // by the open would flip the state to OFFLINE at once. Staying ONLINE
+        // proves the switch attached to the link already up instead of redialing.
+        Thread.sleep(200)
+        assertEquals(ConnState.ONLINE, state.value)
     }
 
     @Test

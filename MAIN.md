@@ -1,4 +1,16 @@
 GOAL:
+[IN_PROCESS] Switching chats must not redial the daemon (operator: "ต่อมาที่ chat
+            การสลับ session ต้อง connect ใหม่ทุกรอบ"; asked which behaviour they
+            wanted, answered "ไม่ต้องต่อใหม่ตอนสลับ"). `RunSocket.open` always
+            went through `follow`, which called `probe` (GET /v1/sessions) on
+            every switch: the header flashed CONNECTING on each tap and paid a
+            round trip for a link that was already up. `follow` now skips the
+            probe while the transport is ONLINE and only attaches the opened
+            chat's run (`resumeRemembered` + `pump`); a link that really dropped
+            is discovered by the next call, whose failure puts the state OFFLINE
+            and re-runs the probe loop. New ownership test: the socket in the
+            test resolves to no daemon, so a probe would flip OFFLINE at once —
+            staying ONLINE proves the switch did not redial.
 [COMPLETED] A latched Ctrl/Alt/Shift must mean the same chord no matter which
             of the terminal's three inputs produced the key, so Ctrl+C works
             (operator: "ใช้ปุ่มเช่น ctrl + c ไม่ได้ ทำให้สมบูรณ์ในทุกเคสเลยได้มั้ย
