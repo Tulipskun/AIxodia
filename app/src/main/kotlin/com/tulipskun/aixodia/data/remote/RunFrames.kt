@@ -62,11 +62,12 @@ internal object RunFrames {
                     reasoningTokens = row.reasoningTokens,
                     inputIncludesCache = row.inputIncludesCache,
                     turns = listOf(row),
-                    // The engine says whether its rows are already in the store.
-                    // An answer that arrived before D1 kept it must be read back
-                    // once the write lands; trusting a hardcoded true would leave
-                    // the phone's own copy as the only record of the turn.
-                    turnsSynced = obj.optBoolean("turns_synced", true),
+                    // The engine's own word on whether its rows have reached the
+                    // store. A run event carries only the turn and its usage, so
+                    // the seq says the same thing: a turn no store has numbered
+                    // is a turn still on its way there, and the phone has to read
+                    // it back rather than trust what it was handed.
+                    turnsSynced = obj.optBoolean("turns_synced", row.seq > 0L),
                 )
             }
             "error" -> {

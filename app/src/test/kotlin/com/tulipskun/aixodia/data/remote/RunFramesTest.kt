@@ -65,6 +65,16 @@ class RunFramesTest {
         assertTrue("the phone must not trust that seq", !frame.turnsSynced)
     }
 
+    /**
+     * The run event carries the turn and its usage and nothing else: the seq is
+     * the only word the phone gets, and zero is the word for "not stored yet".
+     */
+    @Test
+    fun anUnnumberedFinalTurnIsUnsyncedEvenWithoutTheFlag() {
+        val json = JSONObject("""{"turn":{"seq":0,"role":"assistant","text":"answer"},"usage":{}}""")
+        assertTrue(!RunFrames.map("final", json, "s1")!!.turnsSynced)
+    }
+
     @Test
     fun doneAndCancelledAreTerminalDone() {
         assertEquals("done", RunFrames.map("status", JSONObject("{\"status\":\"done\"}"), "s1")!!.kind)

@@ -167,7 +167,9 @@ class RunSocketPollTest {
                 .apply { isAccessible = true }
             handle.invoke(
                 socket, "run-P", "final",
-                """{"seq":1,"kind":"final","data":{"turn":{"seq":0,"role":"model","text":"answer"},"turns_synced":false}}""",
+                // The shape the daemon really writes: the turn and its usage,
+                // numbered zero because no store has kept it yet.
+                """{"seq":1,"kind":"final","data":{"turn":{"seq":0,"role":"assistant","text":"answer"},"usage":{}}}""",
             )
             handle.invoke(socket, "run-P", "status", """{"seq":2,"kind":"status","data":{"status":"done"}}""")
             val closed = withTimeoutOrNull(2_000) {

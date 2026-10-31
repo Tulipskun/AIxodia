@@ -2,9 +2,9 @@ GOAL:
 [COMPLETED] An answer the engine wrote after it answered must stay on screen
             (operator: "ทำให้เรียบร้อย", after the engine's "D1 ทำหลังจากกระบวนการทุกอย่าง
             ไว้เป็น backup ไม่ต้องรอ D1 เขียนเสร็จ"). A turn now closes while its rows
-            are still on their way to D1: the run's `final` event hands over the
-            answer at seq 0 and says `turns_synced: false`. RunFrames turned
-            that into a message frame and `ChatRepository.onFrame` committed
+            are still on their way to D1, and the answer the phone is handed is
+            one no store has numbered yet. RunFrames turned that frame into a
+            message row and `ChatRepository.onFrame` committed
             only rows with `seq > 0`, so nothing reached Room — and the closing
             frame dropped the live timeline that had been drawing the reply,
             which is how the bubble vanished until a pull brought it back.
@@ -13,19 +13,25 @@ GOAL:
             fields, or the turn handed inside `turns` — and
             `commitUnnumberedAnswer` writes it at the next free seq, skipping a
             row already there; a numbered answer, a delta, a tool row and a
-            question are all left alone); `RunFrames` stopped hardcoding
-            `turns_synced = true` on the final event, and `RunSocket` now
-            carries what that event said onto the closing status frame, because
-            that is the only frame the screen settles a turn on; and the screen
-            then reads the store's own copy — the newest page, not the rows
-            above the phone's guess, which would skip a tool step that landed
-            under it — 2.5s after the turn, by which time D1 has kept the write
-            and reconcile adopts the numbered rows on role and text. Covered by
-            UnnumberedAnswerTest (6 cases), RunFramesTest and RunSocketPollTest
-            (the frame the turn closes on). `:app:testDebugUnitTest` green at
-            410 tests, 0 failures, and `assembleDebug` green. Not
-            handset-verified: the bubble through a live turn needs the next APK
-            off main, and so do the two fixes above it on this list.
+            question are all left alone). Proved against the live daemon rather
+            than assumed: a turn was run and every poll event dumped, and the
+            `final` event carries only `{turn, usage}` — the run-events
+            projection drops the engine's `turns_synced` word — while the turn
+            inside it says `seq: 0` and D1 held just the question at that moment
+            and both rows 2.5s later. So `RunFrames` reads the flag when a
+            daemon sends it and takes the seq when it does not (it hardcoded
+            `true` before, which told the phone to never look), `RunSocket`
+            carries that onto the closing status frame because that is the only
+            frame the screen settles a turn on, and the screen then reads the
+            store's own copy — the newest page, not the rows above the phone's
+            guess, which would skip a tool step that landed under it. reconcile
+            adopts the numbered rows on role and text. Covered by
+            UnnumberedAnswerTest (6 cases), RunFramesTest (the two event shapes)
+            and RunSocketPollTest (the frame the turn closes on).
+            `:app:testDebugUnitTest` green at 411 tests, 0 failures, and
+            `assembleDebug` green. Not handset-verified: the bubble through a
+            live turn needs the next APK off main, and so do the two fixes below
+            it on this list.
 [COMPLETED] A shell tool card must settle when its command finishes, not spin
             forever (operator: "การแสดงผลบัคอีกแล้ว", screenshot of a
             `rm /root/test.txt` card stuck on its spinner and a climbing
