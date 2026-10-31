@@ -93,7 +93,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick as semanticsOnClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -133,6 +132,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 private val Ink = Color(0xFF0B0F14)
 private val InkRaised = Color(0xFF111821)
 private val InkLine = Color(0xFF1A222C)
+private val InkSeam = Color(0xFF2A3544)
 private val InkActive = Color(0xFF1E2A38)
 private val InkText = Color(0xFFD7E0EA)
 private val KeyActiveFill = Color(0xFF2A3A4A)
@@ -1045,7 +1045,7 @@ internal fun TerminalKeys(
     // middle: page-up, up and page-down sit above left, down and right, so the
     // up arrow stays directly above the down arrow and the thumb finds all six
     // without reaching for an edge. The modifiers hold the left of the lower
-    // row in the order Shift, Ctrl, Alt. The two job keys share the right edge:
+    // row in the order Ctrl, Shift, Alt. The two job keys share the right edge:
     // the whole-line erase (Ctrl-U then Ctrl-K, so it works from the middle
     // too) sits above the one that replaces the running shell with a fresh
     // login shell in place — exec $SHELL — which is how a wedged or
@@ -1053,9 +1053,9 @@ internal fun TerminalKeys(
     // and page key holds and repeats: nobody walks a file one tap at a time.
     val tab = if (shiftOn) "\u001b[Z".toByteArray() else byteArrayOf(9)
     Column(Modifier.fillMaxWidth()) {
-        // A hairline owns the boundary with the terminal above: with no key
-        // boxes the bar and the grid would otherwise run into one another.
-        Box(Modifier.fillMaxWidth().height(Dp.Hairline).background(InkLine))
+        // The bar keeps the terminal's own background, so only this line
+        // separates the keys from the grid; at a pixel it read as one surface.
+        Box(Modifier.fillMaxWidth().height(1.dp).background(InkSeam))
         Spacer(Modifier.height(6.dp))
         Row(
             Modifier.fillMaxWidth(),
@@ -1097,10 +1097,10 @@ internal fun TerminalKeys(
             horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             Box(Modifier.weight(1f)) {
-                KeyChip("Shift", active = shiftOn, onClick = onShift)
+                KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
             }
             Box(Modifier.weight(1f)) {
-                KeyChip("Ctrl", active = ctrlOn, onClick = onCtrl)
+                KeyChip("Shift", active = shiftOn, onClick = onShift)
             }
             Box(Modifier.weight(1f)) {
                 KeyChip("Alt", active = altOn, onClick = onAlt)
