@@ -1,5 +1,5 @@
 GOAL:
-[IN_PROCESS] A latched Ctrl/Alt/Shift must mean the same chord no matter which
+[COMPLETED] A latched Ctrl/Alt/Shift must mean the same chord no matter which
             of the terminal's three inputs produced the key, so Ctrl+C works
             (operator: "ใช้ปุ่มเช่น ctrl + c ไม่ได้ ทำให้สมบูรณ์ในทุกเคสเลยได้มั้ย
             เปิด internet ค้นหาข้อมูลด้วยก็ได้ ว่า Terminal ควรมีอะไรบ้าง ควรทำ
@@ -14,7 +14,16 @@ GOAL:
             Ctrl+Backspace as ^W, Shift+Tab as backtab — and the bar, the IME
             and hardware keys all go through it. In the composer a keystroke
             typed while a chip is lit is sent as the chord and never lands in
-            the field. New TerminalKeysTest, 12 cases; 400 unit tests total.
+            the field. New TerminalKeysTest, 12 cases; 400 unit tests total, 0
+            failures; assembleDebug green. Shipped d5149c3, Release APK
+            41165230598 green, `latest` at 1.0.202610310340 (versionCode
+            1793418009), version.json commit == d5149c3. Not handset-verified.
+            Build note: this host's JDK prints HotSpot cgroup warnings
+            ("Cgroup ... seems to have moved to '/../../jupyter-children'") on
+            stdout, which Gradle's JDK metadata capture folds into the java
+            version and jmod then rejects as `--module-version`; the APK here
+            was built with Temurin 21 at /opt/temurin21 and
+            JAVA_TOOL_OPTIONS=-Xlog:os+container=off. CI runners are clean.
 [COMPLETED] A tap on the grid must leave the keyboard exactly as it was
             (operator: "เวลากดหน้าจอ terminal มันปิดแป้นพิมพ์ ต้องไม่ปิดแป้นพิมพ์
             แล้วก็ไม่เปิดแป้นพิมพ์ด้วย"). ACTION_DOWN still called requestFocus(),
