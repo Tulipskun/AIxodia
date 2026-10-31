@@ -1,12 +1,19 @@
 GOAL:
-[IN_PROCESS] Give the terminal's key bar a visible edge against the grid, and
+[IN_PROCESS] A tap on the grid must leave the keyboard exactly as it was
+            (operator: "เวลากดหน้าจอ terminal มันปิดแป้นพิมพ์ ต้องไม่ปิดแป้นพิมพ์
+            แล้วก็ไม่เปิดแป้นพิมพ์ด้วย"). ACTION_DOWN still called requestFocus(),
+            so a tap stole focus from the command field and the field's IME fell
+            shut; the tap no longer takes focus at all.
+[COMPLETED] Give the terminal's key bar a visible edge against the grid, and
             put the lower row's modifiers in the order Ctrl, Shift, Alt
             (operator: "เพิ่มเส้นขอบระหว่างหน้าจอกับ ปุ่มใน Terminal หน่อย แล้วก็
             ย้ายปุ่ม แถว 2 เป็น ctrl shift alt ที่เหลือเหมือนเดิม"). The bar keeps
             the terminal's own background, so the old 1px InkLine hairline read as
             one surface with the grid; the boundary is now 1dp of InkSeam
             (#2A3544, the design system's navy hairline). Row 2 becomes Ctrl,
-            Shift, Alt, ←, ↓, →, refresh; row 1 is untouched.
+            Shift, Alt, ←, ↓, →, refresh; row 1 is untouched. Shipped 74348eb,
+            Release APK 41161960199 green, APK 1.0.202610310255 (versionCode
+            1793415312) on the rolling `latest` release.
 [COMPLETED] The strip under the grid is the app's own (operator, on the
             1.0.202610302316 build: "ก็เป็นแถบว่างประมาณ 1 บรรทัดอยู่นี่ไง", with a
             bash-tab screenshot after `seq 1 43`). The tmux bar is gone and

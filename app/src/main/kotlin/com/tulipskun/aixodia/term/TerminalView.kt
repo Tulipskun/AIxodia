@@ -1007,7 +1007,9 @@ class TerminalView @JvmOverloads constructor(
                     }
                     clearSelection()
                 }
-                requestFocus()
+                // A tap is a tap and nothing more: it must not take focus, or
+                // the command field loses the IME and the keyboard falls shut
+                // under the finger that only meant to click or look.
                 scroller.forceFinished(true)
                 lastTouchY = event.y
                 downY = event.y
