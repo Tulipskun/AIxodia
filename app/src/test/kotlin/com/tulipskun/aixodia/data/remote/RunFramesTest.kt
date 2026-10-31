@@ -54,6 +54,18 @@ class RunFramesTest {
     }
 
     @Test
+    fun anAnswerTheStoreHasNotKeptArrivesUnnumberedAndUnsynced() {
+        val json = JSONObject(
+            """{"turn":{"seq":0,"role":"model","text":"answer","model":"m",
+                "output_tokens":3},"turns_synced":false}"""
+        )
+        val frame = RunFrames.map("final", json, "s1")!!
+        assertEquals("answer", frame.text)
+        assertEquals(0L, frame.seq)
+        assertTrue("the phone must not trust that seq", !frame.turnsSynced)
+    }
+
+    @Test
     fun doneAndCancelledAreTerminalDone() {
         assertEquals("done", RunFrames.map("status", JSONObject("{\"status\":\"done\"}"), "s1")!!.kind)
         val cancelled = RunFrames.map("status", JSONObject("{\"status\":\"cancelled\"}"), "s1")!!

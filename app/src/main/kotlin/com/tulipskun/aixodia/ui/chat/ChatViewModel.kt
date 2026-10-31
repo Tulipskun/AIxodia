@@ -108,6 +108,15 @@ data class TurnStats(
  */
 private const val TURN_SILENCE_MS = 45_000L
 
+/**
+ * How long the phone waits before reading back a turn the engine answered
+ * before storing. The write is on its way to D1 when the closing frame
+ * arrives, and one HTTPS round trip takes about a second, so a read made the
+ * instant the turn ends finds nothing and the thread is left on the copy the
+ * phone numbered itself.
+ */
+private const val STORED_READ_MS = 2_500L
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(
     private val repo: ChatRepository,
@@ -1160,10 +1169,13 @@ class ChatViewModel(
         // total has no way to report), so the strip hands over to the thread.
         liveUsage.value = null
         val completedTurn = turnVersion
-        // Repository has already committed the WS rows. A D1 read is only a
-        // compatibility/recovery fallback for a daemon without a complete batch.
+        // False when the closing frame carried rows the store has not numbered.
+        val unnumbered = !frame.turnsSynced
+        // The repository has already committed every row the turn handed over.
+        // What is read below is the store's own copy: the recovery path for a
+        // daemon that answers before it writes, and for a frame whose rows
+        // could not be applied.
         viewModelScope.launch {
-            if (!frame.turnsSynced) runCatchingCancellable { repo.refreshLatest(sid) }
             if (baseSeq >= 0L) {
                 runCatchingCancellable { repo.stampThinking(sid, baseSeq, spans.answerMs, spans.byCall) }
             }
@@ -1174,6 +1186,15 @@ class ChatViewModel(
             // The turn may have moved goals and plans; the card shows the
             // engine's list, not the phone's guess.
             if (owns(chat) && turnVersion == completedTurn) refreshObjectives(sid)
+            // The engine answered before D1 kept the turn, so the thread is
+            // showing rows the phone numbered itself. Reading the store the
+            // instant the turn closes finds nothing — the write is still on its
+            // way — so the newest page is asked for once it has had time to
+            // land, and the engine's numbered copies replace the phone's.
+            if (unnumbered) {
+                delay(STORED_READ_MS)
+                runCatchingCancellable { repo.refreshPage(sid) }
+            }
         }
     }
 

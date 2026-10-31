@@ -136,4 +136,51 @@ class RunSocketPollTest {
             worker.join(2_000)
         }
     }
+
+    /**
+     * The engine answers while its rows are still on the way to the store and
+     * says so on its final event. The screen settles the turn on the closing
+     * status frame, so that truth has to travel from one event to the other:
+     * a done frame that claims the rows are stored is a turn the phone never
+     * reads back, and a thread left on the seq the phone invented for itself.
+     */
+    @Test
+    fun `the closing frame carries what the final event said about the store`() = runBlocking {
+        val settings: SettingsStore = mock()
+        val context: Context = mock()
+        val preferences: SharedPreferences = mock()
+        val editor: SharedPreferences.Editor = mock()
+        whenever(context.applicationContext).thenReturn(context)
+        whenever(context.getSharedPreferences(any<String>(), eq(Context.MODE_PRIVATE))).thenReturn(preferences)
+        whenever(preferences.edit()).thenReturn(editor)
+        whenever(editor.remove(any())).thenReturn(editor)
+        val socket = RunSocket(settings, context)
+        val frames = Collections.synchronizedList(mutableListOf<AiOutput>())
+        try {
+            val collector = launch { socket.frames.collect { frames += it } }
+            delay(50)
+            setField(socket, "session", "P")
+            setField(socket, "runSession", "P")
+            setField(socket, "runId", "run-P")
+            val handle = RunSocket::class.java
+                .getDeclaredMethod("handle", String::class.java, String::class.java, String::class.java)
+                .apply { isAccessible = true }
+            handle.invoke(
+                socket, "run-P", "final",
+                """{"seq":1,"kind":"final","data":{"turn":{"seq":0,"role":"model","text":"answer"},"turns_synced":false}}""",
+            )
+            handle.invoke(socket, "run-P", "status", """{"seq":2,"kind":"status","data":{"status":"done"}}""")
+            val closed = withTimeoutOrNull(2_000) {
+                while (frames.none { it.kind == "done" }) delay(20)
+                true
+            }
+            assertTrue("the closing frame should reach the screen", closed == true)
+            assertEquals("answer", frames.first { it.kind == "message" }.text)
+            assertTrue("the rows were not stored yet", !frames.first { it.kind == "done" }.turnsSynced)
+            collector.cancel()
+        } finally {
+            socket.close()
+            (field(socket, "scope") as CoroutineScope).cancel()
+        }
+    }
 }

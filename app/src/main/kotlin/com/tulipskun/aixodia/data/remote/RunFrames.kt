@@ -62,7 +62,11 @@ internal object RunFrames {
                     reasoningTokens = row.reasoningTokens,
                     inputIncludesCache = row.inputIncludesCache,
                     turns = listOf(row),
-                    turnsSynced = true,
+                    // The engine says whether its rows are already in the store.
+                    // An answer that arrived before D1 kept it must be read back
+                    // once the write lands; trusting a hardcoded true would leave
+                    // the phone's own copy as the only record of the turn.
+                    turnsSynced = obj.optBoolean("turns_synced", true),
                 )
             }
             "error" -> {

@@ -419,11 +419,24 @@ class ChatRepository(
     /** Removes one chat's stored route; the daemon then uses the agent defaults. */
     suspend fun clearSessionModel(sid: String): Boolean = history.clearSessionModel(sid)
 
-    suspend fun refreshLatest(sid: String) {
+    suspend fun refreshLatest(sid: String) = refresh(sid, incremental = true)
+
+    /**
+     * Reads one chat's newest page outright. [refreshLatest] continues from the
+     * highest seq Room holds, which is the right question when every local row
+     * is the store's own; it is the wrong one after the phone has kept an
+     * answer the store had not numbered yet, because that guess sits on a seq
+     * the engine may hand to a tool step instead, and asking only above it
+     * leaves the rows below unread. The page brings the whole tail back and
+     * reconcile matches the two copies on role and text.
+     */
+    suspend fun refreshPage(sid: String) = refresh(sid, incremental = false)
+
+    private suspend fun refresh(sid: String, incremental: Boolean) {
         // Incremental: only pull turns newer than what Room already has, so a
         // reconnect does not re-download the whole history (Telegram/Discord style).
         val localMax = db.messages().maxSeq(sid)
-        val rows = if (localMax <= 0L) {
+        val rows = if (!incremental || localMax <= 0L) {
             // A cold open has no local seq to continue from. Pull one newest
             // page, not the whole transcript: older pages arrive on demand
             // through loadOlderWindow, and the optimistic row for the next
@@ -777,10 +790,13 @@ class ChatRepository(
         if (f.kind == "ack" && f.clientMsgId.isNotBlank()) {
             db.messages().markAcked(f.clientMsgId)
         }
-        if (f.sessionId.isBlank() || f.turns.isEmpty()) return
+        if (f.sessionId.isBlank()) return
         val sid = f.sessionId
         val entities = f.turns.filter { it.seq > 0 }.map { it.toEntity(sid) }
-        if (entities.isEmpty()) return
+        if (entities.isEmpty()) {
+            commitUnnumberedAnswer(f, sid)
+            return
+        }
         db.withTransaction {
             val local = db.messages().allNow(sid)
             val merged = mergeCommittedTurns(local, entities, f.clientMsgId)
@@ -802,8 +818,28 @@ class ChatRepository(
                 lastAt = last.createdAt,
             ))
         }
+        commitUnnumberedAnswer(f, sid)
     }
 
+
+    /**
+     * Keeps the phone's own copy of an answer the store has not numbered yet.
+     *
+     * The engine answers before D1 keeps the turn, so the row that closes it
+     * carries seq 0 and the write lands after the stream has already closed. The
+     * live timeline that showed the reply goes away with the closing frame, so
+     * with no local row the bubble leaves the thread until a pull brings it back.
+     * It is written at the next free seq instead; when the store's numbered copy
+     * arrives, reconcile matches the two on role and text and adopts it.
+     */
+    private suspend fun commitUnnumberedAnswer(f: AiOutput, sid: String) {
+        val row = unnumberedAnswer(f) ?: return
+        val entity = row.toEntity(sid)
+        val maxSeq = db.messages().maxSeq(sid)
+        val last = runCatchingCancellable { db.messages().get(sid, maxSeq) }.getOrNull()
+        if (last != null && last.role == entity.role && last.text == entity.text) return
+        db.messages().upsert(entity.copy(seq = maxSeq + 1))
+    }
 
     private fun com.tulipskun.aixodia.data.remote.TurnRow.toEntity(sid: String): MessageEntity {
         val view = toolRowView(role, text)
@@ -932,6 +968,42 @@ private fun SessionEntity.storedUsage(): StoredTotals? =
 /** True for a model reply that has no text, no tool name and was not waiting to send. */
 internal fun isEmptyAnswer(role: String, text: String, toolName: String, pending: Boolean): Boolean =
     role != "user" && !role.startsWith("tool") && text.isBlank() && toolName.isBlank() && !pending
+
+/**
+ * The answer one frame carries that no store has numbered yet, or null.
+ *
+ * Two shapes say it: the socket's closing message frame, whose own fields are
+ * the turn and whose seq is still zero, and the run API's final event, which
+ * hands the same turn inside `turns`. An engine that waits for its write arrives
+ * with a real seq, and a reply that is only streaming arrives as a delta — both
+ * return null, so the phone never invents a second copy of an answer it already
+ * has a row for.
+ */
+internal fun unnumberedAnswer(f: com.tulipskun.aixodia.data.model.AiOutput):
+        com.tulipskun.aixodia.data.remote.TurnRow? {
+    f.turns.firstOrNull {
+        it.seq <= 0L && it.text.isNotBlank() && normalizedRole(it.role) == "model"
+    }?.let { return it }
+    if (f.kind != "message" || f.seq > 0L || f.text.isBlank() || normalizedRole(f.role) != "model") {
+        return null
+    }
+    return com.tulipskun.aixodia.data.remote.TurnRow(
+        seq = 0,
+        role = f.role,
+        agent = f.agent,
+        text = f.text,
+        model = f.model,
+        inputTokens = f.inputTokens,
+        outputTokens = f.outputTokens,
+        cacheRead = f.cacheRead,
+        cacheWrite = f.cacheWrite,
+        reasoningTokens = f.reasoningTokens,
+        reasoningContent = f.reasoningContent,
+        inputIncludesCache = f.inputIncludesCache,
+        durationMs = f.durationMs,
+        generationMs = f.generationMs,
+    )
+}
 
 /**
  * The key every row in the thread is drawn under, in the order it is drawn.

@@ -101,6 +101,11 @@ class RunSocket(
     @Volatile private var runId: String? = null
     @Volatile private var lastSeq = 0L
     @Volatile private var terminal = false
+    // Whether the rows of the run being followed are already in the store. The
+    // engine's final event answers that, and the closing status frame is what
+    // the screen settles the turn on, so the answer travels from one to the
+    // other instead of being guessed.
+    @Volatile private var rowsSynced = true
     private var streamJob: Job? = null
     private var probeJob: Job? = null
     @Volatile private var currentCall: Call? = null
@@ -360,6 +365,7 @@ class RunSocket(
                 runSession = req.sessionId
                 lastSeq = 0
                 terminal = false
+                rowsSynced = true
                 startStream(id)
                 true
             }
@@ -475,7 +481,8 @@ class RunSocket(
         val data = env.opt("data")
         if (kind == "user") return
         val frame = RunFrames.map(kind, data, runSession) ?: return
-        emit(frame)
+        if (kind == "final") rowsSynced = frame.turnsSynced
+        emit(if (frame.kind == "done") frame.copy(turnsSynced = rowsSynced) else frame)
         if (kind == "status" && RunFrames.terminal((data as? JSONObject)?.optString("status").orEmpty())) {
             clearRun()
         }
