@@ -111,7 +111,9 @@ import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.data.remote.TermEvent
 import com.tulipskun.aixodia.data.remote.TermState
 import com.tulipskun.aixodia.data.remote.TerminalSocket
+import com.tulipskun.aixodia.term.KeyMods
 import com.tulipskun.aixodia.term.TerminalEmulator
+import com.tulipskun.aixodia.term.TerminalKeys
 import com.tulipskun.aixodia.term.TerminalLiveService
 import com.tulipskun.aixodia.term.TerminalOutput
 import com.tulipskun.aixodia.term.TerminalView
@@ -651,19 +653,27 @@ fun TerminalWindow(
                                             view.setLatchedMods(ctrlOn.value, altOn.value, v)
                                             view.keepSoftKeyboardIfShown()
                                         },
-                                        onShiftSpent = {
-                                            // The backtab went out; the latch has no key left.
-                                            shiftOn.value = false
-                                            view.setLatchedMods(ctrlOn.value, altOn.value, false)
-                                        },
                                         onKey = { bytes ->
-                                            socket.send(bytes)
+                                            // Through the view, so the latch is spent and
+                                            // the chips un-light with it.
+                                            view.sendChord(bytes)
                                             // Tapping a key must not take the keyboard with it.
+                                            view.keepSoftKeyboardIfShown()
+                                        },
+                                        onCursor = { final ->
+                                            view.sendBarCursor(final)
                                             view.keepSoftKeyboardIfShown()
                                         },
                                     )
                                     TerminalComposer(
                                         socket = socket,
+                                        mods = KeyMods(ctrlOn.value, altOn.value, shiftOn.value),
+                                        onModsConsumed = {
+                                            ctrlOn.value = false
+                                            altOn.value = false
+                                            shiftOn.value = false
+                                            view.setLatchedMods(false, false, false)
+                                        },
                                         onSend = {
                                             if (ctrlOn.value || altOn.value || shiftOn.value) {
                                                 ctrlOn.value = false
@@ -1026,9 +1036,10 @@ private fun statusLabel(state: TermState): String = when (state) {
  *
  * Ctrl and Alt latch for one keystroke: tap Ctrl, then type C, and the view
  * turns it into 0x03 (the same as the ^C key, but for any letter or symbol).
- * Shift latches the same way, and its one key is Tab: Shift then Tab sends
- * the backtab (ESC[Z) that reverses an edit's completion or a TUI's strip.
- * Every arrow is holdable: keep a thumb on it and it repeats.
+ * Shift latches the same way; typing a letter capitalises it and Shift then
+ * Tab sends the backtab (ESC[Z) that reverses an edit's completion or a TUI's
+ * strip. The latch applies to any key on the bar too, so Ctrl then Left is
+ * the xterm word-left. Every arrow is holdable: a thumb kept on it repeats.
  */
 @Composable
 internal fun TerminalKeys(
@@ -1038,8 +1049,8 @@ internal fun TerminalKeys(
     onCtrl: () -> Unit,
     onAlt: () -> Unit,
     onShift: () -> Unit,
-    onShiftSpent: () -> Unit,
     onKey: (ByteArray) -> Unit,
+    onCursor: (final: Char) -> Unit,
 ) {
     // Exactly two rows, seven keys each. The navigation cluster owns the
     // middle: page-up, up and page-down sit above left, down and right, so the
@@ -1051,7 +1062,10 @@ internal fun TerminalKeys(
     // login shell in place — exec $SHELL — which is how a wedged or
     // half-configured session gets a clean one without a new tab. Every arrow
     // and page key holds and repeats: nobody walks a file one tap at a time.
-    val tab = if (shiftOn) "\u001b[Z".toByteArray() else byteArrayOf(9)
+    // The chips latch for one key, so every key on the bar is built with them:
+    // Ctrl then Esc is Ctrl+Esc's bytes, Shift then Tab is the backtab, and a
+    // latched modifier plus an arrow becomes the xterm modified cursor key.
+    val mods = KeyMods(ctrlOn, altOn, shiftOn)
     Column(Modifier.fillMaxWidth()) {
         // The bar keeps the terminal's own background, so only this line
         // separates the keys from the grid; at a pixel it read as one surface.
@@ -1062,27 +1076,22 @@ internal fun TerminalKeys(
             horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             Box(Modifier.weight(1f)) {
-                KeyChip("Esc", onClick = { onKey(byteArrayOf(27)) })
+                KeyChip("Esc", onClick = { onKey(TerminalKeys.escape(mods).toByteArray(Charsets.US_ASCII)) })
             }
             Box(Modifier.weight(1f)) {
-                KeyChip("Tab", onClick = {
-                    onKey(tab)
-                    // Only Tab answers to Shift: once the backtab has gone
-                    // out, the latch has nothing left to colour.
-                    if (shiftOn) onShiftSpent()
-                })
+                KeyChip("Tab", onClick = { onKey(TerminalKeys.tab(mods).toByteArray(Charsets.US_ASCII)) })
             }
             Box(Modifier.weight(1f)) {
                 KeyChip("CMD", onClick = { onKey(byteArrayOf(16)) })
             }
             Box(Modifier.weight(1f)) {
-                HoldableKeyChip("PgUp", onClick = { onKey("\u001b[5~".toByteArray()) })
+                HoldableKeyChip("PgUp", onClick = { onKey(TerminalKeys.tilde(5, mods).toByteArray(Charsets.US_ASCII)) })
             }
             Box(Modifier.weight(1f)) {
-                HoldableKeyChip("\u2191", labelStyle = Arrows, onClick = { onKey("\u001b[A".toByteArray()) })
+                HoldableKeyChip("\u2191", labelStyle = Arrows, onClick = { onCursor('A') })
             }
             Box(Modifier.weight(1f)) {
-                HoldableKeyChip("PgDn", onClick = { onKey("\u001b[6~".toByteArray()) })
+                HoldableKeyChip("PgDn", onClick = { onKey(TerminalKeys.tilde(6, mods).toByteArray(Charsets.US_ASCII)) })
             }
             Box(Modifier.weight(1f)) {
                 IconKey(
@@ -1106,13 +1115,13 @@ internal fun TerminalKeys(
                 KeyChip("Alt", active = altOn, onClick = onAlt)
             }
             Box(Modifier.weight(1f)) {
-                HoldableKeyChip("\u2190", labelStyle = Arrows, onClick = { onKey("\u001b[D".toByteArray()) })
+                HoldableKeyChip("\u2190", labelStyle = Arrows, onClick = { onCursor('D') })
             }
             Box(Modifier.weight(1f)) {
-                HoldableKeyChip("\u2193", labelStyle = Arrows, onClick = { onKey("\u001b[B".toByteArray()) })
+                HoldableKeyChip("\u2193", labelStyle = Arrows, onClick = { onCursor('B') })
             }
             Box(Modifier.weight(1f)) {
-                HoldableKeyChip("\u2192", labelStyle = Arrows, onClick = { onKey("\u001b[C".toByteArray()) })
+                HoldableKeyChip("\u2192", labelStyle = Arrows, onClick = { onCursor('C') })
             }
             Box(Modifier.weight(1f)) {
                 IconKey(
@@ -1336,7 +1345,12 @@ internal fun HoldableKeyChip(
  * anywhere else it is a line break, so a multi-line command can be written first.
  */
 @Composable
-private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
+private fun TerminalComposer(
+    socket: TerminalSocket,
+    mods: KeyMods = KeyMods.NONE,
+    onModsConsumed: () -> Unit = {},
+    onSend: () -> Unit = {},
+) {
     var field by remember { mutableStateOf(TextFieldValue("")) }
     Row(
         Modifier
@@ -1353,6 +1367,21 @@ private fun TerminalComposer(socket: TerminalSocket, onSend: () -> Unit = {}) {
                 // middle it is a line break, letting a loop or here-doc be
                 // built over several lines before it goes to the shell.
                 val old = field
+                // A latched modifier belongs to the very next keystroke, so a
+                // character typed into the field while one is lit is sent as
+                // that chord (Ctrl then C is 0x03) and never lands in the text.
+                val chord = if (mods.any) TerminalKeys.insertedChar(old.text, next.text) else null
+                if (chord != null) {
+                    val bytes = if (chord == '\n') {
+                        TerminalKeys.enter(mods)
+                    } else {
+                        TerminalKeys.typed(chord.toString(), mods)
+                    }
+                    socket.send(bytes.toByteArray())
+                    onModsConsumed()
+                    field = old
+                    return@OutlinedTextField
+                }
                 val enterAtEnd = old.selection.collapsed &&
                     old.selection.end == old.text.length &&
                     next.text.length == old.text.length + 1 &&

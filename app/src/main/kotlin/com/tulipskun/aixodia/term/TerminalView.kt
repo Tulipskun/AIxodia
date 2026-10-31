@@ -350,10 +350,10 @@ class TerminalView @JvmOverloads constructor(
     }
 
     /**
-     * Text produced by the keyboard. A latched Ctrl or Alt is applied to the
-     * first character and then released, so Ctrl then c really does send 0x03.
-     * Shift changes no letter — the keyboard already supplied the case — but a
-     * latched Shift is spent all the same, so the chip does not outlive its key.
+     * Text produced by the keyboard. A latched modifier is applied to the
+     * first character and then released, so Ctrl then c really does send 0x03;
+     * Shift leaves a letter the IME already capitalised alone and capitalises
+     * a lowercase one. The rest of a multi-character commit rides unchanged.
      */
     fun sendTyped(text: String) {
         if (text.isEmpty()) return
@@ -361,35 +361,42 @@ class TerminalView @JvmOverloads constructor(
             sendText(text)
             return
         }
-        val ctrl = latchedCtrl
-        val alt = latchedAlt
-        latchedCtrl = false
-        latchedAlt = false
-        latchedShift = false
-        onModsConsumed?.invoke()
-        val cp = text.codePointAt(0)
-        val rest = text.substring(Character.charCount(cp))
-        val sb = StringBuilder()
-        if (alt) sb.append('\u001b')
-        if (ctrl) {
-            sb.append(controlFor(cp).toChar())
-        } else {
-            sb.appendCodePoint(cp)
-        }
-        sb.append(rest)
-        sendText(sb.toString())
+        val mods = latchMods()
+        consumeLatch()
+        sendText(TerminalKeys.typed(text, mods))
     }
 
-    private fun controlFor(cp: Int): Int = when {
-        cp in 'a'.code..'z'.code -> cp - 'a'.code + 1
-        cp in 'A'.code..'Z'.code -> cp - 'A'.code + 1
-        cp == ' '.code -> 0
-        cp == '['.code -> 0x1B
-        cp == '\\'.code -> 0x1C
-        cp == ']'.code -> 0x1D
-        cp == '^'.code -> 0x1E
-        cp == '_'.code -> 0x1F
-        else -> cp
+    private fun latchMods() = KeyMods(latchedCtrl, latchedAlt, latchedShift)
+
+    /** Sends a key the on-screen bar drew, then spends the latches like a keystroke. */
+    fun sendChord(bytes: ByteArray) {
+        if (bytes.isEmpty()) return
+        sendBytes(bytes)
+        consumeLatch()
+    }
+
+    /** An arrow from the bar: application mode and the latches belong to the view. */
+    fun sendBarCursor(final: Char) {
+        val mods = latchMods()
+        val bytes = emulator?.cursorKey(final, mods)
+            ?: TerminalKeys.cursor(final, mods, false).toByteArray(Charsets.US_ASCII)
+        sendBytes(bytes)
+        consumeLatch()
+    }
+
+    /**
+     * The IME's Backspace. A latched modifier makes it that chord — Ctrl is the
+     * readline word-erase — the same bytes the hardware path sends.
+     */
+    fun deleteBackward(count: Int) {
+        if (count <= 0) return
+        val mods = latchMods()
+        if (mods.any) {
+            sendText(TerminalKeys.backspace(mods))
+            consumeLatch()
+            return
+        }
+        repeat(count) { sendText(TerminalKeys.backspace(KeyMods.NONE)) }
     }
 
     /** Called by the panel whenever the emulator produced output. */
@@ -1247,26 +1254,28 @@ class TerminalView @JvmOverloads constructor(
     /** Maps a key press to the bytes a terminal expects. */
     fun handleKey(event: KeyEvent): Boolean {
         val em = emulator
-        val ctrl = event.isCtrlPressed || latchedCtrl
-        val alt = event.isAltPressed || latchedAlt
-        val shift = event.isShiftPressed || latchedShift
+        val mods = KeyMods(
+            ctrl = event.isCtrlPressed || latchedCtrl,
+            alt = event.isAltPressed || latchedAlt,
+            shift = event.isShiftPressed || latchedShift,
+        )
         var handled = true
         when (event.keyCode) {
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> sendText("\r")
-            KeyEvent.KEYCODE_DEL -> sendText("\u007f")
-            KeyEvent.KEYCODE_FORWARD_DEL -> sendText("\u001b[3~")
-            KeyEvent.KEYCODE_TAB ->
-                if (shift) sendText("\u001b[Z") else sendText("\t")
-            KeyEvent.KEYCODE_ESCAPE -> sendText("\u001b")
-            KeyEvent.KEYCODE_DPAD_UP -> sendBytes(em?.cursorKey('A') ?: "\u001b[A".toByteArray())
-            KeyEvent.KEYCODE_DPAD_DOWN -> sendBytes(em?.cursorKey('B') ?: "\u001b[B".toByteArray())
-            KeyEvent.KEYCODE_DPAD_RIGHT -> sendBytes(em?.cursorKey('C') ?: "\u001b[C".toByteArray())
-            KeyEvent.KEYCODE_DPAD_LEFT -> sendBytes(em?.cursorKey('D') ?: "\u001b[D".toByteArray())
-            KeyEvent.KEYCODE_MOVE_HOME -> sendText("\u001b[H")
-            KeyEvent.KEYCODE_MOVE_END -> sendText("\u001b[F")
-            KeyEvent.KEYCODE_PAGE_UP -> sendText("\u001b[5~")
-            KeyEvent.KEYCODE_PAGE_DOWN -> sendText("\u001b[6~")
-            KeyEvent.KEYCODE_INSERT -> sendText("\u001b[2~")
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER ->
+                sendText(TerminalKeys.enter(mods))
+            KeyEvent.KEYCODE_DEL -> sendText(TerminalKeys.backspace(mods))
+            KeyEvent.KEYCODE_FORWARD_DEL -> sendText(TerminalKeys.tilde(3, mods))
+            KeyEvent.KEYCODE_TAB -> sendText(TerminalKeys.tab(mods))
+            KeyEvent.KEYCODE_ESCAPE -> sendText(TerminalKeys.escape(mods))
+            KeyEvent.KEYCODE_DPAD_UP -> sendBytes(em?.cursorKey('A', mods) ?: TerminalKeys.cursor('A', mods, false).toByteArray(Charsets.US_ASCII))
+            KeyEvent.KEYCODE_DPAD_DOWN -> sendBytes(em?.cursorKey('B', mods) ?: TerminalKeys.cursor('B', mods, false).toByteArray(Charsets.US_ASCII))
+            KeyEvent.KEYCODE_DPAD_RIGHT -> sendBytes(em?.cursorKey('C', mods) ?: TerminalKeys.cursor('C', mods, false).toByteArray(Charsets.US_ASCII))
+            KeyEvent.KEYCODE_DPAD_LEFT -> sendBytes(em?.cursorKey('D', mods) ?: TerminalKeys.cursor('D', mods, false).toByteArray(Charsets.US_ASCII))
+            KeyEvent.KEYCODE_MOVE_HOME -> sendText(TerminalKeys.home(mods))
+            KeyEvent.KEYCODE_MOVE_END -> sendText(TerminalKeys.end(mods))
+            KeyEvent.KEYCODE_PAGE_UP -> sendText(TerminalKeys.tilde(5, mods))
+            KeyEvent.KEYCODE_PAGE_DOWN -> sendText(TerminalKeys.tilde(6, mods))
+            KeyEvent.KEYCODE_INSERT -> sendText(TerminalKeys.tilde(2, mods))
             else -> handled = false
         }
         if (handled) {
@@ -1274,16 +1283,19 @@ class TerminalView @JvmOverloads constructor(
             return true
         }
 
-        val unicode = event.unicodeChar
-        if (unicode == 0) return false
-        val sb = StringBuilder()
-        if (alt) sb.append('\u001b')
-        if (ctrl) {
-            sb.append(controlFor(unicode).toChar())
+        // Some keyboards report no character at all for a Ctrl chord. The code
+        // still names the letter, so the chord is built from that instead of
+        // being dropped on the floor.
+        val cp = if (event.unicodeChar != 0) {
+            event.unicodeChar
         } else {
-            sb.appendCodePoint(unicode)
+            (if (event.keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
+                'a'.code + (event.keyCode - KeyEvent.KEYCODE_A)
+            } else {
+                return false
+            })
         }
-        sendText(sb.toString())
+        sendText(TerminalKeys.typed(String(Character.toChars(cp)), mods))
         consumeLatch()
         return true
     }
@@ -1368,7 +1380,10 @@ class TerminalView @JvmOverloads constructor(
         }
 
         override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-            repeat(beforeLength) { view.sendRaw("\u007f") }
+            // Through the same door as the hardware DEL key, so a latched Ctrl
+            // makes the IME's Backspace the word-erase chord too.
+            view.deleteBackward(beforeLength)
+            if (afterLength > 0) view.sendRaw(TerminalKeys.tilde(3, KeyMods.NONE))
             return true
         }
 

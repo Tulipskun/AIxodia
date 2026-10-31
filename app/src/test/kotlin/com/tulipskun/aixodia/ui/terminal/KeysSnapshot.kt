@@ -34,8 +34,8 @@ class KeysSnapshot {
                         onCtrl = {},
                         onAlt = {},
                         onShift = {},
-                        onShiftSpent = {},
                         onKey = {},
+                        onCursor = {},
                     )
                 }
             }

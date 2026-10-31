@@ -1,4 +1,20 @@
 GOAL:
+[IN_PROCESS] A latched Ctrl/Alt/Shift must mean the same chord no matter which
+            of the terminal's three inputs produced the key, so Ctrl+C works
+            (operator: "ใช้ปุ่มเช่น ctrl + c ไม่ได้ ทำให้สมบูรณ์ในทุกเคสเลยได้มั้ย
+            เปิด internet ค้นหาข้อมูลด้วยก็ได้ ว่า Terminal ควรมีอะไรบ้าง ควรทำ
+            อะไรได้"). Four paths were broken: (a) the composer field sent raw
+            text and bypassed the latches entirely; (b) the bar's Esc/Tab/PgUp/
+            PgDn chips sent fixed bytes and left the latch lit; (c) the bar's
+            arrows ignored application-cursor mode and modifiers; (d) a hardware
+            Ctrl chord whose KeyEvent carried no unicodeChar was dropped. One
+            shared `term/TerminalKeys.kt` now owns the rules every terminal
+            shares — Ctrl→C0, Alt→ESC prefix, Shift→shifted character, xterm's
+            `CSI 1;mod` cursor/home/end and `CSI code;mod~` numbered keys,
+            Ctrl+Backspace as ^W, Shift+Tab as backtab — and the bar, the IME
+            and hardware keys all go through it. In the composer a keystroke
+            typed while a chip is lit is sent as the chord and never lands in
+            the field. New TerminalKeysTest, 12 cases; 400 unit tests total.
 [COMPLETED] A tap on the grid must leave the keyboard exactly as it was
             (operator: "เวลากดหน้าจอ terminal มันปิดแป้นพิมพ์ ต้องไม่ปิดแป้นพิมพ์
             แล้วก็ไม่เปิดแป้นพิมพ์ด้วย"). ACTION_DOWN still called requestFocus(),

@@ -681,9 +681,9 @@ class TerminalEmulator(
     // =======================================================================
 
     /** The arrow/Home/End form depends on DECCKM, set by the program. */
-    fun cursorKey(final: Char): ByteArray {
-        val prefix = if (applicationCursorKeys) "\u001bO" else "\u001b["
-        return "$prefix$final".toByteArray(Charsets.US_ASCII)
+    fun cursorKey(final: Char, mods: KeyMods = KeyMods.NONE): ByteArray {
+        val sequence = TerminalKeys.cursor(final, mods, applicationCursorKeys)
+        return sequence.toByteArray(Charsets.US_ASCII)
     }
 
     /** True when the program asked for the mouse, so a tap should be a click. */
