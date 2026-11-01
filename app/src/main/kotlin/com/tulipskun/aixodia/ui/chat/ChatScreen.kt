@@ -113,6 +113,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.model.StoredTotals
@@ -312,6 +313,13 @@ fun ChatScreen(
     val liveReasoning by vm.liveReasoning.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     val liveUsage by vm.liveUsage.collectAsStateWithLifecycle()
+    // The engine's own backup: what it is configured to store, how the run in
+    // flight is going, and what the bucket holds. Progress arrives through the
+    // notice line, which the view model rewrites every couple of seconds while
+    // a job runs — the engine never streams it.
+    val backup by vm.backup.collectAsStateWithLifecycle()
+    val storedBackups by vm.backups.collectAsStateWithLifecycle()
+    val backupBusy = backup?.running == true
     // The footer format follows the provider, because what is worth printing
     // differs: Anthropic has no reasoning count to show.
     val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initialValue = TokenField.DEFAULT)
@@ -354,6 +362,7 @@ fun ChatScreen(
     val snackbar = remember { SnackbarHostState() }
     var showPushNowDialog by remember { mutableStateOf(false) }
     var pushNowBusy by remember { mutableStateOf(false) }
+    var showRestoreDialog by remember { mutableStateOf(false) }
 
     if (showSettings) {
         SettingsScreen(
@@ -432,6 +441,14 @@ fun ChatScreen(
         ComposerCommand(stringResource(R.string.stop), enabled = busy) { vm.stop() },
         ComposerCommand(stringResource(R.string.clear_draft), enabled = draft.isNotBlank()) { vm.changeDraft("") },
         ComposerCommand(stringResource(R.string.refresh)) { vm.refresh() },
+        // The engine's own backup. Both are greyed while a run is in flight
+        // rather than removed, so the menu keeps its shape between openings and
+        // one cannot start a restore over a backup that is still writing.
+        ComposerCommand(stringResource(R.string.backup_now), enabled = !backupBusy) { vm.backupNow() },
+        ComposerCommand(stringResource(R.string.restore_backup), enabled = !backupBusy) {
+            vm.inspectBackup()
+            showRestoreDialog = true
+        },
         ComposerCommand(stringResource(R.string.settings)) { showSettings = true },
     )
     // Uptime is counted on the phone from the daemon's start time, so it has to
@@ -608,6 +625,51 @@ fun ChatScreen(
             },
             dismissButton = {
                 TextButton(enabled = !pushNowBusy, onClick = { showPushNowDialog = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+    if (showRestoreDialog) {
+        // The newest backup is named inside the question, because what the
+        // confirm button answers is "overwrite the machine with this one". The
+        // engine asks for the same word in the body it receives.
+        val newest = storedBackups.firstOrNull()
+        val state = backup
+        AlertDialog(
+            onDismissRequest = { showRestoreDialog = false },
+            title = { Text(stringResource(R.string.restore_title)) },
+            text = {
+                Text(
+                    when {
+                        state == null -> stringResource(R.string.restore_reading)
+                        backupBusy -> stringResource(R.string.restore_busy, state.operation)
+                        !state.configured -> stringResource(
+                            R.string.restore_not_configured,
+                            state.needs.joinToString(", ").ifBlank { "bucket and token" },
+                        )
+                        newest == null -> stringResource(R.string.restore_none_in_bucket)
+                        else -> stringResource(
+                            R.string.restore_body,
+                            newest!!.name,
+                            newest!!.files,
+                            AttachmentRef.humanSize(newest!!.bytes),
+                            state!!.root,
+                        )
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = state != null && state.configured && newest != null && !backupBusy,
+                    onClick = {
+                        showRestoreDialog = false
+                        vm.restoreBackup(newest?.name.orEmpty())
+                    },
+                ) { Text(stringResource(R.string.confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
             },
         )
     }

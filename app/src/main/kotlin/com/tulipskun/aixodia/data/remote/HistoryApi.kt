@@ -216,6 +216,118 @@ sealed interface TerminalShells {
 }
 
 /**
+ * One stored backup, as the engine's `/api/backup/list` names it. The name is
+ * the manifest's utc stamp (`20261101T053000Z`), newest first, and is what a
+ * restore is asked for by.
+ */
+data class BackupRow(
+    val name: String = "",
+    val createdAt: Long = 0,
+    val files: Int = 0,
+    val bytes: Long = 0,
+    val uploadedBytes: Long = 0,
+)
+
+/**
+ * One read of `/api/backup`: what the engine is configured to back up, what it
+ * is doing right now, and how the last run ended.
+ *
+ * The hub token is not in here and never will be — the engine reports only its
+ * last four characters, which is enough to tell two keys apart.
+ */
+data class BackupStatus(
+    val configured: Boolean = false,
+    /** Field names the engine still needs before a run can start. */
+    val needs: List<String> = emptyList(),
+    val bucket: String = "",
+    val prefix: String = "",
+    val root: String = "",
+    val retention: Int = 0,
+    val gc: Boolean = false,
+    val tokenTail: String = "",
+    /** "backup" or "restore" while a job runs, "" when the engine is idle. */
+    val operation: String = "",
+    val phase: String = "",
+    val message: String = "",
+    val done: Int = 0,
+    val total: Int = 0,
+    val bytesDone: Long = 0,
+    val bytesTotal: Long = 0,
+    /** One line on the last run to finish, "" until this engine has done one. */
+    val lastRun: String = "",
+) {
+    val running: Boolean get() = operation.isNotBlank()
+
+    /** "uploading · 12/340 files · 4.1 MB of 38.0 MB" for the status line. */
+    fun progressLine(): String = buildString {
+        append(phase.ifBlank { operation.ifBlank { "idle" } })
+        if (total > 0) append(" · ").append(done).append('/').append(total)
+        if (bytesTotal > 0) append(" · ")
+            .append(com.tulipskun.aixodia.data.model.AttachmentRef.humanSize(bytesDone))
+            .append(" of ")
+            .append(com.tulipskun.aixodia.data.model.AttachmentRef.humanSize(bytesTotal))
+        if (message.isNotBlank()) append(" — ").append(message)
+    }
+}
+
+/** Reads one `/api/backup` answer. Only the fields that are there are read. */
+private fun parseBackupStatus(o: JSONObject): BackupStatus {
+    val active = o.optJSONObject("active")
+    val progress = active?.optJSONObject("progress")
+    return BackupStatus(
+        configured = o.optBoolean("configured"),
+        needs = stringList(o.optJSONArray("needs")),
+        bucket = o.optString("bucket"),
+        prefix = o.optString("prefix"),
+        root = o.optString("root"),
+        retention = o.optInt("retention"),
+        gc = o.optBoolean("gc"),
+        tokenTail = o.optJSONObject("token")?.optString("tail").orEmpty(),
+        operation = active?.optString("operation").orEmpty(),
+        phase = progress?.optString("phase").orEmpty(),
+        message = progress?.optString("message").orEmpty(),
+        done = progress?.optInt("done") ?: 0,
+        total = progress?.optInt("total") ?: 0,
+        bytesDone = progress?.optLong("bytes_done") ?: 0L,
+        bytesTotal = progress?.optLong("bytes_total") ?: 0L,
+        lastRun = backupLastRun(o.optJSONObject("finished")),
+    )
+}
+
+/**
+ * How the last run ended, in one line the phone can show as it is. The engine
+ * keeps the slot's result until it is restarted, so this survives closing the
+ * chat — the answer to "did it work?" after the progress line has gone.
+ */
+private fun backupLastRun(finished: JSONObject?): String {
+    val summary = finished?.optJSONObject("summary") ?: return ""
+    val operation = finished.optString("operation")
+    if (!summary.optBoolean("ok")) {
+        return "$operation failed: " + summary.optString("error").ifBlank { "unknown reason" }
+    }
+    val report = summary.optJSONObject("report") ?: return "$operation finished"
+    val seconds = report.optLong("duration_ms") / 1000.0
+    return if (operation == "restore") {
+        "$operation ${report.optString("name")} — ${report.optInt("files")} files written, " +
+            "${report.optInt("unchanged")} already correct, %.1fs".format(seconds)
+    } else {
+        "$operation ${report.optString("name")} — ${report.optInt("files")} files, " +
+            "${com.tulipskun.aixodia.data.model.AttachmentRef.humanSize(report.optLong("uploaded_bytes"))}" +
+            " uploaded, ${report.optInt("files_reused")} files reused, %.1fs".format(seconds)
+    }
+}
+
+private fun stringList(arr: JSONArray?): List<String> {
+    if (arr == null) return emptyList()
+    val out = ArrayList<String>(arr.length())
+    for (i in 0 until arr.length()) {
+        val s = arr.optString(i)
+        if (s.isNotBlank()) out.add(s)
+    }
+    return out
+}
+
+/**
  * Picks one page out of an oldest-first transcript.
  *
  * beforeSeq <= 0 means "the newest page", which is what opening a long chat
@@ -972,6 +1084,135 @@ class HistoryApi(
                 )
             }
         }.getOrNull()
+    }
+
+    /**
+     * The engine's own backup, driven from here. `GET /api/backup` answers what
+     * is configured, what is running and how the last run ended; nothing in the
+     * reply is a secret — the hub token comes back as its last four characters
+     * at most, and the phone never sees it whole.
+     */
+    suspend fun backupStatus(): BackupStatus? = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
+        runCatchingCancellable {
+            val req = Request.Builder().url("$base/api/backup")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use null
+                parseBackupStatus(JSONObject(r.body!!.string()))
+            }
+        }.getOrNull()
+    }
+
+    /** The backups the bucket holds, newest first. Empty when none or unreadable. */
+    suspend fun backups(): List<BackupRow> = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+        runCatchingCancellable {
+            val req = Request.Builder().url("$base/api/backup/list")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use emptyList()
+                val arr = JSONObject(r.body!!.string()).optJSONArray("backups") ?: return@use emptyList()
+                val out = ArrayList<BackupRow>(arr.length())
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    out.add(
+                        BackupRow(
+                            name = o.optString("name"),
+                            createdAt = o.optLong("created_at"),
+                            files = o.optInt("files"),
+                            bytes = o.optLong("bytes"),
+                            uploadedBytes = o.optLong("uploaded_bytes"),
+                        )
+                    )
+                }
+                out
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Starts a backup. The engine answers 202 and keeps working on its own
+     * thread, so this returns at once and progress is read from [backupStatus].
+     * A busy engine answers 409 with its own reason, which is what shows here.
+     */
+    suspend fun backupStart(): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
+        runCatching {
+            val req = Request.Builder().url("$base/api/backup")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                failure("Backup started", r).let { if (r.isSuccessful) it else "Backup failed: $it" }
+            }
+        }.getOrDefault("Backup failed")
+    }
+
+    /**
+     * Restores [name] (blank asks for the newest). The engine refuses anything
+     * that does not say `confirm: true`, because a restore overwrites files
+     * under its root — the caller has already asked the reader, so this always
+     * says yes.
+     */
+    suspend fun backupRestore(name: String): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
+        val body = JSONObject().put("confirm", true)
+            .apply { if (name.isNotBlank()) put("name", name) }
+            .toString()
+        runCatching {
+            val req = Request.Builder().url("$base/api/backup/restore")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                failure("Restore started", r).let { if (r.isSuccessful) it else "Restore failed: $it" }
+            }
+        }.getOrDefault("Restore failed")
+    }
+
+    /**
+     * Saves the backup configuration on the engine, which keeps it in D1.
+     * A blank [token] is not sent at all: the stored one stays, so changing the
+     * bucket never means retyping the key, and a key the phone no longer shows
+     * cannot be wiped by accident.
+     */
+    suspend fun saveBackupConfig(
+        token: String,
+        bucket: String,
+        prefix: String,
+        retention: Int,
+        gc: Boolean,
+    ): String = withContext(Dispatchers.IO) {
+        val c = settings.current()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
+        val body = JSONObject().apply {
+            if (token.isNotBlank()) put("token", token.trim())
+            if (bucket.isNotBlank()) put("bucket", bucket.trim())
+            if (prefix.isNotBlank()) put("prefix", prefix.trim())
+            put("retention", retention)
+            put("gc", gc)
+        }.toString()
+        runCatching {
+            val req = Request.Builder().url("$base/api/backup/config")
+                .header("Authorization", "Bearer ${c.token}")
+                .header("Content-Type", "application/json")
+                .put(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { r ->
+                failure("Backup settings saved", r).let { if (r.isSuccessful) it else "Save failed: $it" }
+            }
+        }.getOrDefault("Save failed")
     }
 
     /**

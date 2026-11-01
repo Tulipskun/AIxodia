@@ -1,4 +1,40 @@
 GOAL:
+[IN_PROCESS] The phone drives the engine's own backup (operator: "สร้างฟังชั่น
+            backup ข้อมูลโดยเก็บไว้ใน HF … และหาวิธีที่เร็วที่สุด ทั้งการ backup
+            และ restore", trigger "ผ่านเมนูในปุ่ม /", "restore ต้องมี explicit
+            confirm", "HF TOKEN เก็บไว้ที่ D1 (KV)"). The engine side is shipped
+            in the other repo: `aixodia-backup` (content-addressed objects keyed
+            by file sha256, size+mtime reuse so an unchanged file is only
+            stat'ed, Xet for the bytes that move) and five routes on the gateway
+            — `GET/POST /api/backup`, `GET /api/backup/list`,
+            `PUT /api/backup/config`, `POST /api/backup/restore`. This app is the
+            remote control and never holds the hub token: the engine answers with
+            at most its last four characters, and a config write that omits the
+            token keeps the stored one, so the bucket can be changed without the
+            key ever passing back through the phone.
+            Wiring: `HistoryApi` gained `backupStatus`/`backups`/`backupStart`/
+            `backupRestore`/`saveBackupConfig` and the `BackupStatus`/`BackupRow`
+            shapes, `ChatRepository` passes them through unchanged (the view
+            model still reaches the network only through the repository),
+            `ChatViewModel` holds `backup`/`backups` and follows a run on the
+            notice line every 2s until the engine reports itself idle — a job
+            the engine refused to start leaves its own reason on screen instead
+            of being overwritten by the previous run's summary — and the "/" menu
+            gained "Back up now" and "Restore backup", both greyed while a job
+            runs so the menu cannot start a restore over a backup still writing.
+            Restore opens a dialog that names the newest backup, its file count
+            and size, and the root it will overwrite, and only then sends
+            `confirm: true`, which is what the engine insists on for a thing that
+            overwrites a machine. Settings gained a Backup page: hub token,
+            bucket, prefix, retention, a garbage-collection chip, the state the
+            engine reports, and what the bucket holds.
+            Not compiled here: this host has no Android SDK (no /opt/android-sdk)
+            and only JDK 21, which AGP's JdkImageTransform rejects — the whole app
+            side is hand-reviewed against the file's existing idioms. The compile
+            happens on the push: `Release APK` runs
+            `./gradlew :app:testDebugUnitTest` (which builds the sources and the
+            JVM tests) and then `scripts/release.sh`, so a mistake in this wiring
+            fails the release rather than the phone.
 [COMPLETED] An answer the engine wrote after it answered must stay on screen
             (operator: "ทำให้เรียบร้อย", after the engine's "D1 ทำหลังจากกระบวนการทุกอย่าง
             ไว้เป็น backup ไม่ต้องรอ D1 เขียนเสร็จ"). A turn now closes while its rows

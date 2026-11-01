@@ -113,6 +113,17 @@
     <string name="push_now_body">Signals the daemon to end this session: it backs up and starts the next one. Confirm?</string>
     <string name="push_now_requested">Push now requested</string>
     <string name="push_now_failed">Push now failed</string>
+
+    <!-- Backup: the engine's own tree, onto a Hugging Face bucket. The phone
+         only asks for it; the token it stores never comes back whole. -->
+    <string name="backup_now">Back up now</string>
+    <string name="restore_backup">Restore backup</string>
+    <string name="restore_title">Restore this backup?</string>
+    <string name="restore_reading">Reading the engine\'s backup state…</string>
+    <string name="restore_busy">A %1$s is already running — wait for it to finish</string>
+    <string name="restore_not_configured">The engine cannot back itself up yet — still needs: %1$s. Set them under Settings › Backup.</string>
+    <string name="restore_none_in_bucket">The bucket holds no backup to restore — run "Back up now" first.</string>
+    <string name="restore_body">Newest backup: %1$s — %2$d files, %3$s.\n\nRestoring overwrites files under %4$s on the engine with what that backup holds. Files the backup does not name are left where they are. This cannot be undone.</string>
     <string name="model_label">Model</string>
     <string name="provider_label">Provider</string>
     <string name="model_count">Model (%1$d)</string>
