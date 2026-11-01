@@ -383,8 +383,23 @@ private fun ProgressBlock(s: BackupStatus, now: Long) {
     // The engine stamps when a run began on its own clock; only an elapsed time
     // can be wrong from phone drift, and never a total the engine itself gave.
     val elapsed = if (s.startedAt <= 0L) 0L else (now / 1000L - s.startedAt).coerceAtLeast(0L)
+    // What is left comes from the rate so far, the only number this side of the
+    // request has. It is a guess, not a deadline: an upload that speeds up once
+    // the bucket warms, or a tree whose files arrive in uneven sizes, moves it,
+    // so it waits until enough has gone by to have a rate worth dividing by.
+    val left = if (measured && fraction >= 0.05f && elapsed > 20L) {
+        (elapsed * (1f - fraction) / fraction).toLong()
+    } else {
+        0L
+    }
     Text(
-        "running for ${humanDuration(elapsed)} · started ${atUtc(s.startedAt)}",
+        buildString {
+            append("running for ").append(humanDuration(elapsed))
+            if (left > 0L) {
+                append(" · roughly ").append(humanDuration(left)).append(" left at the rate so far")
+            }
+            append(" · started ").append(atUtc(s.startedAt))
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
