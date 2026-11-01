@@ -408,23 +408,6 @@ class ChatRepository(
     suspend fun objectives(sid: String): com.tulipskun.aixodia.data.remote.ObjectivesPage? =
         runCatchingCancellable { history.objectives(sid) }.getOrNull()
 
-    /** What the daemon is configured to back up and what it is doing about it. */
-    suspend fun backupStatus(): com.tulipskun.aixodia.data.remote.BackupStatus? =
-        runCatchingCancellable { history.backupStatus() }.getOrNull()
-
-    /** The backups the bucket holds, newest first. */
-    suspend fun backups(): List<com.tulipskun.aixodia.data.remote.BackupRow> =
-        runCatchingCancellable { history.backups() }.getOrDefault(emptyList())
-
-    /** Asks the daemon to back itself up now; returns what it answered. */
-    suspend fun backupStart(): String = history.backupStart()
-
-    /**
-     * Asks the daemon to rebuild its tree from one backup. The reader confirmed
-     * it here, so the request carries the engine's own `confirm` flag.
-     */
-    suspend fun backupRestore(name: String): String = history.backupRestore(name)
-
     /**
      * Pins provider and model for one chat. The daemon validates the pair and
      * stores it on the session, so the choice survives a restart and is shared

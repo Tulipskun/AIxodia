@@ -72,15 +72,12 @@ import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.ui.display.TokenField
 import com.tulipskun.aixodia.data.model.AgentRoute
-import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.model.AgentSettings
 import com.tulipskun.aixodia.data.model.GenerationSettings
 import com.tulipskun.aixodia.data.model.ModelView
 import com.tulipskun.aixodia.data.model.SettingsView
 import com.tulipskun.aixodia.data.model.ProviderStatus
 import com.tulipskun.aixodia.data.model.ProviderView
-import com.tulipskun.aixodia.data.remote.BackupRow
-import com.tulipskun.aixodia.data.remote.BackupStatus
 import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
@@ -93,7 +90,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /** The Settings screen is split: the main page, and a page only for providers and keys. */
-private enum class SettingsPage { Main, Connection, Agent, Backup, About }
+private enum class SettingsPage { Main, Connection, Agent, About }
 
 /**
  * Connection settings: the Cloudflare API token the app uses to read
@@ -109,6 +106,7 @@ fun SettingsScreen(
     socket: ChatTransport,
     sessionId: String,
     onBack: () -> Unit,
+    onOpenBackup: () -> Unit,
     discovery: DaemonDiscovery? = null,
 ) {
     val scope = rememberCoroutineScope()
@@ -201,7 +199,6 @@ fun SettingsScreen(
                             SettingsPage.Main -> "Settings"
                             SettingsPage.Connection -> "Connection"
                             SettingsPage.Agent -> "Agent defaults"
-                            SettingsPage.Backup -> "Backup"
                             SettingsPage.About -> "About"
                         },
                     )
@@ -234,7 +231,10 @@ fun SettingsScreen(
             if (page == SettingsPage.Main) {
                 SettingsNavRow("Connection", "") { page = SettingsPage.Connection }
                 SettingsNavRow("Agent defaults", "") { page = SettingsPage.Agent }
-                SettingsNavRow("Backup", "") { page = SettingsPage.Backup }
+                // The backup page is its own screen rather than a page in here:
+                // a run is followed there while it is happening, and this row is
+                // only the way to get to it.
+                SettingsNavRow("Backup", "") { onOpenBackup() }
                 SettingsNavRow("About", "") { page = SettingsPage.About }
             }
 
@@ -455,10 +455,6 @@ fun SettingsScreen(
                 }
             }
 
-            }
-
-            if (page == SettingsPage.Backup) {
-                BackupCard(history = history)
             }
 
             if (page == SettingsPage.About) {
@@ -778,195 +774,6 @@ private fun NodeCard(
     }
 }
 
-
-/**
- * The engine's own backup, configured from here. Every action is a request to
- * the daemon: it holds the hub token in D1, it walks the tree and it is the only
- * thing that talks to the bucket. What comes back is at most the token's last
- * four characters, so this screen can tell the reader which key is stored
- * without ever showing it.
- */
-@Composable
-private fun BackupCard(history: HistoryApi) {
-    val scope = rememberCoroutineScope()
-    var status by remember { mutableStateOf<BackupStatus?>(null) }
-    var rows by remember { mutableStateOf<List<BackupRow>>(emptyList()) }
-    var token by rememberSaveable { mutableStateOf("") }
-    var bucket by rememberSaveable { mutableStateOf("") }
-    var prefix by rememberSaveable { mutableStateOf("") }
-    var retention by rememberSaveable { mutableStateOf("") }
-    var gc by remember { mutableStateOf(false) }
-    var showToken by remember { mutableStateOf(false) }
-    // Filled from the engine once per visit: re-reading it on every refresh
-    // would overwrite whatever the reader is halfway through typing.
-    var filled by remember { mutableStateOf(false) }
-    var msg by remember { mutableStateOf("") }
-    var msgIsError by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
-
-    val load: suspend () -> Unit = {
-        val read = runCatching { history.backupStatus() }
-        val s = read.getOrNull()
-        if (s == null) {
-            msg = "The engine did not answer: " + (read.exceptionOrNull()?.message ?: "no reply")
-            msgIsError = true
-        } else {
-            status = s
-            if (!filled) {
-                filled = true
-                bucket = s.bucket
-                prefix = s.prefix
-                retention = s.retention.toString()
-                gc = s.gc
-            }
-        }
-    }
-    LaunchedEffect(Unit) {
-        load()
-        rows = runCatching { history.backups() }.getOrDefault(emptyList())
-    }
-
-    SectionCard("Backup", "The engine keeps its own tree on a Hugging Face bucket.") {
-        if (msg.isNotBlank()) StatusBanner(msg, msgIsError)
-        val s = status
-        if (s != null) {
-            StatusBanner(
-                when {
-                    s.configured -> "Ready — ${s.bucket} · ${s.prefix} · root ${s.root}"
-                    // The tree is not on this machine yet, which stops a backup
-                    // and is precisely what a restore is for.
-                    s.restorable -> "A restore can still run; backing up needs: " +
-                        s.needs.joinToString(", ")
-                    else -> "Not ready — still needs: " +
-                        s.needs.joinToString(", ").ifBlank { "the hub token and the bucket" }
-                },
-                error = !s.configured,
-            )
-            Text(
-                "hub token: " + if (s.tokenTail.isBlank()) "not stored" else "stored (ends …${s.tokenTail})",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // A run started from the chat's "/" menu keeps going on the engine
-            // whatever this screen does; this is what it says about it now.
-            if (s.running) {
-                Text("${s.operation}: ${s.progressLine()}", style = MaterialTheme.typography.bodyMedium)
-            }
-            if (s.lastRun.isNotBlank()) {
-                Text(
-                    "last run: ${s.lastRun}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(
-                    onClick = {
-                        busy = true; msg = ""
-                        scope.launch {
-                            val out = history.backupStart()
-                            msg = out
-                            msgIsError = out.startsWith("Backup failed") || out.startsWith("Daemon")
-                            load()
-                            busy = false
-                        }
-                    },
-                    enabled = !busy && !s.running,
-                ) { Text("Back up now") }
-                OutlinedButton(
-                    onClick = {
-                        busy = true
-                        scope.launch {
-                            load()
-                            rows = runCatching { history.backups() }.getOrDefault(rows)
-                            busy = false
-                        }
-                    },
-                    enabled = !busy,
-                ) { Text("Refresh") }
-            }
-        }
-        HorizontalDivider()
-        LabelledField(
-            value = token,
-            onValueChange = { token = it },
-            label = "HF hub token",
-            hint = if (s?.tokenTail.isNullOrBlank()) {
-                "Not stored yet — paste a write token from huggingface.co/settings/tokens"
-            } else {
-                "Stored (ends …${s?.tokenTail}); leave blank to keep it"
-            },
-            visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
-            trailing = {
-                IconButton(onClick = { showToken = !showToken }) {
-                    Icon(
-                        if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = if (showToken) "Hide token" else "Show token",
-                    )
-                }
-            },
-        )
-        LabelledField(
-            value = bucket,
-            onValueChange = { bucket = it },
-            label = "Bucket",
-            placeholder = "namespace/name",
-            hint = "The Hugging Face storage bucket, as its API spells it",
-        )
-        LabelledField(
-            value = prefix,
-            onValueChange = { prefix = it },
-            label = "Key prefix",
-            hint = "The part of the bucket this backup owns; nothing outside it is touched",
-        )
-        LabelledField(
-            value = retention,
-            onValueChange = { retention = it },
-            label = "Manifests kept",
-            hint = "Runs older than this are pruned; each one is a tree you can restore",
-        )
-        FilterChip(
-            selected = gc,
-            onClick = { gc = !gc },
-            label = { Text("Delete objects no kept manifest needs") },
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = {
-                    val keep = retention.trim().toIntOrNull()
-                    if (keep == null || keep < 1) {
-                        msg = "Retention must be a whole number of manifests, at least 1"
-                        msgIsError = true
-                        return@Button
-                    }
-                    busy = true; msg = ""
-                    scope.launch {
-                        val out = history.saveBackupConfig(token, bucket, prefix, keep, gc)
-                        msg = out
-                        msgIsError = out.startsWith("Save failed") || out.startsWith("Daemon")
-                        // The engine is the authority on what it now stores, so
-                        // the fields are refilled from its answer.
-                        filled = false
-                        load()
-                        busy = false
-                    }
-                },
-                enabled = !busy,
-            ) { Text("Save backup settings") }
-        }
-        if (rows.isNotEmpty()) {
-            HorizontalDivider()
-            Text("In the bucket", style = MaterialTheme.typography.titleSmall)
-            rows.take(6).forEach { row ->
-                Text(
-                    "${row.name} · ${row.files} files · ${AttachmentRef.humanSize(row.bytes)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun UpdateRow(settings: SettingsStore) {

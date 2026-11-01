@@ -229,6 +229,48 @@ data class BackupRow(
 )
 
 /**
+ * How the last run to finish ended, read out of the engine's `finished` slot.
+ *
+ * The engine keeps exactly one such answer and forgets it when it restarts, so
+ * this is shown as soon as it is read and never assumed to still be there later.
+ */
+data class BackupRun(
+    val operation: String = "",
+    val ok: Boolean = false,
+    val startedAt: Long = 0,
+    val finishedAt: Long = 0,
+    /** What the engine said when [ok] is false; blank on a run that worked. */
+    val error: String = "",
+    val report: BackupRunReport? = null,
+)
+
+/**
+ * The counts one completed run reported. Every field is read if present and
+ * left at zero if not, so a phone newer than its engine still shows what the
+ * engine did say rather than nothing at all.
+ */
+data class BackupRunReport(
+    val name: String = "",
+    val root: String = "",
+    val bucket: String = "",
+    val files: Int = 0,
+    val dirs: Int = 0,
+    val symlinks: Int = 0,
+    val bytes: Long = 0,
+    /** Bytes this run actually put on the wire; the rest were already there. */
+    val uploadedBytes: Long = 0,
+    val filesReused: Int = 0,
+    val objectsReused: Int = 0,
+    /** Restore only: files already on disk with the right contents. */
+    val unchanged: Int = 0,
+    val deletedManifests: Int = 0,
+    val deletedObjects: Int = 0,
+    /** Paths the run could not read, named so a silent omission stays visible. */
+    val skipped: List<String> = emptyList(),
+    val durationMs: Long = 0,
+)
+
+/**
  * One read of `/api/backup`: what the engine is configured to back up, what it
  * is doing right now, and how the last run ended.
  *
@@ -255,6 +297,8 @@ data class BackupStatus(
     val tokenTail: String = "",
     /** "backup" or "restore" while a job runs, "" when the engine is idle. */
     val operation: String = "",
+    /** When the run in flight began, in engine unix seconds. 0 when idle. */
+    val startedAt: Long = 0,
     val phase: String = "",
     val message: String = "",
     val done: Int = 0,
@@ -263,23 +307,24 @@ data class BackupStatus(
     val bytesTotal: Long = 0,
     /** One line on the last run to finish, "" until this engine has done one. */
     val lastRun: String = "",
+    /** The same answer as [lastRun], with every count the engine reported. */
+    val run: BackupRun? = null,
+    /**
+     * The glob patterns this engine leaves out of a backup, or null when it does
+     * not say. A backup scope is not something to guess at: an engine older than
+     * the field is reported as unknown rather than as an empty list, which would
+     * read as "nothing is excluded" on a machine that excludes a dozen things.
+     */
+    val excludes: List<String>? = null,
 ) {
     val running: Boolean get() = operation.isNotBlank()
 
-    /** "uploading · 12/340 files · 4.1 MB of 38.0 MB" for the status line. */
-    fun progressLine(): String = buildString {
-        append(phase.ifBlank { operation.ifBlank { "idle" } })
-        if (total > 0) append(" · ").append(done).append('/').append(total)
-        if (bytesTotal > 0) append(" · ")
-            .append(com.tulipskun.aixodia.data.model.AttachmentRef.humanSize(bytesDone))
-            .append(" of ")
-            .append(com.tulipskun.aixodia.data.model.AttachmentRef.humanSize(bytesTotal))
-        if (message.isNotBlank()) append(" — ").append(message)
-    }
+    /** Whether this engine will answer what it excludes. */
+    val reportsExcludes: Boolean get() = excludes != null
 }
 
 /** Reads one `/api/backup` answer. Only the fields that are there are read. */
-private fun parseBackupStatus(o: JSONObject): BackupStatus {
+internal fun parseBackupStatus(o: JSONObject): BackupStatus {
     val active = o.optJSONObject("active")
     val progress = active?.optJSONObject("progress")
     // An engine older than the split answers only "configured", and on those
@@ -298,6 +343,7 @@ private fun parseBackupStatus(o: JSONObject): BackupStatus {
         gc = o.optBoolean("gc"),
         tokenTail = o.optJSONObject("token")?.optString("tail").orEmpty(),
         operation = active?.optString("operation").orEmpty(),
+        startedAt = active?.optLong("started_at") ?: 0,
         phase = progress?.optString("phase").orEmpty(),
         message = progress?.optString("message").orEmpty(),
         done = progress?.optInt("done") ?: 0,
@@ -305,6 +351,8 @@ private fun parseBackupStatus(o: JSONObject): BackupStatus {
         bytesDone = progress?.optLong("bytes_done") ?: 0L,
         bytesTotal = progress?.optLong("bytes_total") ?: 0L,
         lastRun = backupLastRun(o.optJSONObject("finished")),
+        run = parseBackupRun(o.optJSONObject("finished")),
+        excludes = if (o.has("excludes")) stringList(o.optJSONArray("excludes")) else null,
     )
 }
 
@@ -329,6 +377,43 @@ private fun backupLastRun(finished: JSONObject?): String {
             "${com.tulipskun.aixodia.data.model.AttachmentRef.humanSize(report.optLong("uploaded_bytes"))}" +
             " uploaded, ${report.optInt("files_reused")} files reused, %.1fs".format(seconds)
     }
+}
+
+/**
+ * Reads the engine's `finished` slot into the counts a screen can lay out.
+ * A slot holding nothing is no run yet; a slot holding an answer with no report
+ * is a run that failed, and the reason is all there is.
+ */
+internal fun parseBackupRun(finished: JSONObject?): BackupRun? {
+    if (finished == null) return null
+    val summary = finished.optJSONObject("summary")
+    val report = summary?.optJSONObject("report")
+    return BackupRun(
+        operation = finished.optString("operation"),
+        ok = summary?.optBoolean("ok") ?: false,
+        startedAt = finished.optLong("started_at"),
+        finishedAt = finished.optLong("finished_at"),
+        error = summary?.optString("error").orEmpty(),
+        report = report?.let {
+            BackupRunReport(
+                name = it.optString("name"),
+                root = it.optString("root"),
+                bucket = it.optString("bucket"),
+                files = it.optInt("files"),
+                dirs = it.optInt("dirs"),
+                symlinks = it.optInt("symlinks"),
+                bytes = it.optLong("bytes"),
+                uploadedBytes = it.optLong("uploaded_bytes"),
+                filesReused = it.optInt("files_reused"),
+                objectsReused = it.optInt("objects_reused"),
+                unchanged = it.optInt("unchanged"),
+                deletedManifests = it.optInt("deleted_manifests"),
+                deletedObjects = it.optInt("deleted_objects"),
+                skipped = stringList(it.optJSONArray("skipped")),
+                durationMs = it.optLong("duration_ms"),
+            )
+        },
+    )
 }
 
 private fun stringList(arr: JSONArray?): List<String> {
@@ -1121,17 +1206,23 @@ class HistoryApi(
         }.getOrNull()
     }
 
-    /** The backups the bucket holds, newest first. Empty when none or unreadable. */
-    suspend fun backups(): List<BackupRow> = withContext(Dispatchers.IO) {
+    /**
+     * The backups the bucket holds, newest first. Null when the engine did not
+     * answer: a bucket with nothing in it and a daemon that is not there are two
+     * different facts, and the page that shows a restore list has to tell them
+     * apart — an empty list read as "nothing to restore" is how a machine with
+     * fourteen good manifests in it gets re-imaged from an outage.
+     */
+    suspend fun backups(): List<BackupRow>? = withContext(Dispatchers.IO) {
         val c = settings.current()
-        val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
+        val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup/list")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return@use emptyList()
+                if (!r.isSuccessful) return@use null
                 val arr = JSONObject(r.body!!.string()).optJSONArray("backups") ?: return@use emptyList()
                 val out = ArrayList<BackupRow>(arr.length())
                 for (i in 0 until arr.length()) {
@@ -1148,7 +1239,7 @@ class HistoryApi(
                 }
                 out
             }
-        }.getOrDefault(emptyList())
+        }.getOrNull()
     }
 
     /**
@@ -1159,7 +1250,7 @@ class HistoryApi(
     suspend fun backupStart(): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
-        runCatching {
+        runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
@@ -1183,7 +1274,7 @@ class HistoryApi(
         val body = JSONObject().put("confirm", true)
             .apply { if (name.isNotBlank()) put("name", name) }
             .toString()
-        runCatching {
+        runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup/restore")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")
@@ -1199,7 +1290,8 @@ class HistoryApi(
      * Saves the backup configuration on the engine, which keeps it in D1.
      * A blank [token] is not sent at all: the stored one stays, so changing the
      * bucket never means retyping the key, and a key the phone no longer shows
-     * cannot be wiped by accident.
+     * cannot be wiped by accident. A null [excludes] is likewise not sent, and
+     * an empty list is — the two mean "leave it alone" and "exclude nothing".
      */
     suspend fun saveBackupConfig(
         token: String,
@@ -1207,6 +1299,7 @@ class HistoryApi(
         prefix: String,
         retention: Int,
         gc: Boolean,
+        excludes: List<String>? = null,
     ): String = withContext(Dispatchers.IO) {
         val c = settings.current()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
@@ -1216,8 +1309,9 @@ class HistoryApi(
             if (prefix.isNotBlank()) put("prefix", prefix.trim())
             put("retention", retention)
             put("gc", gc)
+            excludes?.let { put("excludes", JSONArray(it)) }
         }.toString()
-        runCatching {
+        runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup/config")
                 .header("Authorization", "Bearer ${c.token}")
                 .header("Content-Type", "application/json")

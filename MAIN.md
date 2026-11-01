@@ -1,4 +1,51 @@
 GOAL:
+[IN_PROCESS] The backup run gets its own screen (operator: "ปรับหน้าจอตอน process
+            ให้แยกออกมา … backup สำเร็จหรือไม่สำเร็จก็ไม่รู้ คืบหน้าถึงไหนก็ไม่รู้
+            … ดูรายละเอียดได้อย่างไร … ถ้าแอพกลับมาเชื่อมต่อได้จะสามารถดูการทำงาน
+            ต่อจากเดิมได้หรือไม่ … การ backup ควรเลือกได้ว่าจะ backup อะไร restore
+            ก็เช่นกัน"). The old wiring showed a run as one line of `notice` text
+            on the chat composer, shared with unrelated chat events and rewritten
+            only while the chat that started the job was still the one being
+            watched — so the outcome of a completed run was routinely never seen.
+            The engine already answers everything needed (elapsed, phase, counts,
+            per-run report with reused/skipped/pruned detail, and any named
+            manifest for a restore); what was missing was all on the phone.
+            `ui/settings/BackupScreen.kt` is now a screen branch of the chat the
+            way Providers and the terminal are — its own Scaffold, its own
+            BackHandler, opened from the "/" menu and from Settings › Backup — so
+            leaving it never leaves the reader without an answer. It polls on two
+            speeds (2s while the engine reports a run, 15s idle), which is what
+            lets a job started from another device, or before the app was closed,
+            show up on opening the page: `GET /api/backup` is not per-client and
+            the job is the engine's own thread, so the phone only ever re-attaches
+            a read, never resumes work. A bar is drawn from bytes when the engine
+            has totals and from file counts otherwise; during `scanning` it is
+            indeterminate and says so, because a scan reports no counts at all
+            until it ends. The finished slot is laid out as the report it is —
+            files, dirs, symlinks, tree size, uploaded, already-current, reused
+            objects, what was pruned, how long it took, and the paths that could
+            not be read, named rather than counted, since an unreadable file is
+            simply missing from the backup. Restore is now asked for by name from
+            the bucket list: the engine has taken `name` all along and the phone
+            hardcoded `firstOrNull()`.
+            Two things the phone cannot do and no screen changes that: a started
+            run cannot be cancelled (the engine has one job slot with `claim()`
+            and no `release()`), and an engine restart kills the run mid-flight
+            with no resume and no marker that it was interrupted — which is why
+            the page says plainly that leaving the app is safe while making no
+            promise about the machine behind it.
+            `HistoryApi.backups()` answers null instead of an empty list when the
+            engine did not reply: a daemon that is down and a bucket with nothing
+            in it are different facts, and conflating them is how fourteen good
+            manifests get treated as none. `BackupStatus` gained `startedAt`, the
+            structured `run`, and `excludes` (null = this engine does not say),
+            and `BackupStatusParseTest` pins the parser because this host still
+            has no Android SDK to compile against.
+            Chat-side removal: `ChatViewModel`'s `backup`/`backups`/`backupNow`/
+            `restoreBackup`/`watchBackup`, the restore dialog and the repository's
+            passthrough of the same are gone — the screen reaches `HistoryApi` as
+            the old Settings card did, and a second poller watching the same job
+            to write one shared line is what produced the original complaint.
 [COMPLETED] The phone drives the engine's own backup (operator: "สร้างฟังชั่น
             backup ข้อมูลโดยเก็บไว้ใน HF … และหาวิธีที่เร็วที่สุด ทั้งการ backup
             และ restore", trigger "ผ่านเมนูในปุ่ม /", "restore ต้องมี explicit

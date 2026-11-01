@@ -150,6 +150,7 @@ import com.tulipskun.aixodia.ui.sessions.RenameChatDialog
 import com.tulipskun.aixodia.ui.sessions.SessionDrawerContent
 import com.tulipskun.aixodia.ui.sessions.sessionTitle
 import com.tulipskun.aixodia.ui.providers.ProvidersScreen
+import com.tulipskun.aixodia.ui.settings.BackupScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
 import com.tulipskun.aixodia.ui.terminal.TerminalUiState
 import com.tulipskun.aixodia.ui.terminal.TerminalWindow
@@ -203,6 +204,10 @@ fun ChatScreen(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showProviders by rememberSaveable { mutableStateOf(false) }
     var showTerminal by rememberSaveable { mutableStateOf(false) }
+    // The engine's backup is a branch of the chat like these three, because a
+    // run outlasts the window it was started from and the reader needs a place
+    // to come back to — not a line of text inside the chat it interrupts.
+    var showBackup by rememberSaveable { mutableStateOf(false) }
 
     // The terminal's sockets, tabs and grids belong to this screen, not to the
     // visible window. Back only hides the window: every WebSocket stays
@@ -240,6 +245,15 @@ fun ChatScreen(
     BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showProviders) { showProviders = false }
     BackHandler(enabled = showTerminal) { showTerminal = false }
+    BackHandler(enabled = showBackup) { showBackup = false }
+
+    // Read before the configured check: a run already going on the engine is
+    // worth looking at even from an install whose own settings are not set up,
+    // and this page only ever asks the daemon what it is doing.
+    if (showBackup) {
+        BackupScreen(history = history, onBack = { showBackup = false })
+        return
+    }
 
     // Unconfigured installs stop here — before the ViewModel exists — so a
     // first launch cannot reach the network layer and crash. The settings
@@ -250,6 +264,7 @@ fun ChatScreen(
                 settings = settings, history = history, socket = socket,
                 sessionId = sessId, onBack = { showSettings = false },
                 discovery = discovery,
+                onOpenBackup = { showSettings = false; showBackup = true },
             )
             return
         }
@@ -313,15 +328,8 @@ fun ChatScreen(
     val liveReasoning by vm.liveReasoning.collectAsStateWithLifecycle()
     val stats by vm.turnStats.collectAsStateWithLifecycle()
     val liveUsage by vm.liveUsage.collectAsStateWithLifecycle()
-    // The engine's own backup: what it is configured to store, how the run in
-    // flight is going, and what the bucket holds. Progress arrives through the
-    // notice line, which the view model rewrites every couple of seconds while
-    // a job runs — the engine never streams it.
-    val backup by vm.backup.collectAsStateWithLifecycle()
-    val storedBackups by vm.backups.collectAsStateWithLifecycle()
-    val backupBusy = backup?.running == true
-    // The footer format follows the provider, because what is worth printing
-    // differs: Anthropic has no reasoning count to show.
+    // The token field format follows the provider, because what is worth
+    // printing differs: Anthropic has no reasoning count to show.
     val tokenFields by vm.tokenFields.collectAsStateWithLifecycle(initialValue = TokenField.DEFAULT)
     val footerIds = remember(messages) { turnFooterIds(messages) }
     // One key per live item, handed out so no two of them can ever collide: a
@@ -362,13 +370,13 @@ fun ChatScreen(
     val snackbar = remember { SnackbarHostState() }
     var showPushNowDialog by remember { mutableStateOf(false) }
     var pushNowBusy by remember { mutableStateOf(false) }
-    var showRestoreDialog by remember { mutableStateOf(false) }
 
     if (showSettings) {
         SettingsScreen(
             settings = settings, history = history, socket = socket,
             sessionId = vm.sessionId, onBack = { showSettings = false },
             discovery = discovery,
+            onOpenBackup = { showSettings = false; showBackup = true },
         )
         return
     }
@@ -441,14 +449,11 @@ fun ChatScreen(
         ComposerCommand(stringResource(R.string.stop), enabled = busy) { vm.stop() },
         ComposerCommand(stringResource(R.string.clear_draft), enabled = draft.isNotBlank()) { vm.changeDraft("") },
         ComposerCommand(stringResource(R.string.refresh)) { vm.refresh() },
-        // The engine's own backup. Both are greyed while a run is in flight
-        // rather than removed, so the menu keeps its shape between openings and
-        // one cannot start a restore over a backup that is still writing.
-        ComposerCommand(stringResource(R.string.backup_now), enabled = !backupBusy) { vm.backupNow() },
-        ComposerCommand(stringResource(R.string.restore_backup), enabled = !backupBusy) {
-            vm.inspectBackup()
-            showRestoreDialog = true
-        },
+        // The engine's own backup, on a page of its own. The run belongs to the
+        // engine and outlives this screen, so the menu's job is to put the reader
+        // where it says how far it got and how it ended, not to fire a job off
+        // blind from a dropdown and leave the answer on a line of chat text.
+        ComposerCommand(stringResource(R.string.backup_and_restore)) { showBackup = true },
         ComposerCommand(stringResource(R.string.settings)) { showSettings = true },
     )
     // Uptime is counted on the phone from the daemon's start time, so it has to
@@ -625,51 +630,6 @@ fun ChatScreen(
             },
             dismissButton = {
                 TextButton(enabled = !pushNowBusy, onClick = { showPushNowDialog = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        )
-    }
-    if (showRestoreDialog) {
-        // The newest backup is named inside the question, because what the
-        // confirm button answers is "overwrite the machine with this one". The
-        // engine asks for the same word in the body it receives.
-        val newest = storedBackups.firstOrNull()
-        val state = backup
-        AlertDialog(
-            onDismissRequest = { showRestoreDialog = false },
-            title = { Text(stringResource(R.string.restore_title)) },
-            text = {
-                Text(
-                    when {
-                        state == null -> stringResource(R.string.restore_reading)
-                        backupBusy -> stringResource(R.string.restore_busy, state.operation)
-                        state.restorable.not() -> stringResource(
-                            R.string.restore_not_configured,
-                            state.needsRestore.joinToString(", ").ifBlank { "token and bucket" },
-                        )
-                        newest == null -> stringResource(R.string.restore_none_in_bucket)
-                        else -> stringResource(
-                            R.string.restore_body,
-                            newest!!.name,
-                            newest!!.files,
-                            AttachmentRef.humanSize(newest!!.bytes),
-                            state!!.root,
-                        )
-                    }
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = state != null && state.restorable && newest != null && !backupBusy,
-                    onClick = {
-                        showRestoreDialog = false
-                        vm.restoreBackup(newest?.name.orEmpty())
-                    },
-                ) { Text(stringResource(R.string.confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRestoreDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
             },
         )
     }
