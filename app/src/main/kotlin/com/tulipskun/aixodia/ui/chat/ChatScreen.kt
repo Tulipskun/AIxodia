@@ -642,9 +642,9 @@ fun ChatScreen(
                     when {
                         state == null -> stringResource(R.string.restore_reading)
                         backupBusy -> stringResource(R.string.restore_busy, state.operation)
-                        !state.configured -> stringResource(
+                        state.restorable.not() -> stringResource(
                             R.string.restore_not_configured,
-                            state.needs.joinToString(", ").ifBlank { "bucket and token" },
+                            state.needsRestore.joinToString(", ").ifBlank { "token and bucket" },
                         )
                         newest == null -> stringResource(R.string.restore_none_in_bucket)
                         else -> stringResource(
@@ -659,7 +659,7 @@ fun ChatScreen(
             },
             confirmButton = {
                 TextButton(
-                    enabled = state != null && state.configured && newest != null && !backupBusy,
+                    enabled = state != null && state.restorable && newest != null && !backupBusy,
                     onClick = {
                         showRestoreDialog = false
                         vm.restoreBackup(newest?.name.orEmpty())

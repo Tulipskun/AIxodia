@@ -1,5 +1,5 @@
 GOAL:
-[IN_PROCESS] The phone drives the engine's own backup (operator: "สร้างฟังชั่น
+[COMPLETED] The phone drives the engine's own backup (operator: "สร้างฟังชั่น
             backup ข้อมูลโดยเก็บไว้ใน HF … และหาวิธีที่เร็วที่สุด ทั้งการ backup
             และ restore", trigger "ผ่านเมนูในปุ่ม /", "restore ต้องมี explicit
             confirm", "HF TOKEN เก็บไว้ที่ D1 (KV)"). The engine side is shipped
@@ -28,13 +28,22 @@ GOAL:
             overwrites a machine. Settings gained a Backup page: hub token,
             bucket, prefix, retention, a garbage-collection chip, the state the
             engine reports, and what the bucket holds.
+            The restore question reads `restorable`, not `configured`: an engine
+            asked to rebuild a tree answers that a backup cannot start (there is
+            nothing to read) while the restore can, and the phone had greyed its
+            own confirm button in exactly that case. The parser falls back to
+            `configured` on an engine old enough not to answer the second
+            question, so an updated phone on an old daemon behaves as that daemon
+            actually does; Settings says "a restore can still run; backing up
+            needs: root".
             Not compiled here: this host has no Android SDK (no /opt/android-sdk)
             and only JDK 21, which AGP's JdkImageTransform rejects — the whole app
             side is hand-reviewed against the file's existing idioms. The compile
-            happens on the push: `Release APK` runs
-            `./gradlew :app:testDebugUnitTest` (which builds the sources and the
-            JVM tests) and then `scripts/release.sh`, so a mistake in this wiring
-            fails the release rather than the phone.
+            happened on the push, as planned: `Release APK` run 41288685318 is
+            green (2m31s), which means `./gradlew :app:testDebugUnitTest` built
+            these sources and passed the JVM tests, and `AIxodia.apk` (20,943,274
+            bytes) is published on the rolling `latest` release for the phone to
+            pick up.
 [COMPLETED] An answer the engine wrote after it answered must stay on screen
             (operator: "ทำให้เรียบร้อย", after the engine's "D1 ทำหลังจากกระบวนการทุกอย่าง
             ไว้เป็น backup ไม่ต้องรอ D1 เขียนเสร็จ"). A turn now closes while its rows

@@ -831,9 +831,15 @@ private fun BackupCard(history: HistoryApi) {
         val s = status
         if (s != null) {
             StatusBanner(
-                if (s.configured) "Ready — ${s.bucket} · ${s.prefix} · root ${s.root}"
-                else "Not ready — still needs: " +
-                    s.needs.joinToString(", ").ifBlank { "the hub token and the bucket" },
+                when {
+                    s.configured -> "Ready — ${s.bucket} · ${s.prefix} · root ${s.root}"
+                    // The tree is not on this machine yet, which stops a backup
+                    // and is precisely what a restore is for.
+                    s.restorable -> "A restore can still run; backing up needs: " +
+                        s.needs.joinToString(", ")
+                    else -> "Not ready — still needs: " +
+                        s.needs.joinToString(", ").ifBlank { "the hub token and the bucket" }
+                },
                 error = !s.configured,
             )
             Text(

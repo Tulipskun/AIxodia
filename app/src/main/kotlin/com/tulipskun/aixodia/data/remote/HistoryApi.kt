@@ -239,6 +239,14 @@ data class BackupStatus(
     val configured: Boolean = false,
     /** Field names the engine still needs before a run can start. */
     val needs: List<String> = emptyList(),
+    /**
+     * Whether a restore could start. It differs from [configured] on a machine
+     * whose tree is gone: a backup has to read the root, a restore is the answer
+     * to the root not being there, so it creates it.
+     */
+    val restorable: Boolean = false,
+    /** Field names a restore still needs — usually token and bucket only. */
+    val needsRestore: List<String> = emptyList(),
     val bucket: String = "",
     val prefix: String = "",
     val root: String = "",
@@ -274,9 +282,15 @@ data class BackupStatus(
 private fun parseBackupStatus(o: JSONObject): BackupStatus {
     val active = o.optJSONObject("active")
     val progress = active?.optJSONObject("progress")
+    // An engine older than the split answers only "configured", and on those
+    // builds a restore really did require the root to exist.
+    val restorable =
+        if (o.has("restorable")) o.optBoolean("restorable") else o.optBoolean("configured")
     return BackupStatus(
         configured = o.optBoolean("configured"),
         needs = stringList(o.optJSONArray("needs")),
+        restorable = restorable,
+        needsRestore = stringList(o.optJSONArray("needs_restore")),
         bucket = o.optString("bucket"),
         prefix = o.optString("prefix"),
         root = o.optString("root"),
