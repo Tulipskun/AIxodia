@@ -44,6 +44,10 @@ class SettingsStore(private val ctx: Context) {
     // The daemon's start time, kept so the header's uptime counter has a number
     // the moment the app opens — the D1 query that confirms it has not landed yet.
     private val daemonStartedAt = stringPreferencesKey("daemon_started_at")
+    // When the machine the daemon runs on booted. The counter shows this rather
+    // than the process start, because an engine update restarts the process and
+    // the box has stayed up through it.
+    private val daemonBootAt = stringPreferencesKey("daemon_boot_at")
     // Which counts the footer shows, in order. A stored comma-separated list of
     // TokenField names, because providers differ: Anthropic reports no
     // reasoning count, so a reasoning field there would print a zero that means
@@ -102,6 +106,8 @@ class SettingsStore(private val ctx: Context) {
     }
     val daemonStartedAtFlow: Flow<Long> =
         ctx.ds.data.map { it[daemonStartedAt]?.toLongOrNull() ?: 0L }
+    val daemonBootAtFlow: Flow<Long> =
+        ctx.ds.data.map { it[daemonBootAt]?.toLongOrNull() ?: 0L }
 
     suspend fun current(): ConnConfig {
         // One snapshot, not seven independent first() reads: saveDaemon() writes
@@ -257,12 +263,16 @@ class SettingsStore(private val ctx: Context) {
     }
 
     /**
-     * Remembers when the daemon started, for the next open to count from. A
-     * non-positive time is the daemon not saying, and is not worth a write.
+     * Remembers the two clocks the header can count from, for the next open to
+     * have a number before the D1 query lands. A non-positive time is the daemon
+     * not saying, and is not worth a write.
      */
-    suspend fun saveDaemonStartedAt(startedAt: Long) {
-        if (startedAt <= 0L) return
-        ctx.ds.edit { it[daemonStartedAt] = startedAt.toString() }
+    suspend fun saveDaemonClocks(startedAt: Long, bootAt: Long) {
+        if (startedAt <= 0L && bootAt <= 0L) return
+        ctx.ds.edit {
+            if (startedAt > 0L) it[daemonStartedAt] = startedAt.toString()
+            if (bootAt > 0L) it[daemonBootAt] = bootAt.toString()
+        }
     }
 
     /**

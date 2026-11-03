@@ -97,6 +97,7 @@ class ChatViewModelStateTest {
         whenever(repo.retryTurn(any())).thenReturn(true)
         whenever(repo.createDraftSession(any())).thenReturn("draft")
         whenever(settings.daemonStartedAtFlow).thenReturn(flowOf(0L))
+        whenever(settings.daemonBootAtFlow).thenReturn(flowOf(0L))
         whenever(settings.endpointFlow).thenReturn(flowOf(""))
         beforeStart()
         val vm = ChatViewModel(repo, settings, "A")

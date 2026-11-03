@@ -78,6 +78,12 @@ data class NodeInfo(
     @Json(name = "heartbeat_age_s") val ageS: Long = -1,
     /** Unix second the daemon process started; 0 when unknown. */
     @Json(name = "started") val startedAt: Long = 0,
+    /**
+     * Unix second the *machine* started, which is the uptime the corner counter
+     * shows: an engine update restarts the process, and the box has been up the
+     * whole time. 0 on an engine too old to publish it.
+     */
+    @Json(name = "boot") val bootAt: Long = 0,
 )
 
 @JsonClass(generateAdapter = true)

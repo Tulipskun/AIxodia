@@ -415,6 +415,12 @@ class ChatViewModel(
     val liveUsage = MutableStateFlow<LiveUsage?>(null)
     /** Unix second the daemon process started; 0 = unknown/not polled yet. */
     val daemonStartedAt = MutableStateFlow(0L)
+    /**
+     * Unix second the machine the daemon runs on booted; 0 when the engine is too
+     * old to say. The corner counter counts this, not the process start: an update
+     * restarts the engine while the box has been up the whole time.
+     */
+    val daemonBootAt = MutableStateFlow(0L)
     /** Files picked and uploaded, waiting to go out with the next message. */
     val pendingAttachments = MutableStateFlow<List<AttachmentRef>>(emptyList())
     /** True while an upload is in flight, so the picker can be disabled. */
@@ -540,6 +546,9 @@ class ChatViewModel(
         viewModelScope.launch {
             runCatchingCancellable { settings.daemonStartedAtFlow.first() }.getOrDefault(0L).let { cached ->
                 if (cached > 0L) daemonStartedAt.value = cached
+            }
+            runCatchingCancellable { settings.daemonBootAtFlow.first() }.getOrDefault(0L).let { cached ->
+                if (cached > 0L) daemonBootAt.value = cached
             }
             refreshDaemonStart()
         }
@@ -1853,19 +1862,24 @@ class ChatViewModel(
     }
 
     /**
-     * Reads the daemon's start time from its D1 row. Called on open and when the
-     * socket comes back; the displayed uptime then advances on its own.
+     * Reads the daemon's two clocks from its D1 row: when the engine process
+     * started and, on an engine that publishes it, when the machine booted. The
+     * header counts the boot; the start is kept for the fallback and for the
+     * "replaced" check. Called on open and when the socket comes back; the
+     * displayed uptime then advances on its own.
      */
     private suspend fun refreshDaemonStart() {
         val node = runCatchingCancellable { repo.node() }.getOrNull() ?: return
         val started = node.startedAt
-        if (started <= 0L) return
+        val boot = node.bootAt
+        if (started <= 0L && boot <= 0L) return
         // Same daemon as the last answer: the number on screen is already right,
         // and rewriting it would only cost a re-render and a write to make no
         // change.
-        if (started == daemonStartedAt.value) return
+        if (started == daemonStartedAt.value && boot == daemonBootAt.value) return
         daemonStartedAt.value = started
-        runCatchingCancellable { settings.saveDaemonStartedAt(started) }
+        daemonBootAt.value = boot
+        runCatchingCancellable { settings.saveDaemonClocks(started, boot) }
     }
 
     /**

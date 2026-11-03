@@ -266,6 +266,7 @@ class D1Api(private val settings: SettingsStore) {
         val url = urlRaw.trim().trimEnd('/')
         if (url.isBlank()) return null
         val started = Regex("started=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val boot = Regex("boot=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
         val heartbeat = heartbeatStr.toLongOrNull() ?: 0L
         val ageS = if (heartbeat > 0L) nowSeconds() - heartbeat else -1L
         return NodeInfo(
@@ -277,6 +278,7 @@ class D1Api(private val settings: SettingsStore) {
             online = ageS < 90,
             ageS = ageS,
             startedAt = started,
+            bootAt = boot,
         )
     }
 

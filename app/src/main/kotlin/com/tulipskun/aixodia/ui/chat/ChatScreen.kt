@@ -322,6 +322,7 @@ fun ChatScreen(
     val busy by vm.busy.collectAsStateWithLifecycle()
     val errorCard by vm.errorCard.collectAsStateWithLifecycle()
     val daemonStartedAt by vm.daemonStartedAt.collectAsStateWithLifecycle()
+    val daemonBootAt by vm.daemonBootAt.collectAsStateWithLifecycle()
     val liveText by vm.liveText.collectAsStateWithLifecycle()
     val liveBlocks by vm.liveBlocks.collectAsStateWithLifecycle()
     val objectives by vm.objectives.collectAsStateWithLifecycle()
@@ -456,11 +457,16 @@ fun ChatScreen(
         ComposerCommand(stringResource(R.string.backup_and_restore)) { showBackup = true },
         ComposerCommand(stringResource(R.string.settings)) { showSettings = true },
     )
-    // Uptime is counted on the phone from the daemon's start time, so it has to
-    // advance on its own. A one-second tick is enough for a "2h 15m" readout.
+    // The header counts from a clock the engine set once, so the number has to
+    // advance on the phone: a one-second tick is enough for a "2h 15m" readout.
+    // What it counts is the machine's boot, not the engine's start — restarting
+    // the engine is not restarting the server. An engine too old to publish
+    // `boot=` still knows its own start, so the header falls back to that rather
+    // than going blank.
+    val uptimeSince = if (daemonBootAt > 0L) daemonBootAt else daemonStartedAt
     var uptimeNow by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(daemonStartedAt) {
-        while (daemonStartedAt > 0L) {
+    LaunchedEffect(uptimeSince) {
+        while (uptimeSince > 0L) {
             uptimeNow = System.currentTimeMillis()
             kotlinx.coroutines.delay(1000)
         }
@@ -766,12 +772,12 @@ fun ChatScreen(
                             )
                         }
                         // Status at a glance: a coloured dot and how long the
-                        // daemon has been up. No words — the colour is the state.
+                        // machine has been up. No words — the colour is the state.
                         // The counter is on screen from the first frame, at zero
                         // until a start time is known, so the header is never
                         // blank while the app waits for the daemon.
                         ConnDot(conn)
-                        val uptime = formatUptime(daemonStartedAt, uptimeNow, "HH:mm:ss")
+                        val uptime = formatUptime(uptimeSince, uptimeNow, "HH:mm:ss")
                         if (uptime.isNotBlank()) {
                             Text(
                                 uptime,

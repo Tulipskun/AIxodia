@@ -88,6 +88,7 @@ class ChatViewModelDraftTest {
         whenever(repo.setSessionModel(any(), any(), any())).thenReturn(true)
         whenever(settings.sessionFlow).thenReturn(flowOf("A"))
         whenever(settings.daemonStartedAtFlow).thenReturn(flowOf(0L))
+        whenever(settings.daemonBootAtFlow).thenReturn(flowOf(0L))
         whenever(settings.endpointFlow).thenReturn(flowOf(""))
         beforeStart()
         val vm = ChatViewModel(repo, settings, initialSession, savedStateHandle = savedState)
