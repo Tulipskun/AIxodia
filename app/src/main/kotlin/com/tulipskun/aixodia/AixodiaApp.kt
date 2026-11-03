@@ -34,8 +34,9 @@ class AppContainer(app: Application) {
     val historyApi = HistoryApi(settings)
     // No shared socket: chat is POST + SSE and the terminal is its own
     // WebSocket. Discovery only has to nudge the run stream when the engine
-    // address changes.
-    val chat: ChatTransport = RunSocket(settings, app)
+    // address changes — and the run stream reads the announced address itself
+    // when a dial fails, since the announcements travel on that dead socket.
+    val chat: ChatTransport = RunSocket(settings, historyApi, app)
     val repo = ChatRepository(db, historyApi, chat)
     val discovery = DaemonDiscovery(settings, historyApi, chat, scope)
 

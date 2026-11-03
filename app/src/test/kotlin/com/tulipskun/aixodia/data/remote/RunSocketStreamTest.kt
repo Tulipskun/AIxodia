@@ -25,7 +25,7 @@ class RunSocketStreamTest {
         val preferences: SharedPreferences = mock()
         whenever(context.applicationContext).thenReturn(context)
         whenever(context.getSharedPreferences(any<String>(), eq(Context.MODE_PRIVATE))).thenReturn(preferences)
-        return RunSocket(settings, context).let { socket ->
+        return RunSocket(settings, mock<HistoryApi>(), context).let { socket ->
             val client = RunSocket::class.java.getDeclaredField("streamHttp")
                 .apply { isAccessible = true }
                 .get(socket) as OkHttpClient

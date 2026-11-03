@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Call
@@ -46,6 +47,29 @@ internal const val POLL_HOT_MS = 60L
 internal const val POLL_IDLE_MS = 300L
 
 /**
+ * How often a failing dial may go looking for a daemon that moved. A quick
+ * tunnel's host dies with the engine that opened it, and the D1 row is the only
+ * place the new one is written, so a socket that keeps dialing the address it
+ * holds is dialing a name that no longer resolves to anything. One look per
+ * backoff step: the step caps at 15s, and a read more often would spend the
+ * phone's Cloudflare quota on a daemon that is simply down.
+ */
+private const val ADDRESS_RECHECK_MS = 15_000L
+
+/**
+ * What a failed dial makes of the address the daemon announced: either a new
+ * one to adopt, or nothing to go with. A trailing slash is not a different
+ * daemon, and a row whose heartbeat stopped is a name that no longer resolves
+ * — keeping the address in hand beats trading it for a dead one.
+ */
+internal fun pickDaemonAddress(currentUrl: String, node: NodeInfo?): String? {
+    val url = node?.tunnelUrl?.trim()?.trimEnd('/') ?: return null
+    if (url.isBlank() || node.online != true) return null
+    if (url == currentUrl.trim().trimEnd('/')) return null
+    return url
+}
+
+/**
  * Chat over POST /v1/runs + short polls of GET /v1/runs/{id}/events.
  *
  * The daemon also offers a live SSE stream, but Cloudflare Quick Tunnels
@@ -63,6 +87,7 @@ internal const val POLL_IDLE_MS = 300L
  */
 class RunSocket(
     private val settings: SettingsStore,
+    private val history: HistoryApi,
     context: Context,
 ) : ChatTransport {
     private val app = context.applicationContext
@@ -109,6 +134,10 @@ class RunSocket(
     private var streamJob: Job? = null
     private var probeJob: Job? = null
     @Volatile private var currentCall: Call? = null
+
+    // When a failing dial last went looking for a moved daemon. Not a timer: a
+    // socket that is healthy never reads the row at all.
+    @Volatile private var lastAddressCheck = 0L
 
     override fun open(sessionId: String, fromSeq: Long) {
         session = sessionId
@@ -460,7 +489,11 @@ class RunSocket(
                 delay(POLL_IDLE_MS)
             } else {
                 // A failed poll backs off like the old stream did, so a tunnel
-                // that is down is not dialled hundreds of times a minute.
+                // that is down is not dialled hundreds of times a minute. The
+                // wait is the moment to go looking for a host that moved: the
+                // next iteration reads the address again, so a fresh one is
+                // dialed instead of this dead one.
+                rediscoverIfNeeded()
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(15_000L)
             }
@@ -492,10 +525,50 @@ class RunSocket(
 
     // ---- cursor / probing ----
 
+    /**
+     * Goes looking for the daemon at another address, on a dial that just
+     * failed. The announcements that normally move the phone to a new tunnel
+     * arrive as frames on this very socket, so a run stream that cannot connect
+     * is exactly the one that will never hear them; the terminal has no such
+     * problem because it re-reads the row between its own retries.
+     */
+    private suspend fun rediscoverIfNeeded() {
+        val now = System.currentTimeMillis()
+        if (now - lastAddressCheck < ADDRESS_RECHECK_MS) return
+        lastAddressCheck = now
+        if (rediscover()) Log.i(TAG, "the daemon moved; the next dial uses its new address")
+    }
+
+    /** The daemon's announced address, adopted. False means there was nothing better to go with. */
+    private suspend fun rediscover(): Boolean {
+        val current = try {
+            settings.current()
+        } catch (t: Throwable) {
+            return false
+        }
+        // No credential, so no row to read and no daemon that could be reached.
+        if (current.token.isBlank()) return false
+        val node = try {
+            withTimeoutOrNull(5_000) { history.node() }
+        } catch (t: Throwable) {
+            Log.w(TAG, "daemon address refresh failed: ${t.message}")
+            null
+        } ?: return false
+        val url = pickDaemonAddress(current.daemonUrl, node) ?: return false
+        return try {
+            settings.saveDaemon(url)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "could not save the new daemon address: ${t.message}")
+            false
+        }
+    }
+
     private suspend fun probe(): Boolean {
         _state.value = ConnState.CONNECTING
         val cfg = config() ?: run {
             _state.value = ConnState.OFFLINE
+            rediscoverIfNeeded()
             return false
         }
         val request = Request.Builder()
@@ -511,6 +584,7 @@ class RunSocket(
                     true
                 } else {
                     _state.value = if (response.code >= 500) ConnState.OFFLINE else ConnState.ONLINE
+                    if (response.code >= 500) rediscoverIfNeeded()
                     response.code < 500
                 }
             }
@@ -519,6 +593,7 @@ class RunSocket(
         } catch (e: Exception) {
             _state.value = ConnState.OFFLINE
             Log.w(TAG, "probe: ${e.message}")
+            rediscoverIfNeeded()
             false
         }
     }

@@ -33,7 +33,7 @@ class RunSocketOwnershipTest {
         whenever(context.getSharedPreferences(any<String>(), eq(Context.MODE_PRIVATE))).thenReturn(preferences)
         whenever(preferences.edit()).thenReturn(editor)
         whenever(editor.remove(any())).thenReturn(editor)
-        val socket = RunSocket(settings, context)
+        val socket = RunSocket(settings, mock<HistoryApi>(), context)
         val frames = mutableListOf<AiOutput>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             socket.frames.collect { frames += it }
