@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Build AIxodia on this machine and publish the APK that was just built.
+# Build AIxodia and publish the APK that was just built.
 #
-# There is no CI. A build here is minutes cold and seconds once warm, and the
-# APK that is signed and verified is the same file that is published — nothing
-# is rebuilt elsewhere from a different toolchain. Publishing stays in one
-# place, so release tags and versionCodes have a single writer and cannot race.
+# The file that is signed and verified here is the file that is published, so what
+# was checked is what ships. Publishing has one writer — this script, run by the
+# release workflow — so the rolling tag and the versionCodes have a single owner
+# and cannot race.
 #
 # The APK is signed with the stable key at app/aixodia-debug.keystore. Same
 # applicationId + same signature + a higher versionCode is what lets an update
@@ -121,9 +121,10 @@ else
   git push origin "HEAD:refs/heads/$branch"
 fi
 
-# One rolling release, like the engine's engine-latest: the tag never changes,
-# the asset is replaced in place. The version code still moves forward on every
-# build so an install overwrites the previous APK instead of being rejected.
+# One rolling release, like the engine's engine-latest: there is one tag and one
+# release row, the tag moves to whatever was last built and the asset is replaced
+# in place. The version code still moves forward on every build so an install
+# overwrites the previous APK instead of being rejected.
 tag="latest"
 VERSION_CODE="$(date +%s)"
 VERSION_NAME="1.0.$(date +%Y%m%d%H%M)"
@@ -153,16 +154,27 @@ case "$signer" in
 esac
 
 cp "$APK" AIxodia.apk
+SHA="$(git rev-parse HEAD)"
+
+# The rolling tag is not decoration. A release whose tag is gone is put back into
+# draft by GitHub, and a draft answers 404 to `releases/latest` — the one endpoint
+# the phone reads — so the build ships, is current, and cannot be found. That is
+# how a released app goes missing without anyone deleting it: a clean-up of tags
+# orphaned the release this script had just published. So the tag is moved onto the
+# commit that was built, and the row is published rather than left as it was found.
+git tag -f "$tag" "$SHA"
+git push -f origin "refs/tags/$tag"
+
 if gh release view "$tag" >/dev/null 2>&1; then
-  gh release edit "$tag" --title "AIxodia $tag" --target "$(git rev-parse HEAD)"
   gh release upload "$tag" AIxodia.apk "$VERSION_ASSET" --clobber
+  gh release edit "$tag" --title "AIxodia $tag" --target "$SHA" --draft=false
 else
   gh release create "$tag" AIxodia.apk "$VERSION_ASSET" \
     --title "AIxodia $tag" \
-    --target "$(git rev-parse HEAD)" \
+    --target "$SHA" \
     --generate-notes
 fi
-echo "released $tag"
+echo "released $tag at $(git rev-parse --short HEAD)"
 
 # Keep a single release, the rolling one. Legacy v0.1.x tags from the old
 # scheme are removed on the first run and never come back.
