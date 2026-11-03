@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T03:30:00Z",
+  "title": "Design System: AIxodia",
+  "extensions": {
+    "colorMeta": {
+      "page-black": { "role": "neutral", "displayName": "Page Black", "canonical": "#000000" },
+      "ink-on-page": { "role": "neutral", "displayName": "Ink On Page", "canonical": "#F7F9FB" },
+      "navy-recess": { "role": "neutral", "displayName": "Navy Recess", "canonical": "oklch(21% 0.03 255)", "tonalRamp": ["#0B1220", "#0E131C", "#111720", "#151D29", "#19202B", "#2A3544", "#71809A", "#C8DCEE"] },
+      "accent": { "role": "primary", "displayName": "Sky Accent", "canonical": "oklch(76% 0.11 240)", "tonalRamp": ["#0A0F2C", "#17305A", "#284B70", "#2F6FED", "#7FB2FF", "#B8D8FF", "#D9E7FF", "#E7F0FF"] },
+      "send": { "role": "primary", "displayName": "Deep Signal Blue", "canonical": "#2F6FED" },
+      "online": { "role": "tertiary", "displayName": "Online Green", "canonical": "#3DDC84" },
+      "connecting": { "role": "tertiary", "displayName": "Connecting Amber", "canonical": "#FFB020" },
+      "offline": { "role": "tertiary", "displayName": "Offline Red", "canonical": "#E5484D" }
+    },
+    "typographyMeta": {
+      "mono-readout": { "displayName": "Machine Readout", "purpose": "seq/pid/cost/token figures and the terminal grid; monospace is semantic." }
+    },
+    "motion": [
+      { "name": "draft-tick", "value": "1000ms", "purpose": "One tick a second while a turn is in flight; labels print whole seconds." },
+      { "name": "delta-coalesce", "value": "120ms", "purpose": "Answer deltas flush on a timer instead of restating the bubble per token." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Send Disc",
+      "kind": "button",
+      "refersTo": "disc-control-primary",
+      "description": "The one control meant to be hit without reading.",
+      "html": "<button class=\"ds-disc-send\" aria-label=\"Send\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"><path d=\"M12 19V5M5 12l7-7 7 7\"/></svg></button>",
+      "css": ".ds-disc-send { width:48px; height:48px; border-radius:50%; background:#2F6FED; color:#fff; border:none; display:grid; place-items:center; transition:background .15s, opacity .15s; } .ds-disc-send:hover { background:#2560d8; } .ds-disc-send:focus-visible { outline:2px solid #7FB2FF; outline-offset:2px; } .ds-disc-send:disabled { background:#19202B; opacity:.38; }"
+    },
+    {
+      "name": "Quiet Disc",
+      "kind": "button",
+      "refersTo": "disc-control",
+      "description": "Attach/stop/terminal keys beside the send disc.",
+      "html": "<button class=\"ds-disc-quiet\" aria-label=\"Attach\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#F7F9FB\" stroke-width=\"2\"><path d=\"M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48\"/></svg></button>",
+      "css": ".ds-disc-quiet { width:48px; height:48px; border-radius:50%; background:#19202B; color:#F7F9FB; border:none; display:grid; place-items:center; transition:background .15s; } .ds-disc-quiet:hover { background:#151D29; } .ds-disc-quiet:focus-visible { outline:2px solid #7FB2FF; outline-offset:2px; }"
+    },
+    {
+      "name": "Pill Control",
+      "kind": "button",
+      "refersTo": "pill-control",
+      "description": "Full-round label that opens a sheet (model picker).",
+      "html": "<button class=\"ds-pill\">opus-4.5</button>",
+      "css": ".ds-pill { height:48px; padding:0 18px; border-radius:999px; background:#19202B; color:#F7F9FB; border:1px solid #2A3544; font:600 15px/22px Roboto, sans-serif; letter-spacing:.1px; transition:background .15s; } .ds-pill:hover { background:#151D29; } .ds-pill:focus-visible { outline:2px solid #7FB2FF; outline-offset:2px; }"
+    },
+    {
+      "name": "User Bubble",
+      "kind": "card",
+      "refersTo": "user-bubble",
+      "description": "The operator's own words in the thread.",
+      "html": "<div class=\"ds-bubble\">run the backup now</div>",
+      "css": ".ds-bubble { max-width:78%; background:#17305A; color:#D9E7FF; padding:10px 14px; border-radius:22px; font:400 15px/22px Roboto, sans-serif; }"
+    },
+    {
+      "name": "Session Strip Legend",
+      "kind": "custom",
+      "description": "Mono cached/new/out readout above the composer, 12sp floor.",
+      "html": "<div class=\"ds-legend\"><span class=\"ds-legend-fig\">cached 12.3k</span><span class=\"ds-legend-dim\"> · </span><span class=\"ds-legend-fig\">new 4.1k</span></div>",
+      "css": ".ds-legend { font:12px/12px ui-monospace, monospace; color:#C8DCEE; } .ds-legend-fig { color:#F7F9FB; font-weight:600; } .ds-legend-dim { color:#71809A; }"
+    },
+    {
+      "name": "Drawer Footer Row",
+      "kind": "nav",
+      "description": "Providers / Settings rows anchored at the drawer foot.",
+      "html": "<a class=\"ds-drawer-row\" href=\"#\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"2\"><path d=\"M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4\"/></svg><span>Providers</span></a>",
+      "css": ".ds-drawer-row { display:flex; align-items:center; gap:10px; padding:10px 16px; color:#F7F9FB; font:500 14px/18px Roboto, sans-serif; text-decoration:none; border-radius:10px; transition:background .15s; } .ds-drawer-row:hover { background:#151D29; } .ds-drawer-row:focus-visible { outline:2px solid #7FB2FF; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night Console",
+    "overview": "AIxodia is a control surface for one technical operator, and it looks like the tools that operator already trusts at 2am: a pure-black page, every raised surface the same navy taken to increasing strength, and a single soft sky-blue accent that marks what is interactive or alive. Depth is tonal, never cast — no shadow is drawn anywhere. Density and precision are the identity: Discord's drawer, Telegram's bubbles, a terminal's monospace readouts.",
+    "keyCharacteristics": [
+      "Pure black page; navy-only tonal ramp for all elevation.",
+      "One accent (#7FB2FF) for interactive/alive; status colours are reserved roles.",
+      "Monospace for every machine readout.",
+      "48dp circular discs and full-round pills as the composer's only button silhouettes.",
+      "Hairline borders do the separating; shadows do nothing."
+    ],
+    "rules": [
+      { "name": "The Reserved-Signal Rule", "body": "Green, amber and red mean online/connecting/offline and nothing else. A brand element may never borrow them.", "section": "colors" },
+      { "name": "The One-Voice Rule", "body": "Sky Accent marks the living thing on screen. If an element is neither interactive nor alive, it wears the navy ramp.", "section": "colors" },
+      { "name": "The Readout Floor Rule", "body": "No rendered text below 11sp; anything carrying information a glance must catch is >=12sp.", "section": "typography" },
+      { "name": "The Flat-By-Tone Rule", "body": "Elevation = brightness within one hue. If you reach for a shadow, you want the next navy step up.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do express elevation as the next navy step up (surfaceContainer*), separated by the hairline #2A3544 when two darks meet.",
+      "Do keep machine readouts monospace and >=12sp.",
+      "Do reserve green/amber/red for connection state and the send blue for the send disc.",
+      "Do give raw touch surfaces the 48dp floor and a Role.Button semantic.",
+      "Do let the user retune the accent and base radius; everything else stays structural."
+    ],
+    "donts": [
+      "Don't draw shadows, gradients, or glows; the console is flat by tone.",
+      "Don't introduce a second palette in the UI layer - non-role colours live in AixodiaColors beside the scheme.",
+      "Don't put the terminal's ink chrome under theme control; a shell renders the shell's colours.",
+      "Don't ship iOS-shaped components or hijack system Back.",
+      "Don't drop any label below 11sp to save a line."
+    ]
+  }
+}

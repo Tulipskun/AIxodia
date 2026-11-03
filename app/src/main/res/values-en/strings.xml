@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The default in values/ is English on purpose: these labels are shared
+         technical vocabulary, and a Thai default would be the odd one out for
+         every reader who did not ask for Thai. Only the connection notices are
+         Thai, because they are the one place the app speaks in sentences. -->
+    <string name="offline_title">Cannot reach the daemon</string>
+    <string name="offline_unknown_host">Host not found — check the daemon and its tunnel are running</string>
+    <string name="offline_retry">Retry</string>
+    <string name="composer_hint">Send a message…</string>
+    <string name="agent_user">you</string>
+    <string name="live_answering">answering</string>
+    <string name="live_thinking">thinking · %1$s</string>
+    <string name="sending">Sending…</string>
+    <string name="sending_request">Sending request to provider…</string>
+    <string name="thinking_title">Thinking…</string>
+    <string name="thought_for">Thought for %1$s</string>
+    <string name="thought">Thought</string>
+    <string name="copy_message">Copy message</string>
+    <string name="retry_turn">Retry</string>
+    <string name="copied">Message copied</string>
+    <string name="copy_long_press">Copy message</string>
+    <string name="token_fields_label">Token counts shown</string>
+    <string name="token_fields_subtitle">Choose which counts appear, and in what order</string>
+    <string name="token_fields_help">Comma separated, in the order you want to read them\nAvailable: in out rate model time\nDefault: in,out,rate,model,time</string>
+
+    <!-- First-launch sign-in (see values/ for the note). -->
+    <string name="login_title">Welcome to AIxodia</string>
+    <string name="login_subtitle">Enter your Cloudflare API token to get started.</string>
+    <string name="login_token_label">Cloudflare API token</string>
+    <string name="login_token_placeholder">Paste your token here</string>
+    <string name="login_paste">Paste</string>
+    <string name="login_show">Show</string>
+    <string name="login_hide">Hide</string>
+    <string name="login_continue">Continue</string>
+    <string name="login_advanced">Advanced settings</string>
+    <string name="terminal">Terminal</string>
+    <string name="terminal_window">Window title</string>
+    <string name="terminal_close">Close the terminal</string>
+    <string name="terminal_open_new">Open a new shell</string>
+    <string name="terminal_connecting">Connecting…</string>
+    <string name="terminal_no_address">No daemon address yet — wait for the app to find the machine</string>
+    <string name="terminal_closed">The connection closed</string>
+    <string name="terminal_ended">Shell ended (exit %1$d)</string>
+    <string name="terminal_failed">Terminal error: %1$s</string>
+    <string name="terminal_copy">Copy</string>
+    <string name="terminal_select_all">Select all</string>
+</resources>

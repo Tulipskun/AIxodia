@@ -1,0 +1,247 @@
+package com.tulipskun.aixodia.ui.chat
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * The answer contract, exercised on the text the daemon actually stored. The
+ * strings come from a real turn in the app's own database, so a renderer that
+ * mangles them is caught here rather than on the phone.
+ */
+class MarkdownBlocksTest {
+
+    private val orderedAnswer = "I have two available tools:\n\n" +
+        "1. **read** - Read UTF-8 text files inside the workspace\n" +
+        "2. **bash** - Run shell commands in a persistent session"
+
+    @Test
+    fun `an ordered list keeps every item exactly once`() {
+        val parsed = blocks(orderedAnswer)
+        val paragraph = parsed.filterIsInstance<Block.Paragraph>().single()
+        assertEquals("I have two available tools:", paragraph.text)
+
+        val list = parsed.filterIsInstance<Block.ItemList>().single()
+        assertTrue(list.ordered)
+        assertEquals(2, list.items.size)
+        assertEquals("**read** - Read UTF-8 text files inside the workspace", list.items[0])
+        assertEquals("**bash** - Run shell commands in a persistent session", list.items[1])
+        // The failure this pins: one item that says the same thing twice.
+        for (item in list.items) {
+            val firstLine = item.substringBefore(" - ")
+            assertEquals(1, Regex(Regex.escape(firstLine)).findAll(item).count())
+        }
+    }
+
+    @Test
+    fun `a list is not glued onto the paragraph above it`() {
+        val parsed = blocks(orderedAnswer)
+        val paragraph = parsed.filterIsInstance<Block.Paragraph>().single()
+        assertTrue(paragraph.text.none { it == '1' })
+    }
+
+    @Test
+    fun `a hard-wrapped list item continues instead of starting a new one`() {
+        val parsed = blocks("1. read a file\n   that spans two lines")
+        val list = parsed.filterIsInstance<Block.ItemList>().single()
+        assertEquals(1, list.items.size)
+        assertEquals("read a file that spans two lines", list.items.single())
+    }
+
+    @Test
+    fun `bullets and ordered items do not merge into one list`() {
+        val parsed = blocks("- one\n- two\n\n1. first\n2. second")
+        val lists = parsed.filterIsInstance<Block.ItemList>()
+        assertEquals(2, lists.size)
+        assertEquals(listOf("one", "two"), lists[0].items)
+        assertEquals(listOf("first", "second"), lists[1].items)
+        assertTrue(!lists[0].ordered)
+        assertTrue(lists[1].ordered)
+    }
+
+    @Test
+    fun `headings, quotes and rules become their own blocks`() {
+        val parsed = blocks("# Title\n\n> quoted\n\n---\n\nbody")
+        assertEquals("Title", (parsed[0] as Block.Heading).text)
+        assertEquals("quoted", (parsed[1] as Block.Quote).text)
+        assertTrue(parsed[2] is Block.Rule)
+        assertEquals("body", (parsed[3] as Block.Paragraph).text)
+    }
+
+    @Test
+    fun `a fence keeps its body and its language`() {
+        val parsed = blocks("before\n\n```go\ngo test ./...\n```\n\nafter")
+        val code = parsed.filterIsInstance<Block.Code>().single()
+        assertEquals("go", code.language)
+        assertEquals("go test ./...", code.text)
+    }
+
+    @Test
+    fun `an unfinished stream still parses`() {
+        // A turn in flight: half a fence, an unpaired bold marker, a lone digit.
+        for (partial in listOf("**bo", "1. rea", "```go\ngo bui", "# ", "> ")) {
+            blocks(partial) // must not throw
+        }
+    }
+
+    /**
+     * The exact shape that reached the screen: one item reading the same thing
+     * twice, with the second item of the list gone. A matched line used to be
+     * handled and then handled again by the continuation branch below it.
+     */
+    @Test
+    fun `a matched line is never also treated as a continuation`() {
+        val list = blocks(orderedAnswer).filterIsInstance<Block.ItemList>().single()
+        assertEquals(2, list.items.size)
+        // Each line becomes its own item, verbatim, with the "1."/"2." consumed
+        // as the list marker rather than left inside the text.
+        assertEquals(
+            listOf(
+                "**read** - Read UTF-8 text files inside the workspace",
+                "**bash** - Run shell commands in a persistent session",
+            ),
+            list.items,
+        )
+        // Nothing is dropped either: both sentences survive exactly once.
+        val all = blocks(orderedAnswer).joinToString(" ") { b ->
+            when (b) {
+                is Block.ItemList -> b.items.joinToString(" ")
+                is Block.Paragraph -> b.text
+                is Block.Heading -> b.text
+                is Block.Quote -> b.text
+                is Block.Code -> b.text
+                is Block.Rule -> ""
+                is Block.Table -> (listOf(b.headerRow) + b.rows).joinToString(" ") { row -> row.joinToString(" ") }
+            }
+        }
+        assertEquals(1, Regex("Read UTF-8 text files").findAll(all).count())
+        assertEquals(1, Regex("Run shell commands").findAll(all).count())
+    }
+
+    @Test
+    fun `an answer with no markdown at all is one paragraph`() {
+        val parsed = blocks("Hi there! 👋 How can I help you today?")
+        assertEquals(1, parsed.size)
+        assertTrue(parsed.single() is Block.Paragraph)
+    }
+
+    @Test
+    fun `a table becomes a table, not a paragraph of pipes`() {
+        val md = "name | meaning\n" +
+            "---- | -------\n" +
+            "read | Read a file\n" +
+            "bash | Run a command"
+        val table = blocks(md).filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("name", "meaning"), table.headerRow)
+        assertEquals(listOf(listOf("read", "Read a file"), listOf("bash", "Run a command")), table.rows)
+        assertTrue(blocks(md).none { it is Block.Paragraph })
+    }
+
+    @Test
+    fun `a bare rule after prose stays a rule, not a one-cell table`() {
+        val plain = blocks("just a line\n\n---\n\nafter")
+        assertTrue(plain.any { it is Block.Rule })
+        assertTrue(plain.none { it is Block.Table })
+    }
+
+    @Test
+    fun `a table with an outer pipe on every row parses the same`() {
+        val md = "| name | meaning |\n| ---- | ------- |\n| read | Read a file |"
+        val table = blocks(md).filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("name", "meaning"), table.headerRow)
+        assertEquals(listOf(listOf("read", "Read a file")), table.rows)
+    }
+
+    @Test
+    fun `alignment marks are read off the divider`() {
+        // Leading colon is left, trailing is right, both is centre - GitHub's
+        // rule, which is the opposite of what it looks like.
+        val md = "l | c | r\n:-- | :-: | --:\na | b | c"
+        val table = blocks(md).filterIsInstance<Block.Table>().single()
+        assertEquals(listOf(TableAlign.Start, TableAlign.Center, TableAlign.End), table.aligns)
+    }
+
+    @Test
+    fun `prose above a table stays prose`() {
+        val md = "Here is the tool list:\nname | meaning\n---- | -------\nread | Read a file"
+        val parsed = blocks(md)
+        assertEquals("Here is the tool list:", parsed.filterIsInstance<Block.Paragraph>().single().text)
+        assertEquals(1, parsed.filterIsInstance<Block.Table>().size)
+    }
+
+    @Test
+    fun `bold italic keeps all three markers off the text`() {
+        val parsed = blocks("***read*** now").filterIsInstance<Block.Paragraph>().single()
+        // The parser hands the inline layer the raw text; the point is that the
+        // block structure is a paragraph and the markers survive to be styled.
+        assertEquals("***read*** now", parsed.text)
+    }
+
+    @Test
+    fun `escaped pipes stay inside their table cells`() {
+        val table = blocks("name | meaning\n---- | -------\na\\|b | either").filterIsInstance<Block.Table>().single()
+        assertEquals(listOf(listOf("a|b", "either")), table.rows)
+    }
+
+    @Test
+    fun `an escaped final pipe is content not an outer border`() {
+        val table = blocks("name | meaning\n---- | -------\npipe | ends with \\|")
+            .filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("pipe", "ends with |"), table.rows.single())
+    }
+
+    @Test
+    fun `a longer fence can contain a shorter fence literally`() {
+        assertEquals(
+            listOf(Block.Code("```go\ngo test ./...\n```", "markdown")),
+            blocks("````markdown\n```go\ngo test ./...\n```\n````"),
+        )
+    }
+
+    @Test
+    fun `a closing fence cannot carry a language`() {
+        assertEquals(
+            listOf(Block.Code("first\n```kotlin\nlast", "text")),
+            blocks("```text\nfirst\n```kotlin\nlast\n```"),
+        )
+    }
+
+    @Test
+    fun `a closing fence may be longer than the opening fence`() {
+        assertEquals(
+            listOf(Block.Code("body", "text"), Block.Paragraph("after")),
+            blocks("```text\nbody\n`````\nafter"),
+        )
+    }
+
+    @Test
+    fun `blank lines at the start of code are not lost`() {
+        assertEquals(listOf(Block.Code("\n\nbody", "text")), blocks("```text\n\n\nbody\n```"))
+    }
+
+    @Test
+    fun `CRLF code has no extra spaces at the end of its lines`() {
+        assertEquals(listOf(Block.Code("  first\nsecond", "text")), blocks("```text\r\n  first\r\nsecond\r\n```"))
+    }
+
+    @Test
+    fun `backticks in an info string do not make a fence or disappear`() {
+        assertEquals(listOf(Block.Paragraph("```not a fence```")), blocks("```not a fence```"))
+    }
+
+    @Test
+    fun `trailing blank code lines are preserved too`() {
+        assertEquals(listOf(Block.Code("body\n\n", "text")), blocks("```text\nbody\n\n\n```"))
+    }
+
+    @Test
+    fun `another fence symbol cannot close the code block`() {
+        assertEquals(listOf(Block.Code("~~~\nbody", "text")), blocks("```text\n~~~\nbody\n```"))
+    }
+
+    @Test
+    fun `an even number of backslashes does not escape a table separator`() {
+        val table = blocks("name | meaning\n---- | -------\na\\\\| either").filterIsInstance<Block.Table>().single()
+        assertEquals(listOf("a\\\\", "either"), table.rows.single())
+    }
+}

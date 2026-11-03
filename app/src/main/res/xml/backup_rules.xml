@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android auto-backup (API 26-30). The preferences file holds the Cloudflare
+  token, the account and database ids and the daemon address; none of it is
+  worth restoring onto another phone, where the keystore key that seals the
+  token does not exist. Everything under files/ is left out, and the chat cache
+  is rebuilt from D1 anyway.
+-->
+<full-backup-content>
+    <exclude domain="file" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="database" path="." />
+</full-backup-content>
