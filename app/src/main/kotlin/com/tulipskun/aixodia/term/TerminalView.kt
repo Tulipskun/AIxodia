@@ -153,10 +153,10 @@ class TerminalView @JvmOverloads constructor(
     private var downTime = 0L
     private var dragging = false
     private var wheelAccum = 0f
-    // How far into the pane's own history the wheel has taken the reader, in
-    // notches. Only the direction matters, so a stray notch cannot lose the way
-    // back to the live screen.
-    private var historyNotches = 0
+    // What the IME has composed and not committed, exactly as the shell's line
+    // holds it. An update rewrites the end of it, and the only way to rewrite a
+    // line that is not ours is to take back the characters it no longer has.
+    private var composing = ""
     // A drag chooses one axis at the first touch slop and keeps it until the
     // finger lifts. A vertical scroll must never become a drawer swipe midway.
     private var dragAxisLocked = false
@@ -401,6 +401,44 @@ class TerminalView @JvmOverloads constructor(
             return
         }
         repeat(count) { sendText(TerminalKeys.backspace(KeyMods.NONE)) }
+    }
+
+    /**
+     * The syllable the IME is building, replacing whatever it was building a
+     * moment before. What the two versions share stays on the line; the rest is
+     * taken back and retyped, which is the only edit a line the shell owns
+     * understands. Without this a Thai keyboard shows nothing at all until the
+     * reader presses space, because a composition is not a commit.
+     */
+    fun updateComposing(text: String) {
+        val edit = TerminalCompose.edit(composing, text)
+        composing = text
+        if (edit.erases > 0) deleteBackward(edit.erases)
+        if (edit.types.isNotEmpty()) sendText(edit.types)
+    }
+
+    /**
+     * The composition is over, and what it put on the line belongs to the shell
+     * now. A commit arrives through here too when the keyboard was satisfied
+     * with what it had already shown: those bytes are on the line, so ending the
+     * record is the whole of the job.
+     */
+    fun endComposing() {
+        composing = ""
+    }
+
+    /** The text the IME settled on, in place of the one it was showing. */
+    fun commitComposed(text: String) {
+        val edit = if (text.isNotEmpty() && text[0].code < 0x20) {
+            // A control submits or moves; it does not replace the syllable the
+            // reader was offered, which is already sitting on the line.
+            TerminalCompose.Edit(erases = 0, types = text)
+        } else {
+            TerminalCompose.edit(composing, text)
+        }
+        composing = ""
+        if (edit.erases > 0) deleteBackward(edit.erases)
+        if (edit.types.isNotEmpty()) sendTyped(edit.types)
     }
 
     /** Called by the panel whenever the emulator produced output. */
@@ -1204,35 +1242,13 @@ class TerminalView @JvmOverloads constructor(
             // is that the wheel arrives as an arrow key.
             val bytes = if (button == 65) "\u001b[B" else "\u001b[A"
             inputSink?.invoke(bytes.toByteArray(Charsets.US_ASCII))
-        } else {
-            // A plain prompt with no history of ours to pan. The lines it has
-            // already printed are held by whatever multiplexes the pane, and the
-            // only way to ask for them is a report: a multiplexer pages through
-            // its history on a wheel, and a bare shell ignores the bytes.
-            inputSink?.invoke(em.wheelReport(button, col, row))
-            // Wheel up is the older direction; counting it is what makes a later
-            // keystroke able to find its way back to the live screen.
-            historyNotches = if (button == 64) {
-                historyNotches + 1
-            } else {
-                (historyNotches - 1).coerceAtLeast(0)
-            }
         }
-    }
-
-    /**
-     * Back onto the live screen before a keystroke. A wheel that paged a
-     * multiplexer's history left its pane in a mode where every key is a command,
-     * and text typed there is eaten without a trace. Wheeling down is the way out,
-     * and a down notch already at the bottom does nothing.
-     */
-    private fun returnToLiveScreen() {
-        if (historyNotches == 0) return
-        val em = emulator ?: return
-        repeat(historyNotches) {
-            inputSink?.invoke(em.wheelReport(65, em.columns / 2, em.rows / 2))
-        }
-        historyNotches = 0
+        // A plain prompt with no history above it yet is the third case, and it
+        // gets no bytes at all. The drag used to be sent as a wheel report for a
+        // multiplexer to page, which made the pane's history a mode a keystroke
+        // could get stuck in and put tmux's own redraw clock between the finger
+        // and the screen. The engine hands that history over when the client
+        // attaches, so the reader who has any is already panning it locally.
     }
 
     private fun sendMouse(em: TerminalEmulator, event: MotionEvent, button: Int, release: Boolean) {
@@ -1280,13 +1296,15 @@ class TerminalView @JvmOverloads constructor(
         // Text lands at the prompt, so the page goes back to look at it rather
         // than typing blind into history.
         if (scrollTopPx > 0f) scrollToBottom()
-        returnToLiveScreen()
         inputSink?.invoke(text.toByteArray(Charsets.UTF_8))
     }
 
     /** Maps a key press to the bytes a terminal expects. */
     fun handleKey(event: KeyEvent): Boolean {
         val em = emulator
+        // The line is about to be edited by something the IME did not tell us
+        // about, so the composition it described is no longer ours to correct.
+        composing = ""
         val mods = KeyMods(
             ctrl = event.isCtrlPressed || latchedCtrl,
             alt = event.isAltPressed || latchedAlt,
@@ -1343,7 +1361,10 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun sendBytes(bytes: ByteArray) {
-        returnToLiveScreen()
+        // A key is not part of the composition, whatever the IME thought it was
+        // building: an arrow, a chord, a Tab takes the line over, and the bytes
+        // the composition left there stay exactly as they were typed.
+        composing = ""
         inputSink?.invoke(bytes)
     }
 
@@ -1409,13 +1430,30 @@ class TerminalView @JvmOverloads constructor(
         override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
             val s = text?.toString().orEmpty()
             // Enter arrives as a newline from most keyboards; a terminal wants CR.
-            view.sendTyped(if (s == "\n") "\r" else s)
+            view.commitComposed(if (s == "\n") "\r" else s)
+            return true
+        }
+
+        /**
+         * The composition as it is being built. A keyboard that assembles a
+         * syllable one mark at a time says it here rather than in [commitText],
+         * and a terminal that ignored the call would show a reader nothing of
+         * what they were typing until they pressed space.
+         */
+        override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+            view.updateComposing(text?.toString().orEmpty())
+            return true
+        }
+
+        override fun finishComposingText(): Boolean {
+            view.endComposing()
             return true
         }
 
         override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
             // Through the same door as the hardware DEL key, so a latched Ctrl
             // makes the IME's Backspace the word-erase chord too.
+            view.endComposing()
             view.deleteBackward(beforeLength)
             if (afterLength > 0) view.sendRaw(TerminalKeys.tilde(3, KeyMods.NONE))
             return true

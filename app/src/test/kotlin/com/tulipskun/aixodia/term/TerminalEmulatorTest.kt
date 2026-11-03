@@ -237,9 +237,12 @@ class TerminalEmulatorTest {
     }
 
     /**
-     * A prompt behind a multiplexer keeps its history there, not here: the pane
-     * is repainted in place and the screen we hold never scrolls. A drag on such
-     * a screen has no page to move, so it must go out as a wheel instead.
+     * A prompt behind a multiplexer keeps its history there and not here — until
+     * the pane is handed over: the engine replays whatever the multiplexer holds
+     * when a client attaches, so the rows above the screen arrive in this
+     * scrollback and belong to the drag from the first one. Waiting for a full
+     * screen of our own made the oldest lines unreachable and every drag a
+     * round trip to something that paints on its own clock.
      */
     @Test
     fun aScreenThatNeverScrolledHasNoLocalHistoryToPan() {
@@ -247,9 +250,7 @@ class TerminalEmulatorTest {
         term.send("one\r\ntwo\r\nthree")
         assertFalse(term.pansLocalHistory())
         term.send("\r\nfour")
-        assertFalse("one line off the top is not a page worth panning", term.pansLocalHistory())
-        term.send("\r\nfive\r\nsix\r\nseven")
-        assertTrue("a screenful of our own history is ours to pan", term.pansLocalHistory())
+        assertTrue("one line off the top is one line the reader can pull up", term.pansLocalHistory())
     }
 
     @Test
@@ -369,7 +370,7 @@ class TerminalEmulatorTest {
         // full-screen program speaks SGR and understands this.
         assertEquals(
             "\u001b[<64;1;1M",
-            term.wheelReport(64, 0, 0).toString(Charsets.US_ASCII),
+            term.sgrReport(64, 0, 0, release = false).toString(Charsets.US_ASCII),
         )
         assertEquals(
             "\u001b[<0;2;3m",

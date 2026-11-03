@@ -350,4 +350,37 @@ class TerminalScrollTest {
         tty.view.tap(y = 900f)
         assertTrue("a guessed program still sees the click", tty.sink.sent.contains("\u001b[<"))
     }
+
+    /**
+     * A multiplexer's pane is handed to the client at attach, so the scrollback
+     * here is the pane's own — two rows of it is two rows the reader can reach.
+     * It used to take a full screen before the page would move, and below that
+     * the drag went out as wheel bytes for someone else to page.
+     */
+    @Test
+    fun twoRowsOfHistoryAreStillWorthADrag() {
+        val tty = tty(lines = 60)
+        val history = tty.emulator.buffer.scrollback.size
+        assertTrue(
+            "less history than the screen holds ($history of ${tty.emulator.rows} rows)",
+            history in 1 until tty.emulator.rows,
+        )
+        tty.view.drag(fromY = 600f, toY = 1200f)
+        assertTrue("the page moves over what it holds", tty.pan > 0f)
+        assertEquals("and nothing is sent to the shell to do it", 0, tty.sink.sent.length)
+    }
+
+    /**
+     * A prompt that has not scrolled yet has nothing to show, and the drag that
+     * used to ask a multiplexer for it would leave its bytes in the line a reader
+     * is typing into.
+     */
+    @Test
+    fun aPromptWithNoHistoryKeepsItsBytesToItself() {
+        val tty = tty(lines = 5)
+        assertEquals(0, tty.emulator.buffer.scrollback.size)
+        tty.view.drag(fromY = 600f, toY = 1200f)
+        assertEquals(0f, tty.pan, 0.5f)
+        assertEquals("no wheel bytes reach a plain prompt", 0, tty.sink.sent.length)
+    }
 }

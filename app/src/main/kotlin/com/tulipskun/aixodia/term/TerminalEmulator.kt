@@ -692,14 +692,20 @@ class TerminalEmulator(
     /**
      * Whether a vertical drag should move the page this emulator holds.
      *
-     * A shell behind a multiplexer never scrolls *this* screen: the program
-     * repaints its own viewport and the lines that leave it go into the
-     * multiplexer's history, where our scrollback cannot reach them. Holding a
-     * page of our own is the only case where dragging the grid shows the reader
-     * something they could not otherwise see.
+     * A program that asked for the mouse wants the drag as a wheel report, and the
+     * alternate screen is a canvas that repaints itself, so both keep the gesture.
+     * Everything else pans what it holds — one row of history is worth panning,
+     * because the alternative was sending wheel bytes to a shell that has no use
+     * for them and would drop them into the prompt line.
+     *
+     * A shell behind a multiplexer used to fail this test for the reader who
+     * needed it most: the program repaints its own viewport and the lines that
+     * leave it go into the multiplexer's history, out of reach. The engine answers
+     * that by handing the pane's history over at attach, so the scrollback here
+     * *is* the pane's, and paging it costs no round trip.
      */
     fun pansLocalHistory(): Boolean =
-        !mouseReporting() && !alternateScreen && buffer.scrollback.size >= rows
+        !mouseReporting() && !alternateScreen && buffer.scrollback.isNotEmpty()
 
     /** The modes to restore if this session is reattached (see [TerminalModes]). */
     fun snapshotModes(): TerminalModes = TerminalModes(
@@ -754,14 +760,6 @@ class TerminalEmulator(
             byteArrayOf(0x1B, '['.code.toByte(), 'M'.code.toByte(), (cb + 32).toByte(), (32 + x).toByte(), (32 + y).toByte())
         }
     }
-
-    /**
-     * A wheel notch in the SGR encoding, used even when the mouse mode was not
-     * seen because the session was attached mid-stream. A program that never
-     * enabled the mouse simply ignores it.
-     */
-    fun wheelReport(button: Int, col: Int, row: Int): ByteArray =
-        sgrReport(button, col, row, release = false)
 
     /** An SGR mouse report regardless of the mode, for a reattached TUI. */
     fun sgrReport(button: Int, col: Int, row: Int, release: Boolean): ByteArray =

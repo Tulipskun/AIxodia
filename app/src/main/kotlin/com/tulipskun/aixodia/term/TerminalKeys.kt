@@ -125,3 +125,58 @@ object TerminalKeys {
         return next[p]
     }
 }
+
+/**
+ * What an in-progress composition costs in bytes.
+ *
+ * A Thai keyboard does not hand over a word at a time. It sends the syllable as
+ * it is built and rewrites the end of it as each vowel and tone mark arrives, so
+ * a reader who types ไก่ sees ไ, ไก, ไก่, ไก้... The terminal keeps no composition
+ * of its own — the text lives in the shell's line — so the only way to answer an
+ * update is to do what a thumb does on a backspace key: delete the part that
+ * changed and type the new part.
+ *
+ * Moving the cursor instead would not do it. A line editor reads a cursor-back
+ * as a move *within its own buffer*, so the next character is inserted rather
+ * than written over and the syllable doubles. A delete is the one primitive that
+ * means the same thing to a shell, to readline and to a raw-mode program.
+ */
+object TerminalCompose {
+
+    /** The edit that turns [previous] into [next]: this many backspaces, then this text. */
+    data class Edit(val erases: Int, val types: String) {
+        val idle: Boolean get() = erases == 0 && types.isEmpty()
+    }
+
+    /**
+     * The part the two versions disagree on. Whatever they share at the front is
+     * left on the line untouched, so an update that only appended costs no
+     * backspaces at all.
+     *
+     * Counting is by code point because that is what a line editor deletes: a
+     * Thai tone mark rides on the letter before it, draws in the same cell, and
+     * is still a character of its own to the shell.
+     */
+    fun edit(previous: String, next: String): Edit {
+        val before = codePoints(previous)
+        val after = codePoints(next)
+        var shared = 0
+        while (shared < before.size && shared < after.size && before[shared] == after[shared]) {
+            shared++
+        }
+        val tail = after.copyOfRange(shared, after.size)
+        return Edit(erases = before.size - shared, types = String(tail, 0, tail.size))
+    }
+
+    private fun codePoints(text: String): IntArray {
+        val out = IntArray(text.codePointCount(0, text.length))
+        var index = 0
+        var count = 0
+        while (index < text.length) {
+            val cp = text.codePointAt(index)
+            out[count++] = cp
+            index += Character.charCount(cp)
+        }
+        return out
+    }
+}
