@@ -46,6 +46,14 @@ private const val RESIZE_SETTLE_MS = 140L
  */
 private const val KEYBOARD_RESTORE_MS = 120L
 
+/**
+ * How long to keep looking for the line a rebuilt page temporarily lost. The
+ * engine's replay of a pane's history lands in a few tens of milliseconds; after
+ * that a memory of a page that never came back is only a trap, because the next
+ * ordinary output would drag the reader up into history for no reason.
+ */
+private const val ANCHOR_RETRY_MS = 1_500L
+
 private const val MENU_COPY = 1
 private const val MENU_SELECT_ALL = 2
 
@@ -143,8 +151,32 @@ class TerminalView @JvmOverloads constructor(
     // How far the page is pulled down over the live screen, in px: 0 shows the
     // prompt, more shows the scrollback the normal buffer keeps above it.
     private var scrollTopPx = 0f
+        /**
+         * Every pull of the page goes through here, so a rebuild that lands later
+         * has something to rebuild *to*: the offset is a number of pixels over rows
+         * a reset can throw away, and the line the reader chose is the part that
+         * survives.
+         */
+        set(value) {
+            field = value
+            rememberAnchor()
+        }
     private var pinnedToBottom = true
     private var lastHistoryRows = 0
+    private var lastPageRows = 0
+    // The line the top of the view was showing, remembered by what it says. The
+    // engine answers an attach with the pane's whole history, that frame starts
+    // with a reset, and a reset empties the scrollback the page offset is
+    // measured against — so the reader is thrown back to the live screen even
+    // though every line they were reading is in the new frame. tmux re-wraps that
+    // history at whatever width the pane has now, so a row *number* is not the
+    // thing that survives a rebuild; the row's text is.
+    private var anchorText: String? = null
+    private var anchorRow = -1
+    private var anchorDeadline = 0L
+    // Set while a rebuild is refilling: the page is briefly shorter than the line
+    // being held, and giving up on the first chunk would give up on the replay.
+    private var anchorPending = false
     private val scroller = OverScroller(context)
     private val velocityTracker = VelocityTracker.obtain()
     private var lastTouchY = 0f
@@ -311,6 +343,8 @@ class TerminalView @JvmOverloads constructor(
                 scrollTopPx = (em.buffer.scrollback.size - topRowBefore) * cellHeight
                 clampScroll()
             }
+            lastHistoryRows = em.buffer.scrollback.size
+            lastPageRows = pageRows()
             if (cellHeight != oldCellHeight) invalidate()
             return
         }
@@ -320,7 +354,9 @@ class TerminalView @JvmOverloads constructor(
             scrollTopPx = ((em.buffer.scrollback.size - topRowBefore) * cellHeight).coerceAtLeast(0f)
         }
         lastHistoryRows = em.buffer.scrollback.size
+        lastPageRows = pageRows()
         clampScroll()
+        rememberAnchor()
         invalidate()
     }
 
@@ -443,18 +479,108 @@ class TerminalView @JvmOverloads constructor(
 
     /** Called by the panel whenever the emulator produced output. */
     fun onContentChanged() {
+        val em = emulator
+        val rows = em?.buffer?.scrollback?.size ?: 0
+        val page = pageRows()
+        // A page that got *shorter* was rebuilt — the engine's reset, or history
+        // trimmed at its cap — and the offset is about to be measured against rows
+        // that are gone. This is noted before the offset moves, because moving it
+        // is what drops the memory being held. The search is given its time from
+        // here, not from when the reader dragged: a page held for a quiet minute
+        // and then rebuilt under them is exactly the case this exists for, and the
+        // refill itself is what has to finish before the memory is given up on.
+        if (page < lastPageRows && anchorText != null) {
+            anchorPending = true
+            anchorDeadline = android.os.SystemClock.uptimeMillis() + ANCHOR_RETRY_MS
+        }
         // New output pushes rows off the live screen into the history above it.
         // Measuring the page from the bottom, each of those rows would slide the
         // text the reader is looking at down one line; adding the same height
         // back holds the history still, the way a terminal does when you read it
         // while something keeps printing.
-        val rows = emulator?.buffer?.scrollback?.size ?: 0
         if (rows > lastHistoryRows && scrollTopPx > 0f) {
             scrollTopPx += (rows - lastHistoryRows) * cellHeight
         }
         lastHistoryRows = rows
         clampScroll()
+        if (anchorPending) restoreAnchor()
+        if (scrollTopPx > 0f) anchorPending = false
+        lastPageRows = page
+        rememberAnchor()
         invalidate()
+    }
+
+    /** Rows in the whole document: the history the normal buffer keeps, then the screen. */
+    private fun pageRows(): Int {
+        val buffer = emulator?.buffer ?: return 0
+        return buffer.scrollback.size + buffer.lines.size
+    }
+
+    /** The row at a page index, counting from the top of the history. */
+    private fun pageRow(index: Int): TerminalRow? {
+        val buffer = emulator?.buffer ?: return null
+        val history = buffer.scrollback
+        return if (index < history.size) history.getOrNull(index) else buffer.lines.getOrNull(index - history.size)
+    }
+
+    /** The line at the top of the view, or null for a blank one — a blank matches everywhere. */
+    private fun topRowText(): String? {
+        val em = emulator ?: return null
+        if (scrollTopPx <= 0f || cellHeight <= 0f) return null
+        val index = (em.buffer.scrollback.size - (scrollTopPx / cellHeight).toInt()).coerceIn(0, pageRows() - 1)
+        return pageRow(index)?.text()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Keep the line the reader is looking at, and how far down it was. */
+    private fun rememberAnchor() {
+        val text = topRowText()
+        if (text != null && scrollTopPx > 0f) {
+            anchorText = text
+            anchorRow = (emulator!!.buffer.scrollback.size - (scrollTopPx / cellHeight).toInt())
+                .coerceIn(0, pageRows() - 1)
+            return
+        }
+        if (anchorPending) return
+        clearAnchor()
+    }
+
+    /**
+     * Look for the remembered line in the rebuilt page and slide it back to the
+     * top of the view. The nearest match wins: a rewrap keeps the shape of the
+     * page even where it changes the number of rows.
+     */
+    private fun restoreAnchor() {
+        val want = anchorText ?: return
+        if (android.os.SystemClock.uptimeMillis() > anchorDeadline) {
+            anchorPending = false
+            clearAnchor()
+            return
+        }
+        val buffer = emulator?.buffer ?: return
+        val history = buffer.scrollback
+        val total = history.size + buffer.lines.size
+        var best = -1
+        var bestGap = Int.MAX_VALUE
+        for (i in 0 until total) {
+            val text = (if (i < history.size) history[i] else buffer.lines[i - history.size]).text()
+            if (text != want) continue
+            val gap = kotlin.math.abs(i - anchorRow)
+            if (gap < bestGap) {
+                bestGap = gap
+                best = i
+            }
+        }
+        if (best < 0) return
+        scrollTopPx = ((history.size - best) * cellHeight).coerceAtLeast(0f)
+        clampScroll()
+    }
+
+    /** The reader dragged or typed onto the live screen; nothing is being held. */
+    private fun clearAnchor() {
+        anchorText = null
+        anchorRow = -1
+        anchorDeadline = 0L
+        anchorPending = false
     }
 
     /**
@@ -477,6 +603,8 @@ class TerminalView @JvmOverloads constructor(
         scroller.forceFinished(true)
         scrollTopPx = 0f
         lastHistoryRows = emulator?.buffer?.scrollback?.size ?: 0
+        lastPageRows = pageRows()
+        clearAnchor()
         clampScroll()
     }
 

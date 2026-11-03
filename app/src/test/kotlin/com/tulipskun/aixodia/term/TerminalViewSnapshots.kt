@@ -1,6 +1,7 @@
 package com.tulipskun.aixodia.term
 
 import app.cash.paparazzi.Paparazzi
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -55,6 +56,22 @@ class TerminalViewSnapshots {
      * snapshot shows what a reader sees — including where the page is pulled to.
      */
     private class Page(val view: TerminalView, val emulator: TerminalEmulator) {
+        /** Bytes off the wire, straight into the screen. */
+        fun feed(text: String) = emulator.write(text.toByteArray())
+
+        /** What the row at the top of the view says — the line a reader is on. */
+        val topRowText: String
+            get() {
+                val pan = TerminalView::class.java
+                    .getDeclaredField("scrollTopPx").apply { isAccessible = true }.getFloat(view)
+                val cell = TerminalView::class.java
+                    .getDeclaredField("cellHeight").apply { isAccessible = true }.getFloat(view)
+                val history = emulator.buffer.scrollback
+                val page = history + emulator.buffer.lines
+                if (page.isEmpty()) return ""
+                return page[(history.size - (pan / cell).toInt()).coerceIn(0, page.size - 1)].text()
+            }
+
         /** Pulls the page down by [pixels], which is how a finger reaches history. */
         fun dragDown(pixels: Float) {
             val down = 1_000L
@@ -78,13 +95,17 @@ class TerminalViewSnapshots {
     }
 
     private fun phonePage(script: Page.() -> Unit): Page {
+        // The view is made first so the sink can hand it the news, the way the
+        // panel does: output tells the view, and the view decides where the
+        // page sits.
+        val view = TerminalView(paparazzi.context)
         val sink = object : TerminalOutput {
             override fun write(bytes: ByteArray) = Unit
-            override fun onScreenChanged() = Unit
+            override fun onScreenChanged() = view.onContentChanged()
             override fun onTitleChanged(title: String) = Unit
         }
         val emulator = TerminalEmulator(80, 24, sink)
-        val page = Page(TerminalView(paparazzi.context), emulator)
+        val page = Page(view, emulator)
         // What the grid sends comes back as output, the way a pane answers: a
         // render that dropped the bytes would show a composition that never
         // reached the line and call that Thai. A DEL is what the line discipline
@@ -120,6 +141,30 @@ class TerminalViewSnapshots {
             dragDown(600f)
         }
         paparazzi.snapshot(page.view)
+    }
+
+    /**
+     * The same page, either side of the engine handing the pane over again: a
+     * resize makes the engine answer with a reset and the whole screen, which
+     * used to land the reader back on the live prompt with their lines gone
+     * above them. These two are the picture the complaint was about, and they
+     * have to show the same text.
+     */
+    @Test
+    fun aRebuildUnderThePulledPageKeepsItsLines() {
+        val page = phonePage {
+            for (i in 1..200) emulator.write("build step ${i}\r\n".toByteArray())
+            emulator.write("\r\nuser@host:~/proj$ make deploy\r\n".toByteArray())
+            dragDown(600f)
+        }
+        val read = page.topRowText
+        paparazzi.snapshot(page.view, name = "before")
+        // RIS is what the replay opens with, then the pane arrives line by line.
+        page.feed("\u001bc")
+        for (i in 1..200) page.feed("build step $i\r\n")
+        page.feed("\r\nuser@host:~/proj$ make deploy\r\n")
+        assertEquals("the pane handed over again leaves the reader on their line", read, page.topRowText)
+        paparazzi.snapshot(page.view, name = "after")
     }
 
     /**

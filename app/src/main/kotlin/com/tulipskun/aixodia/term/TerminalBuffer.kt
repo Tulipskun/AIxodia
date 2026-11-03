@@ -81,6 +81,22 @@ class TerminalRow(columns: Int) {
     /** True when the cell holds a glyph (not a continuation or a space). */
     fun hasGlyph(col: Int): Boolean = chars[col] != 0 && chars[col] != SPACE
 
+    /**
+     * What the row says, trimmed of the blanks it was padded with. A wide glyph
+     * leaves a zero in the cell it spans, so the zero is skipped and Thai or CJK
+     * reads whole — which is what makes this safe to compare against the same
+     * line as it arrives from the other end of a rewrap.
+     */
+    fun text(): String {
+        if (lastWritten < 0) return ""
+        val out = StringBuilder(lastWritten + 1)
+        for (c in 0..lastWritten) {
+            val cp = chars[c]
+            if (cp != 0) out.appendCodePoint(cp)
+        }
+        return out.toString().trim()
+    }
+
     fun setChar(col: Int, codePoint: Int, cellWidth: Int, fgColor: Int, bgColor: Int, attr: Int) {
         if (col < 0 || col >= columns) return
         clearCombining(col)

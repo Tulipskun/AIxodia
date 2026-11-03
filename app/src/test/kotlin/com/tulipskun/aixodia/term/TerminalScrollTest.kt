@@ -88,6 +88,17 @@ class TerminalScrollTest {
                 .apply { isAccessible = true }
                 .invoke(view)
         }
+
+        /** What the row at the top of the view says — the line a reader is on. */
+        val topRowText: String
+            get() {
+                val page = emulator.buffer.scrollback + emulator.buffer.lines
+                if (page.isEmpty()) return ""
+                return page[anchorRow.coerceIn(0, page.size - 1)].text()
+            }
+
+        /** Bytes off the wire, straight into the shell's screen. */
+        fun feed(text: String) = emulator.write(text.toByteArray())
     }
 
     /** A view laid out at a phone-sized page, over a shell that has scrolled. */
@@ -383,4 +394,82 @@ class TerminalScrollTest {
         assertEquals(0f, tty.pan, 0.5f)
         assertEquals("no wheel bytes reach a plain prompt", 0, tty.sink.sent.length)
     }
+
+    /**
+     * The engine answers an attach with the pane's own history, and that frame
+     * opens with a reset — which empties the scrollback the page offset is
+     * measured against, so the reader was thrown back onto the live screen by the
+     * very bytes that were meant to give them more to read. What the page is
+     * holding has to be the line, not its number: tmux re-wraps at the size the
+     * pane has now.
+     */
+    @Test
+    fun aReplayThatRewrapsTheHistoryKeepsThePage() {
+        val tty = tty(lines = 100)
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+        tty.view.drag(fromY = 900f, toY = 1500f)
+        val reading = tty.topRowText
+        assertTrue("the page is reading history", tty.pan > 0f)
+
+        tty.feed("\u001bc")
+        assertEquals("and the reset takes the page with it", 0, tty.emulator.buffer.scrollback.size)
+        for (i in 1..100) tty.feed("line $i of the history\r\n")
+
+        assertEquals("the same line is back at the top of the view", reading, tty.topRowText)
+        assertTrue("and the page is still pulled up off the prompt", tty.pan > 0f)
+    }
+
+    /**
+     * How long the reader had been looking at the page is not the question; the
+     * rebuild refilling it is. Measuring the retry from the drag meant that a
+     * page pulled up and then read for a couple of seconds was already out of
+     * time when the next replay arrived, so it went back to the prompt — the
+     * complaint, for anyone who reads before the engine moves.
+     */
+    @Test
+    fun aPageReadForAWhileIsStillHeldWhenThePaneComesBack() {
+        val tty = tty(lines = 100)
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+        tty.view.drag(fromY = 900f, toY = 1500f)
+        val reading = tty.topRowText
+        assertTrue("the page is reading history", tty.pan > 0f)
+
+        // Two minutes of reading, and nothing but the reader's own stillness.
+        TerminalView::class.java.getDeclaredField("anchorDeadline")
+            .apply { isAccessible = true }
+            .setLong(tty.view, android.os.SystemClock.uptimeMillis() - 120_000)
+
+        tty.feed("\u001bc")
+        for (i in 1..100) tty.feed("line $i of the history\r\n")
+
+        assertEquals("the rebuild starts its own clock, not the drag's", reading, tty.topRowText)
+    }
+
+    /**
+     * Both halves of the complaint in one: the screen changes size, the grid is
+     * re-derived, and the pane answers with a replay at the new width. The resize
+     * alone used to hold, the replay alone used to hold, and the pair together is
+     * what a rotation actually sends.
+     */
+    @Test
+    fun aResizeAndTheReplayThatFollowsKeepThePage() {
+        val tty = tty(lines = 120, tail = "prompt")
+        tty.sink.onChanged = { tty.view.onContentChanged() }
+        tty.view.drag(fromY = 900f, toY = 1500f)
+        val reading = tty.topRowText
+
+        tty.view.layout(0, 0, 1080, 1400)
+        tty.resizeToView()
+        tty.view.layout(0, 0, 1080, 1920)
+        tty.resizeToView()
+
+        tty.feed("\u001bc")
+        for (i in 1..120) tty.feed("line $i of the history\r\n")
+        tty.feed("prompt")
+
+        assertEquals("the line the reader was on survived both", reading, tty.topRowText)
+        assertTrue("and the page never fell back to the prompt", tty.pan > 0f)
+    }
+
+
 }
