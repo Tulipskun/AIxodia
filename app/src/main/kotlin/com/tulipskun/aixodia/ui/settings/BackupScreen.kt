@@ -189,7 +189,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 navigationIcon = {
                     IconButton(onClick = {
                         when {
-                            browseRoot -> browseRoot = false
+                            browseRoot -> { browseRoot = false; showScope = true }
                             addFolder -> addFolder = false
                             addExcludeFolder -> addExcludeFolder = false
                             showScope -> showScope = false
@@ -213,7 +213,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     start = rootDraft.ifBlank { s.root },
                     pickLabel = "Back up this folder",
                     bound = null,
-                    onDismiss = { browseRoot = false },
+                    onDismiss = { browseRoot = false; showScope = true },
                     onPick = { chosen ->
                         browseRoot = false
                         showScope = true
