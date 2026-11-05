@@ -16,6 +16,7 @@ import com.tulipskun.aixodia.data.remote.BackupStatus
 import com.tulipskun.aixodia.data.remote.FolderBytes
 import com.tulipskun.aixodia.ui.settings.AutoBackupCard
 import com.tulipskun.aixodia.ui.settings.BucketCard
+import com.tulipskun.aixodia.ui.settings.LastBackupStrip
 import com.tulipskun.aixodia.ui.settings.PreviewCard
 import com.tulipskun.aixodia.ui.settings.RestoreCard
 import com.tulipskun.aixodia.ui.settings.RunCard
@@ -239,6 +240,28 @@ class BackupScreenSnapshots {
     )
 
     private val idle = modern.copy(auto = AutoBackupStatus(enabled = true), run = finished)
+
+    @Test
+    fun lastSuccessfulBackupTimestamp() = paparazzi.snapshot {
+        AIxodiaTheme {
+            LastBackupStrip(
+                BackupRun(
+                    operation = "backup",
+                    ok = true,
+                    startedAt = 1793891284,
+                    finishedAt = 1793891295,
+                    report = BackupRunReport(files = 124079),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun noSuccessfulBackupTimestamp() = paparazzi.snapshot {
+        AIxodiaTheme {
+            LastBackupStrip(null)
+        }
+    }
 
     @Test
     fun pageTopIdle() = paparazzi.snapshot {
