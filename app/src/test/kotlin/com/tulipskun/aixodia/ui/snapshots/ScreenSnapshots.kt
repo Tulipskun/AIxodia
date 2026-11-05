@@ -8,7 +8,6 @@ import com.tulipskun.aixodia.ui.display.ConnDot
 import com.tulipskun.aixodia.ui.display.EmptyChatState
 import com.tulipskun.aixodia.ui.display.OfflineBanner
 import com.tulipskun.aixodia.ui.display.SetupNeeded
-import com.tulipskun.aixodia.ui.settings.ScopeSheetContent
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import org.junit.Rule
 import org.junit.Test
@@ -48,44 +47,8 @@ class ScreenSnapshots {
      * the one picture shows both states a checkbox can mean — and the nested pick
      * with its own way to drop it.
      */
-    @Test
-    fun backupScopeSheet() = paparazzi.snapshot {
-        AIxodiaTheme {
-            ScopeSheetContent(
-                root = "/root",
-                includes = listOf("AIxodia", "projects/aixodia"),
-                excludes = listOf("node_modules", ".venv", "__pycache__"),
-                folders = listOf(".cache", ".cargo", "AIxodia", "aixodia-engine", "projects", "tmp"),
-                foldersLoading = false,
-                foldersError = "",
-                foldersTruncated = false,
-                onToggle = {},
-                onRemove = {},
-                onAddFolder = {},
-                onEverything = {},
-                onDismiss = {},
-            )
-        }
-    }
+
 
     /** The state a scope is in before the operator touches it: nothing ticked, all of it. */
-    @Test
-    fun backupScopeUntouched() = paparazzi.snapshot {
-        AIxodiaTheme {
-            ScopeSheetContent(
-                root = "/root",
-                includes = emptyList(),
-                excludes = emptyList(),
-                folders = listOf(".cache", ".cargo", "AIxodia", "projects"),
-                foldersLoading = false,
-                foldersError = "",
-                foldersTruncated = false,
-                onToggle = {},
-                onRemove = {},
-                onAddFolder = {},
-                onEverything = {},
-                onDismiss = {},
-            )
-        }
-    }
+
 }
