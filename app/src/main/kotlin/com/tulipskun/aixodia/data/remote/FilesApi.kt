@@ -53,7 +53,7 @@ class FilesApi(
         if (base.isBlank()) throw IllegalStateException("Daemon URL is not configured")
         if (config.token.isBlank()) throw IllegalStateException("Cloudflare API token is not configured")
         return Request.Builder()
-            .url("${'
+            .url(base + path)
             .header("Authorization", "Bearer ${')
     }
 
@@ -62,7 +62,7 @@ class FilesApi(
             JSONObject(body).optJSONObject("error")?.optString("message")
                 ?: JSONObject(body).optString("error")
         }.getOrNull().orEmpty()
-        throw IllegalStateException(message.ifBlank { "HTTP ${' })
+        throw IllegalStateException(message.ifBlank { "HTTP " + responseCode })
     }
 
     suspend fun list(path: String): RemoteDirectory = withContext(Dispatchers.IO) {
@@ -122,7 +122,7 @@ class FilesApi(
                 } ?: throw IllegalStateException("Cannot open selected file")
             }
         }
-        val url = "/api/files/upload?path=" + enc(directory) + "&name=" + enc(name) + "&overwrite=${'
+        val url = "/api/files/upload?path=" + enc(directory) + "&name=" + enc(name) + "&overwrite=" + overwrite
         val request = requestBuilder(url)
             .header("Content-Type", mime)
             .post(body)
@@ -176,7 +176,7 @@ class FilesApi(
 
     suspend fun delete(path: String, recursive: Boolean) = withContext(Dispatchers.IO) {
         val request = requestBuilder(
-            "/api/files?path=" + enc(path) + "&recursive=${',
+            "/api/files?path=" + enc(path) + "&recursive=" + recursive,
         ).delete().build()
         client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
