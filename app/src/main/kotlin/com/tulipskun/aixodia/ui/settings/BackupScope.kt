@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -22,7 +24,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -220,11 +220,18 @@ fun FolderBrowserSheet(
     }
 
     val outside = bound != null && !isUnder(path, bound)
-    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    Column(
+        Modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close folder browser")
+                }
+                Text(title, style = MaterialTheme.typography.titleLarge)
+            }
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
                 path,
@@ -279,7 +286,7 @@ fun FolderBrowserSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            LazyColumn(Modifier.heightIn(max = 380.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 items(rows, key = { it.path }) { entry -> BrowseRow(entry) { path = entry.path } }
             }
             listing?.takeIf { it.truncated }?.let {
@@ -295,7 +302,6 @@ fun FolderBrowserSheet(
                 Button(onClick = { onPick(path) }, enabled = !outside && !loading) { Text(pickLabel) }
                 OutlinedButton(onClick = onDismiss) { Text("Cancel") }
             }
-        }
     }
 }
 
