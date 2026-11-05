@@ -114,9 +114,23 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 filled = true
                 bucket = s.bucket
                 prefix = s.prefix
+                val previousRoot = s.root.trimEnd('/').removePrefix("/")
                 rootDraft = "/"
-                excludesText = s.excludes.orEmpty().joinToString("\n")
-                includesText = s.includes.orEmpty().joinToString("\n")
+                excludesText = s.excludes.orEmpty().map { pattern ->
+                    if (previousRoot.isNotBlank() &&
+                        (pattern.contains("/") || pattern.endsWith("/")) &&
+                        !pattern.startsWith("$previousRoot/")
+                    ) "$previousRoot/${pattern.trimStart('/')}" else pattern
+                }.joinToString("\n")
+                includesText = if (previousRoot.isBlank()) {
+                    s.includes.orEmpty().joinToString("\n")
+                } else {
+                    (s.includes.orEmpty().ifEmpty { listOf("") }).map { entry ->
+                        if (entry.isBlank()) previousRoot
+                        else if (entry == previousRoot || entry.startsWith("$previousRoot/")) entry
+                        else "$previousRoot/${entry.trimStart('/')}"
+                    }.joinToString("\n")
+                }
             }
         }
     }
