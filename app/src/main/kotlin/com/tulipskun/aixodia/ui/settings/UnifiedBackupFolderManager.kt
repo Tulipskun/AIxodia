@@ -41,7 +41,6 @@ import com.tulipskun.aixodia.data.remote.HistoryApi
 internal fun UnifiedBackupFolderManager(
     history: HistoryApi,
     includes: List<String>,
-    onRootChange: (String) -> Unit,
     onIncludesChange: (List<String>) -> Unit,
     onDone: () -> Unit,
 ) {
@@ -124,7 +123,6 @@ internal fun UnifiedBackupFolderManager(
         )
         Button(
             onClick = {
-                onRootChange("/")
                 onDone()
             },
             modifier = Modifier.fillMaxWidth(),
