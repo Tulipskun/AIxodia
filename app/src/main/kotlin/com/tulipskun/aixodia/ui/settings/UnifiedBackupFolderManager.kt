@@ -41,10 +41,8 @@ import com.tulipskun.aixodia.data.remote.HistoryApi
 internal fun UnifiedBackupFolderManager(
     history: HistoryApi,
     includes: List<String>,
-    excludes: List<String>,
     onRootChange: (String) -> Unit,
     onIncludesChange: (List<String>) -> Unit,
-    onExcludesChange: (List<String>) -> Unit,
     onDone: () -> Unit,
 ) {
     var path by remember { mutableStateOf("/") }
@@ -89,9 +87,7 @@ internal fun UnifiedBackupFolderManager(
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             items(listing?.entries.orEmpty(), key = { it.path }) { entry ->
                 val relative = entry.path.removePrefix("/").trim('/')
-                val selected = relative.isNotBlank() && includes.any {
-                    it == relative || it.startsWith("$relative/") || (entry.isDir && relative.startsWith("$it/"))
-                }
+                val selected = relative.isNotBlank() && relative in includes
                 Row(
                     Modifier.fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -109,9 +105,9 @@ internal fun UnifiedBackupFolderManager(
                         checked = selected,
                         onCheckedChange = {
                             val next = if (selected) {
-                                includes.filterNot { it == relative || it.startsWith("$relative/") }
+                                includes - relative
                             } else {
-                                includes.filterNot { relative.startsWith("$it/") } + relative
+                                includes + relative
                             }
                             onIncludesChange(next.distinct().sorted())
                         },
@@ -129,7 +125,6 @@ internal fun UnifiedBackupFolderManager(
         Button(
             onClick = {
                 onRootChange("/")
-                onExcludesChange(emptyList())
                 onDone()
             },
             modifier = Modifier.fillMaxWidth(),
