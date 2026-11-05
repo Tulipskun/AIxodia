@@ -2,7 +2,6 @@ package com.tulipskun.aixodia.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,7 +21,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -115,7 +113,10 @@ internal fun UnifiedBackupFolderManager(
                 val relative = if (withinRoot) relativise(root, entry.path) else ""
                 val excludedPath = if (relative.isBlank()) "" else "$relative/"
                 val excluded = excludedPath.isNotBlank() &&
-                    excludes.any { it == excludedPath || it == relative }
+                    excludes.any {
+                        it == excludedPath || it == relative ||
+                            (it.endsWith("/") && relative.startsWith(it))
+                    }
                 val included = relative.isNotBlank() &&
                     (includes.isEmpty() || includes.any {
                         it == relative || it.startsWith("$relative/") || relative.startsWith("$it/")
