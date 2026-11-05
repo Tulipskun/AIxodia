@@ -293,7 +293,6 @@ fun FolderBrowserSheet(
                     BrowseRow(
                         entry = entry,
                         onEnter = { path = entry.path },
-                        onPick = { onPick(entry.path) },
                     )
                 }
             }
@@ -317,53 +316,45 @@ fun FolderBrowserSheet(
 private fun BrowseRow(
     entry: BrowseEntry,
     onEnter: () -> Unit,
-    onPick: () -> Unit,
 ) {
     val canWalk = entry.isDir && entry.canEnter
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        onClick = onEnter,
+        enabled = canWalk,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Surface(
-            onClick = onEnter,
-            enabled = canWalk,
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.weight(1f),
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier.padding(vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    if (entry.isDir) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
-                    contentDescription = null,
-                    tint = if (canWalk) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                    Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                    val why = when {
-                        canWalk -> "Open folder"
+            Icon(
+                if (entry.isDir) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
+                contentDescription = null,
+                tint = if (canWalk) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                Text(
+                    when {
+                        canWalk -> "Folder"
                         !entry.isDir && !entry.isSymlink -> "File"
                         entry.isSymlink -> "Symbolic link"
                         else -> "Cannot open this folder"
-                    }
-                    Text(
-                        why,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-        }
-        if (canWalk) {
-            TextButton(
-                onClick = onPick,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-            ) { Text("Select") }
+            if (canWalk) {
+                Icon(
+                    Icons.Default.FolderOpen,
+                    contentDescription = "Open folder",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
