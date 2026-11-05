@@ -198,7 +198,7 @@ fun FolderBrowserSheet(
     onDismiss: () -> Unit,
     onPick: (String) -> Unit,
 ) {
-    var path by remember { mutableStateOf(start.ifBlank { "/" }) }
+    var path by remember(start) { mutableStateOf(start.ifBlank { "/" }) }
     var listing by remember { mutableStateOf<BackupBrowse?>(null) }
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
