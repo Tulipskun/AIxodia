@@ -71,7 +71,6 @@ class BackupScreenSnapshots {
                 excludesText = "node_modules\n.venv",
                 onExcludes = {},
                 busy = false,
-                onPickRoot = {},
                 onEditScope = {},
                 onSave = {},
             )
@@ -88,7 +87,6 @@ class BackupScreenSnapshots {
                 excludesText = "node_modules\n.venv",
                 onExcludes = {},
                 busy = false,
-                onPickRoot = {},
                 onEditScope = {},
                 onSave = {},
             )
@@ -105,7 +103,6 @@ class BackupScreenSnapshots {
                 excludesText = "node_modules",
                 onExcludes = {},
                 busy = false,
-                onPickRoot = {},
                 onEditScope = {},
                 onSave = {},
             )
@@ -312,8 +309,7 @@ class BackupScreenSnapshots {
                     excludesText = idle.excludes.orEmpty().joinToString("\n"),
                     onExcludes = {},
                     busy = false,
-                    onPickRoot = {},
-                    onEditScope = {},
+                        onEditScope = {},
                     onSave = {},
                 )
             }
@@ -351,8 +347,7 @@ class BackupScreenSnapshots {
                     excludesText = idle.excludes.orEmpty().joinToString("\n"),
                     onExcludes = {},
                     busy = false,
-                    onPickRoot = {},
-                    onEditScope = {},
+                        onEditScope = {},
                     onSave = {},
                 )
             }
