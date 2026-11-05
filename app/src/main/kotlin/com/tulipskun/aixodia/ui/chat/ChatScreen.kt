@@ -152,6 +152,7 @@ import com.tulipskun.aixodia.ui.sessions.sessionTitle
 import com.tulipskun.aixodia.ui.providers.ProvidersScreen
 import com.tulipskun.aixodia.ui.settings.BackupScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
+import com.tulipskun.aixodia.ui.files.FilesScreen
 import com.tulipskun.aixodia.ui.terminal.TerminalUiState
 import com.tulipskun.aixodia.ui.terminal.TerminalWindow
 import com.tulipskun.aixodia.term.TerminalConnections
@@ -208,6 +209,7 @@ fun ChatScreen(
     // run outlasts the window it was started from and the reader needs a place
     // to come back to — not a line of text inside the chat it interrupts.
     var showBackup by rememberSaveable { mutableStateOf(false) }
+    var showFiles by rememberSaveable { mutableStateOf(false) }
 
     // The terminal's sockets, tabs and grids belong to this screen, not to the
     // visible window. Back only hides the window: every WebSocket stays
@@ -246,10 +248,16 @@ fun ChatScreen(
     BackHandler(enabled = showProviders) { showProviders = false }
     BackHandler(enabled = showTerminal) { showTerminal = false }
     BackHandler(enabled = showBackup) { showBackup = false }
+    BackHandler(enabled = showFiles) { showFiles = false }
 
     // Read before the configured check: a run already going on the engine is
     // worth looking at even from an install whose own settings are not set up,
     // and this page only ever asks the daemon what it is doing.
+    if (showFiles) {
+        FilesScreen(settings = settings, onBack = { showFiles = false })
+        return
+    }
+
     if (showBackup) {
         BackupScreen(history = history, onBack = { showBackup = false })
         return
@@ -265,6 +273,7 @@ fun ChatScreen(
                 sessionId = sessId, onBack = { showSettings = false },
                 discovery = discovery,
                 onOpenBackup = { showSettings = false; showBackup = true },
+                onOpenFiles = { showSettings = false; showFiles = true },
             )
             return
         }
