@@ -355,6 +355,7 @@ fun ScopeSheet(
     onRemove: (String) -> Unit,
     onAddFolder: () -> Unit,
     onToggleExclude: (String) -> Unit = {},
+    onRemoveExclude: (String) -> Unit = {},
     onAddExcludeFolder: () -> Unit = {},
     onEverything: () -> Unit,
     onDismiss: () -> Unit,
@@ -372,6 +373,7 @@ fun ScopeSheet(
             onRemove = onRemove,
             onAddFolder = onAddFolder,
             onToggleExclude = onToggleExclude,
+            onRemoveExclude = onRemoveExclude,
             onAddExcludeFolder = onAddExcludeFolder,
             showExcludePicker = true,
             onEverything = onEverything,
@@ -525,23 +527,38 @@ fun ScopeSheetContent(
             )
     
         }
-        if (excludes.isNotEmpty()) {
+        val otherRules = if (showExcludePicker) excludes.filterNot { it in folders } else excludes
+        if (otherRules.isNotEmpty()) {
             HorizontalDivider()
             Text(
-                if (showExcludePicker) "Other exclusion rules (${excludes.size})" else "Still left out inside whatever you tick (${excludes.size})",
+                if (showExcludePicker) "Other exclusion rules (${otherRules.size})" else "Still left out inside whatever you tick (${otherRules.size})",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            excludes.take(14).forEach { pattern ->
-                Text(
-                    pattern,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            otherRules.take(14).forEach { pattern ->
+                if (showExcludePicker) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            pattern,
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        IconButton(onClick = { onRemoveExclude(pattern) }) {
+                            Icon(Icons.Default.Close, contentDescription = "Remove exclusion $pattern")
+                        }
+                    }
+                } else {
+                    Text(
+                        pattern,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            if (excludes.size > 14) {
+            if (otherRules.size > 14) {
                 Text(
-                    "…and ${excludes.size - 14} more",
+                    "…and ${otherRules.size - 14} more",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
