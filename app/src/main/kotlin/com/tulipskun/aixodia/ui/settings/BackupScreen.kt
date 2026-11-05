@@ -416,7 +416,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     }
                 }
             }
-        }
             }
         }
     }
