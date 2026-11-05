@@ -1,9 +1,10 @@
 GOAL:
-[COMPLETED] Three complaints about the same box (with engine v1.172): a resize stopped throwing the terminal page back to the prompt — the culprit was the replay that follows it, not the resize; a failed chat dial now goes looking for a moved tunnel instead of retrying a dead host forever; and the corner counter counts the machine's uptime rather than the engine process's. Each checked by rendering, and the render found a fourth bug the tests had missed.
-[COMPLETED] Terminal shows what a finger and a keyboard asked for (with engine v1.171): a drag pages the pane's own history locally instead of waiting on a multiplexer's repaint, a resize holds the row being read, and a Thai composition appears on the line while it is being built — checked by replaying the real pane stream and by rendering.
+[IN_PROCESS] Add a root-capable SFTP-style file manager to the Android app (v1.174): browse the engine's Linux filesystem, stream uploads/downloads, and manage folders, names, permissions and deletion.
 
 PLAN:
-(no active plan)
+[IN_PROCESS] Add authenticated streaming file API client.
+[IN_PROCESS] Add Compose file browser and connect it to Settings navigation.
+[IN_PROCESS] Run unit tests, snapshots and signed GitHub Actions release.
 
 ARCHIVE:
 v1.172 `e2eeda2` terminal: the page is remembered by the *text* at its top, not its row number — tmux re-wraps a replayed pane at the new width, so the number is the thing a rebuild destroys; `TerminalRow.text()` was added for it
