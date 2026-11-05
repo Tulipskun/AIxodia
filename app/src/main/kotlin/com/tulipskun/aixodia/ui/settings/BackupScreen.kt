@@ -91,6 +91,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     var showScope by remember { mutableStateOf(false) }
     var browseRoot by remember { mutableStateOf(false) }
     var addFolder by remember { mutableStateOf(false) }
+    var addExcludeFolder by remember { mutableStateOf(false) }
 
     val preview = remember { mutableStateOf<BackupPreview?>(null) }
     val previewError = remember { mutableStateOf("") }
@@ -335,6 +336,11 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 preview.value = null
             },
             onAddFolder = { showScope = false; addFolder = true },
+            onToggleExclude = { name ->
+                excludesText = toggleExcludedFolder(excludes, name).joinToString("\n")
+                preview.value = null
+            },
+            onAddExcludeFolder = { showScope = false; addExcludeFolder = true },
             onEverything = {
                 includesText = ""
                 preview.value = null
@@ -394,6 +400,37 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 } else {
                     includesText = (includes + rel).sorted().joinToString("\n")
                     preview.value = null
+                    showScope = true
+                }
+            },
+        )
+    }
+
+    if (addExcludeFolder && s != null) {
+        FolderBrowserSheet(
+            history = history,
+            start = rootDraft,
+            title = "Exclude a folder from backup",
+            pickLabel = "Never back up this folder",
+            bound = rootDraft,
+            onDismiss = { addExcludeFolder = false },
+            onPick = { chosen ->
+                addExcludeFolder = false
+                val rel = relativise(rootDraft, chosen)
+                if (rel.startsWith("/")) {
+                    msg = "$chosen is not under the backup root $rootDraft."
+                    msgIsError = true
+                } else if (rel.isBlank()) {
+                    msg = "The backup root itself cannot be excluded here. Choose a folder inside it."
+                    msgIsError = true
+                } else if (rel in excludes) {
+                    msg = "$rel is already excluded."
+                    msgIsError = false
+                } else {
+                    excludesText = (excludes + rel).distinct().sorted().joinToString("\n")
+                    preview.value = null
+                    msg = "$rel will be excluded from the next backup."
+                    msgIsError = false
                     showScope = true
                 }
             },
