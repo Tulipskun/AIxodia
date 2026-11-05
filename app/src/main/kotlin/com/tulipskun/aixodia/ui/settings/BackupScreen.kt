@@ -342,6 +342,10 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 excludesText = toggleExcludedFolder(excludes, name).joinToString("\n")
                 preview.value = null
             },
+            onRemoveExclude = { name ->
+                excludesText = excludes.filterNot { it == name }.joinToString("\n")
+                preview.value = null
+            },
             onAddExcludeFolder = { showScope = false; addExcludeFolder = true },
             onEverything = {
                 includesText = ""
