@@ -24,6 +24,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -195,49 +197,10 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
         if (readError.isNotBlank()) StatusBanner(readError, error = true)
         if (msg.isNotBlank()) StatusBanner(msg, msgIsError)
 
-        RunCard(
+        BackupOverviewCard(
             status = s,
-            now = now,
-            busy = busy,
-            onStart = {
-                busy = true; msg = ""
-                scope.launch {
-                    val out = history.backupStart()
-                    msg = out
-                    msgIsError = !out.startsWith("Backup started")
-                    load()
-                    busy = false
-                }
-            },
-            onRefresh = {
-                busy = true
-                scope.launch { load(); busy = false }
-            },
-        )
-
-        val run = s?.run
-        if (run != null) RunResultCard(run)
-
-        PreviewCard(
-            preview = preview.value,
-            error = previewError.value,
-            busy = busy,
-            enabled = s != null && s.reportsScope && !s.running,
-            lastRun = run,
-            onPreview = {
-                busy = true; msg = ""
-                previewError.value = ""
-                scope.launch {
-                    val read = history.backupPreview(
-                        root = rootDraft.takeIf { it != s?.root },
-                        includes = s?.includes?.let { includes },
-                    )
-                    preview.value = read.value
-                    previewError.value = read.value?.let { "" } ?: read.error
-                    load()
-                    busy = false
-                }
-            },
+            included = includes.size,
+            excluded = excludes.size,
         )
 
         ScopeCard(
@@ -262,7 +225,71 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     )
                     msg = out
                     msgIsError = !out.startsWith("Backup settings saved")
-                    // The engine is the authority on what it now stores.
+                    filled = false
+                    load()
+                    busy = false
+                }
+            },
+        )
+
+        PreviewCard(
+            preview = preview.value,
+            error = previewError.value,
+            busy = busy,
+            enabled = s != null && s.reportsScope && !s.running,
+            lastRun = s?.run,
+            onPreview = {
+                busy = true; msg = ""
+                previewError.value = ""
+                scope.launch {
+                    val read = history.backupPreview(
+                        root = rootDraft.takeIf { it != s?.root },
+                        includes = s?.includes?.let { includes },
+                    )
+                    preview.value = read.value
+                    previewError.value = read.value?.let { "" } ?: read.error
+                    load()
+                    busy = false
+                }
+            },
+        )
+
+        RunCard(
+            status = s,
+            now = now,
+            busy = busy,
+            onStart = {
+                busy = true; msg = ""
+                scope.launch {
+                    val out = history.backupStart()
+                    msg = out
+                    msgIsError = !out.startsWith("Backup started")
+                    load()
+                    busy = false
+                }
+            },
+            onRefresh = {
+                busy = true
+                scope.launch { load(); busy = false }
+            },
+        )
+
+        val run = s?.run
+        if (run != null) RunResultCard(run)
+
+        BucketCard(
+            status = s,
+            token = token, onToken = { token = it },
+            bucket = bucket, onBucket = { bucket = it },
+            prefix = prefix, onPrefix = { prefix = it },
+            showToken = showToken, onToggleToken = { showToken = !showToken },
+            busy = busy,
+            onSave = {
+                busy = true; msg = ""
+                scope.launch {
+                    val out = history.saveBackupConfig(token, bucket, prefix)
+                    msg = out
+                    msgIsError = !out.startsWith("Backup settings saved")
                     filled = false
                     load()
                     busy = false
@@ -279,26 +306,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     val out = history.saveBackupAuto(enabled, idle, cpu, cooldown)
                     msg = out
                     msgIsError = !out.startsWith("Auto-backup saved")
-                    filled = false
-                    load()
-                    busy = false
-                }
-            },
-        )
-
-        BucketCard(
-            status = s,
-            token = token, onToken = { token = it },
-            bucket = bucket, onBucket = { bucket = it },
-            prefix = prefix, onPrefix = { prefix = it },
-            showToken = showToken, onToggleToken = { showToken = !showToken },
-            busy = busy,
-            onSave = {
-                busy = true; msg = ""
-                scope.launch {
-                    val out = history.saveBackupConfig(token, bucket, prefix)
-                    msg = out
-                    msgIsError = !out.startsWith("Backup settings saved")
                     filled = false
                     load()
                     busy = false
@@ -469,6 +476,63 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 TextButton(onClick = { askRestore = false }) { Text("Cancel") }
             },
         )
+    }
+}
+
+/**
+ * A compact dashboard at the top of the page. Scope and exclusions are shown
+ * before the operator reaches the controls, so a narrowed backup is visible
+ * before it can replace the bucket's current manifest.
+ */
+@Composable
+private fun BackupOverviewCard(
+    status: BackupStatus?,
+    included: Int,
+    excluded: Int,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("BACKUP WORKSPACE", style = MaterialTheme.typography.labelMedium)
+            Text("Protect your files", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                when {
+                    status == null -> "Connecting to the backup engine…"
+                    status.running -> "${status.operation.replaceFirstChar { it.uppercase() }} in progress"
+                    status.configured -> "Ready to back up"
+                    status.restorable -> "Existing backup available to restore"
+                    else -> "Setup required before backup"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.18f))
+            Text(
+                status?.root?.ifBlank { "Backup folder not set" } ?: "Backup folder not loaded",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Column {
+                    Text(if (included == 0) "ALL" else included.toString(), style = MaterialTheme.typography.titleLarge)
+                    Text("included", style = MaterialTheme.typography.labelSmall)
+                }
+                Column {
+                    Text(excluded.toString(), style = MaterialTheme.typography.titleLarge)
+                    Text("excluded", style = MaterialTheme.typography.labelSmall)
+                }
+                Column {
+                    Text(status?.bucket?.substringAfterLast('/')?.ifBlank { "—" } ?: "—", style = MaterialTheme.typography.titleLarge)
+                    Text("bucket", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
     }
 }
 
