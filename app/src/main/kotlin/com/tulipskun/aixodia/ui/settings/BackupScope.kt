@@ -389,6 +389,7 @@ fun ScopeSheet(
     onToggleExclude: (String) -> Unit = {},
     onRemoveExclude: (String) -> Unit = {},
     onAddExcludeFolder: () -> Unit = {},
+    onChangeRoot: () -> Unit = {},
     onEverything: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -447,6 +448,13 @@ fun ScopeSheetContent(
             .padding(bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        Text("Backup location", style = MaterialTheme.typography.titleMedium)
+        PickerRow(
+            label = "Backup root",
+            value = root,
+            onPick = onChangeRoot,
+        )
+        HorizontalDivider()
         Text("What to back up", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(
