@@ -3,7 +3,7 @@ GOAL:
 
 PLAN:
 [IN_PROCESS] Add authenticated streaming file API client.
-[IN_PROCESS] Add Compose file browser and connect it to Settings navigation.
+[IN_PROCESS] Connect the Compose file browser to Settings navigation.
 [IN_PROCESS] Run unit tests, snapshots and signed GitHub Actions release.
 
 ARCHIVE:
