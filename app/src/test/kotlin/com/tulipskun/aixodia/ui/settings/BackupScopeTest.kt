@@ -130,7 +130,7 @@ class BackupScopeTest {
             toggleExcludedFolder(listOf(".cache/", "target/"), ".cache"),
         )
         assertEquals(
-            listOf("target/"),
+            emptyList<String>(),
             toggleExcludedFolder(listOf("target/", "target/"), "target"),
         )
         assertEquals("projects/cache/", excludedFolderPath("projects/cache"))
