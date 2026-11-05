@@ -453,8 +453,8 @@ fun ScopeSheetContent(
                 "Nothing is ticked, so this backs up all of it. Tick one folder to " +
                     "narrow the backup to just the folders you tick."
             } else {
-                "Unticked folders are not in this backup. Folders created later are " +
-                    "not either, until you tick them."
+                "Unticked folders are not scanned in this run. Previously backed-up " +
+                    "files outside this selection remain available to restore."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -778,9 +778,9 @@ fun PreviewCard(
             }
         }
         Text(
-            "A backup replaces the one tree the bucket holds. A restore always " +
-                "restores everything that tree names — narrowing this scope " +
-                "narrows the next backup, never what a restore can put back.",
+            "A narrower selection updates only the folders you chose. Previously " +
+                "backed-up files outside that selection remain in the restore set. " +
+                "Folders explicitly excluded are removed from the next backup.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
