@@ -216,6 +216,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     onDismiss = { browseRoot = false },
                     onPick = { chosen ->
                         browseRoot = false
+                        showScope = true
                         if (chosen != rootDraft) {
                             rootDraft = chosen
                             includesText = ""
@@ -306,6 +307,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                         preview.value = null
                     },
                     onAddExcludeFolder = { showScope = false; addExcludeFolder = true },
+                    onChangeRoot = { showScope = false; browseRoot = true },
                     onEverything = {
                         includesText = ""
                         preview.value = null
@@ -849,14 +851,13 @@ fun ScopeCard(
     ) {
         if (reportsScope) {
             PickerRow(
-                label = "Back up this folder",
-                value = root.ifBlank { status?.root.orEmpty().ifBlank { "not set" } },
-                hint = "the tree the engine walks; everything the backup names is a path inside it",
-                onPick = onPickRoot,
+                label = "Manage backup folders",
+                value = if (includes.isEmpty()) "Everything under ${root.ifBlank { status?.root.orEmpty().ifBlank { "not set" } }}"
+                    else "${includes.size} folders included",
+                hint = "Set the backup location, include folders, and exclude folders in one place.",
+                onPick = onEditScope,
             )
-            PickerRow(
-                label = "Which folders inside it",
-                value = if (includes.isEmpty()) "Everything" else "${includes.size} folders picked",
+            /*
                 hint = if (includes.isEmpty()) {
                     "nothing picked = the whole tree, including folders made after this was saved"
                 } else {
@@ -864,7 +865,7 @@ fun ScopeCard(
                         if (includes.size > 3) " …and ${includes.size - 3} more" else ""
                 },
                 onPick = onEditScope,
-            )
+            ) */
             if (reportsExcludes) {
                 TextButton(onClick = { showPatterns = !showPatterns }) {
                     Text(if (showPatterns) "Hide the raw patterns" else "Edit the raw patterns")
