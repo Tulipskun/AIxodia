@@ -356,7 +356,6 @@ fun ScopeSheet(
     onAddFolder: () -> Unit,
     onToggleExclude: (String) -> Unit = {},
     onAddExcludeFolder: () -> Unit = {},
-    showExcludePicker: Boolean = false,
     onEverything: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -400,6 +399,9 @@ fun ScopeSheetContent(
     onToggle: (String) -> Unit,
     onRemove: (String) -> Unit,
     onAddFolder: () -> Unit,
+    onToggleExclude: (String) -> Unit = {},
+    onAddExcludeFolder: () -> Unit = {},
+    showExcludePicker: Boolean = false,
     onEverything: () -> Unit,
     onDismiss: () -> Unit,
 ) {
