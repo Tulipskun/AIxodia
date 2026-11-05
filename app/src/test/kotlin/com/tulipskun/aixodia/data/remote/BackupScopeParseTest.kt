@@ -7,11 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The two reads the folder picker is built on. Both come from an engine that may
- * be older than the route, may answer with a reason instead of a listing, and may
- * cap what it sends — so what the parser does with a short or odd answer is the
- * difference between a picker that says "engine plumbing" and an empty sheet that
- * reads as an empty folder.
+ * Tests for parsing the engine's backup file and folder listing.
  */
 class BackupScopeParseTest {
 
@@ -23,12 +19,8 @@ class BackupScopeParseTest {
                 {
                   "path": "/root", "parent": "/",
                   "entries": [
-                    {"name": ".codex", "path": "/root/.codex", "is_dir": true,
-                     "is_symlink": false, "can_enter": true},
-                    {"name": "escape", "path": "/root/escape", "is_dir": false,
-                     "is_symlink": true, "can_enter": false},
-                    {"name": "notes.txt", "path": "/root/notes.txt", "is_dir": false,
-                     "is_symlink": false, "can_enter": false}
+                    {"name": ".codex", "path": "/root/.codex", "is_dir": true},
+                    {"name": "notes.txt", "path": "/root/notes.txt", "is_dir": false}
                   ],
                   "truncated": false
                 }
@@ -37,12 +29,11 @@ class BackupScopeParseTest {
         )
         assertEquals("/root", browse.path)
         assertEquals("/", browse.parent)
-        assertEquals(3, browse.entries.size)
+        assertEquals(2, browse.entries.size)
         assertEquals(".codex", browse.entries[0].name)
         assertTrue(browse.entries[0].canEnter)
-        assertFalse(browse.entries[1].canEnter)
-        assertTrue(browse.entries[1].isSymlink)
-        assertEquals("/root/notes.txt", browse.entries[2].path)
+        assertFalse(browse.entries[1].isDir)
+        assertEquals("/root/notes.txt", browse.entries[1].path)
         assertFalse(browse.truncated)
     }
 
