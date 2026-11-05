@@ -302,8 +302,6 @@ data class BackupStatus(
     val lastRun: String = "",
     /** The same answer as [lastRun], with every count the engine reported. */
     val run: BackupRun? = null,
-    /** Last successful backup, persisted by the engine across restarts. */
-    val lastBackup: BackupRun? = null,
     /**
      * The glob patterns this engine leaves out of a backup, or null when it does
      * not say. A backup scope is not something to guess at: an engine older than
@@ -322,6 +320,8 @@ data class BackupStatus(
      * preview route either.
      */
     val includes: List<String>? = null,
+    /** Last successful backup, persisted by the engine across restarts. */
+    val lastBackup: BackupRun? = null,
 ) {
     val running: Boolean get() = operation.isNotBlank()
 
