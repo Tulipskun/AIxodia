@@ -54,7 +54,7 @@ class FilesApi(
         if (config.token.isBlank()) throw IllegalStateException("Cloudflare API token is not configured")
         return Request.Builder()
             .url(base + path)
-            .header("Authorization", "Bearer ${')
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -215,7 +215,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -536,7 +536,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -849,7 +849,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -1170,7 +1170,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -1423,7 +1423,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -1744,7 +1744,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -2057,7 +2057,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -2378,7 +2378,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -2577,7 +2577,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -2898,7 +2898,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -3211,7 +3211,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -3532,7 +3532,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -3785,7 +3785,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -4106,7 +4106,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -4419,7 +4419,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
@@ -4740,7 +4740,7 @@ class FilesApi(
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 }base$path")
-            .header("Authorization", "Bearer $" + "config.token")
+            .header("Authorization", "Bearer " + config.token)
     }
 
     private fun failure(responseCode: Int, body: String): Nothing {
