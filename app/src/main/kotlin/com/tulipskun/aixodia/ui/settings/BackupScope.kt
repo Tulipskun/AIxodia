@@ -433,8 +433,7 @@ fun ScopeSheetContent(
     val everything = includes.isEmpty()
     val stale = stalePicks(includes, folders)
     Column(
-        Modifier.fillMaxWidth()
-            .heightIn(max = 620.dp)
+        Modifier.fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 4.dp)
             .padding(bottom = 28.dp),
