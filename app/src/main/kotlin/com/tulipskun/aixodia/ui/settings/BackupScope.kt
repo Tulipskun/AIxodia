@@ -367,26 +367,24 @@ fun ScopeSheet(
     onEverything: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
-        ScopeSheetContent(
-            root = root,
-            includes = includes,
-            excludes = excludes,
-            folders = folders,
-            foldersLoading = foldersLoading,
-            foldersError = foldersError,
-            foldersTruncated = foldersTruncated,
-            onToggle = onToggle,
-            onRemove = onRemove,
-            onAddFolder = onAddFolder,
-            onToggleExclude = onToggleExclude,
-            onRemoveExclude = onRemoveExclude,
-            onAddExcludeFolder = onAddExcludeFolder,
-            showExcludePicker = true,
-            onEverything = onEverything,
-            onDismiss = onDismiss,
-        )
-    }
+    ScopeSheetContent(
+        root = root,
+        includes = includes,
+        excludes = excludes,
+        folders = folders,
+        foldersLoading = foldersLoading,
+        foldersError = foldersError,
+        foldersTruncated = foldersTruncated,
+        onToggle = onToggle,
+        onRemove = onRemove,
+        onAddFolder = onAddFolder,
+        onToggleExclude = onToggleExclude,
+        onRemoveExclude = onRemoveExclude,
+        onAddExcludeFolder = onAddExcludeFolder,
+        showExcludePicker = true,
+        onEverything = onEverything,
+        onDismiss = onDismiss,
+    )
 }
 
 /**
@@ -474,18 +472,17 @@ fun ScopeSheetContent(
             else -> folders.forEach { name ->
                 if (foldersTruncated && name == folders.last()) {
                     Text(
-                        "The engine stops listing a folder after 2000 entries, so this " +
-                            "may not be all of them. Browse below to reach a deeper path.",
+                        "The engine stops listing a folder after 2000 entries. Use Browse to reach deeper paths.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                FolderCheckRow(
+                FolderScopeRow(
                     name = name,
                     pick = pickOf(includes, name),
-                    nested = includes.filter { it.startsWith("$name/") },
-                    onToggle = { onToggle(name) },
-                    onDrop = onRemove,
+                    excluded = "$name/" in excludes || name in excludes,
+                    onToggleBackup = { onToggle(name) },
+                    onToggleExclude = { onToggleExclude("$name/") },
                 )
             }
         }
@@ -512,28 +509,15 @@ fun ScopeSheetContent(
             onPick = onAddFolder,
         )
         if (showExcludePicker) {
-            HorizontalDivider()
-            Text("Folders to leave out", style = MaterialTheme.typography.titleSmall)
             Text(
-                "These folders stay excluded even when you back up everything or tick their parent.",
+                "Each folder appears once. Use Back up to include it, or Exclude to keep it out. Exclusions take priority.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (folders.isNotEmpty()) {
-                folders.forEach { name ->
-                    FolderExcludeRow(
-                        name = name,
-                        excluded = "$name/" in excludes,
-                        onToggle = { onToggleExclude("$name/") },
-                    )
-                }
+            OutlinedButton(onClick = onAddExcludeFolder) {
+                Icon(Icons.Default.Folder, contentDescription = null)
+                Text("Exclude a deeper folder")
             }
-            PickerRow(
-                label = "Exclude a folder deeper inside",
-                value = "browse inside $root",
-                onPick = onAddExcludeFolder,
-            )
-    
         }
         val folderRules = folders.map { "$it/" }.toSet()
         val otherRules = if (showExcludePicker) excludes.filterNot { it in folderRules } else excludes
@@ -575,6 +559,54 @@ fun ScopeSheetContent(
         }
         HorizontalDivider()
         Button(onClick = onDismiss) { Text("Done") }
+    }
+}
+
+/**
+ * One physical folder, one visual row. Include and exclude are actions on that
+ * same row; exclusions always win in the engine's matching rules.
+ */
+@Composable
+private fun FolderScopeRow(
+    name: String,
+    pick: FolderPick,
+    excluded: Boolean,
+    onToggleBackup: () -> Unit,
+    onToggleExclude: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.Folder,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+            Text(
+                when {
+                    excluded -> "Excluded"
+                    pick == FolderPick.Whole -> "Included in backup"
+                    pick == FolderPick.Partial -> "Some subfolders included"
+                    else -> "Not selected"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Checkbox(checked = pick != FolderPick.Off, onCheckedChange = { onToggleBackup() })
+            Text("Back up", style = MaterialTheme.typography.labelSmall)
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Checkbox(checked = excluded, onCheckedChange = { onToggleExclude() })
+            Text("Exclude", style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
