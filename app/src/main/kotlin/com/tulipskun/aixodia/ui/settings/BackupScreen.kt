@@ -84,10 +84,9 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     var token by rememberSaveable { mutableStateOf("") }
     var bucket by rememberSaveable { mutableStateOf("") }
     var prefix by rememberSaveable { mutableStateOf("") }
-    // A newline-joined list rather than a List<String>, so the pick survives the
-    // process being recreated. An empty string is the whole tree, not nothing.
+    // A newline-joined list rather than a List<String>, so selected paths
+    // survive the process being recreated. An empty list means no selection.
     var includesText by rememberSaveable { mutableStateOf("") }
-    var rootDraft by rememberSaveable { mutableStateOf("") }
     var showToken by remember { mutableStateOf(false) }
     var filled by remember { mutableStateOf(false) }
 
@@ -113,7 +112,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 bucket = s.bucket
                 prefix = s.prefix
                 val previousRoot = s.root.trimEnd('/').removePrefix("/")
-                rootDraft = "/"
                 includesText = if (previousRoot.isBlank()) {
                     s.includes.orEmpty().joinToString("\n")
                 } else {
@@ -168,12 +166,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 UnifiedBackupFolderManager(
                     history = history,
                     includes = includes,
-                    onRootChange = { _ ->
-                        rootDraft = "/"
-                        preview.value = null
-                        msg = "Backup filesystem root set to /. Select any source folders, then save."
-                        msgIsError = false
-                    },
                     onIncludesChange = { chosen ->
                         includesText = chosen.joinToString("\n")
                         preview.value = null
@@ -249,8 +241,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Choose folders", style = MaterialTheme.typography.titleLarge)
                             Text(
-                                "Select what enters the backup and what must always stay out. " +
-                                    "An empty selection means all folders on the engine filesystem.",
+                                "Select the files and folders to back up. Nothing is included until it is selected.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
