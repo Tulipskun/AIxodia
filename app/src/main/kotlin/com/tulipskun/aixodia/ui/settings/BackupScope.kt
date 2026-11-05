@@ -232,7 +232,6 @@ fun FolderBrowserSheet(
                 }
                 Text(title, style = MaterialTheme.typography.titleLarge)
             }
-            Text(title, style = MaterialTheme.typography.titleMedium)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalArrangement = Arrangement.Center,
@@ -251,12 +250,6 @@ fun FolderBrowserSheet(
                     ) { Text(segment, maxLines = 1) }
                 }
             }
-            Text(
-                path,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (outside) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
             if (outside) {
                 StatusBanner("This is outside $bound — the backup's root. Move back in to pick a folder.", error = true)
             }
