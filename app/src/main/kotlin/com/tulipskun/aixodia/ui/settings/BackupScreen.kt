@@ -142,11 +142,11 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     }
 
     val s = status
-    val tabLabels = listOf("Activity", "Folders", "Storage", "Auto")
+    val tabLabels = listOf("Activity", "Files & folders", "Storage", "Auto")
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (showScope) "Manage backup folders" else "Backup & restore") },
+                title = { Text(if (showScope) "Manage backup files and folders" else "Backup & restore") },
                 navigationIcon = {
                     IconButton(onClick = {
                         if (showScope) showScope = false else onBack()
@@ -678,12 +678,7 @@ internal fun RestoreCard(
 }
 
 /**
- * The scope: which folder the engine walks, and which folders inside it are kept.
- *
- * Both are chosen, not typed. An engine older than the allowlist gets what it
- * always got — the raw exclusion patterns, which is the only scope it can be
- * asked about — and an engine that reports neither is told so plainly rather
- * than shown a list the phone invented.
+ * The file and folder paths explicitly selected for backup.
  */
 @Composable
 fun ScopeCard(
