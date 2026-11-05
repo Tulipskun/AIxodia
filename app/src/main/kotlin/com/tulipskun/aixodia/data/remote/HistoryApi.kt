@@ -340,12 +340,6 @@ data class BrowseEntry(
     val name: String,
     val path: String,
     val isDir: Boolean,
-    val isSymlink: Boolean,
-    /**
-     * False for a link and for a folder on another filesystem: the walker will
-     * not go there, so the picker must not offer it as a place to descend.
-     */
-    val canEnter: Boolean,
 )
 
 /** The answer to "what is in this folder on the engine". */
