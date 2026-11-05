@@ -42,7 +42,6 @@ import com.tulipskun.aixodia.data.remote.HistoryApi
 @Composable
 internal fun UnifiedBackupFolderManager(
     history: HistoryApi,
-    root: String,
     includes: List<String>,
     excludes: List<String>,
     onRootChange: (String) -> Unit,
