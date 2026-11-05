@@ -120,19 +120,20 @@ class BackupScopeTest {
 
     @Test
     fun `one tap adds or removes a folder exclusion without changing other rules`() {
-        assertEquals(listOf(".cache"), toggleExcludedFolder(emptyList(), ".cache"))
+        assertEquals(listOf(".cache/"), toggleExcludedFolder(emptyList(), ".cache"))
         assertEquals(
-            listOf(".cache", "target"),
-            toggleExcludedFolder(listOf(".cache"), "target"),
+            listOf(".cache/", "target/"),
+            toggleExcludedFolder(listOf(".cache/"), "target"),
         )
         assertEquals(
-            listOf("target"),
-            toggleExcludedFolder(listOf(".cache", "target"), ".cache"),
+            listOf("target/"),
+            toggleExcludedFolder(listOf(".cache/", "target/"), ".cache"),
         )
         assertEquals(
-            listOf("target"),
-            toggleExcludedFolder(listOf("target", "target"), "target"),
+            listOf("target/"),
+            toggleExcludedFolder(listOf("target/", "target/"), "target"),
         )
+        assertEquals("projects/cache/", excludedFolderPath("projects/cache"))
     }
 
     @Test
