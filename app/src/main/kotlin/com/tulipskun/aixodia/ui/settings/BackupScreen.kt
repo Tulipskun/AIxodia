@@ -105,6 +105,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     var foldersTruncated by remember { mutableStateOf(false) }
 
     val includes = includesText.split('\n').map { it.trim() }.filter { it.isNotBlank() }
+    val excludes = excludesText.split('\n').map { it.trim() }.filter { it.isNotBlank() }
 
     val load: suspend () -> Unit = {
         val read = runCatchingCancellable { history.backupStatus() }
