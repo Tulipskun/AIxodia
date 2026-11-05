@@ -256,10 +256,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                         token = token,
                         bucket = bucket,
                         prefix = prefix,
-                        excludes = s?.excludes?.let {
-                            excludesText.split('\n').map { line -> line.trim() }
-                                .filter { line -> line.isNotBlank() }
-                        },
+                        excludes = excludes,
                         includes = s?.includes?.let { includes },
                         root = rootDraft.takeIf { it != s?.root },
                     )
