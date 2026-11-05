@@ -156,9 +156,16 @@ internal fun dropPick(includes: List<String>, name: String): List<String> =
     includes.filter { it != name && !it.startsWith("$name/") }
 
 /** A bare exclusion names a folder component; a path exclusion names one folder under the root. */
-internal fun toggleExcludedFolder(excludes: List<String>, name: String): List<String> =
-    if (name in excludes) excludes.filterNot { it == name }.sorted()
-    else (excludes + name).distinct().sorted()
+internal fun excludedFolderPath(name: String): String = name.trimEnd('/') + "/"
+
+internal fun toggleExcludedFolder(excludes: List<String>, name: String): List<String> {
+    val path = excludedFolderPath(name)
+    return if (path in excludes || name in excludes) {
+        excludes.filterNot { it == path || it == name }.sorted()
+    } else {
+        (excludes + path).distinct().sorted()
+    }
+}
 
 /**
  * Picks whose first component is not in the current listing: a folder renamed or
