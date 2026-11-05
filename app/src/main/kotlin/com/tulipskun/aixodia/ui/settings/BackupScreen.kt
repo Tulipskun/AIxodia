@@ -732,6 +732,7 @@ internal fun RunResultCard(run: BackupRun) {
         if (r.root.isNotBlank()) DetailRow("root", r.root)
         if (r.bucket.isNotBlank()) DetailRow("bucket", r.bucket)
         DetailRow("took", humanDuration(r.durationMs / 1000))
+        DetailRow("effective throughput", humanRate(r.bytes, r.durationMs))
         if (r.skipped.isNotEmpty()) {
             HorizontalDivider()
             // A path that could not be read is missing from the backup and the
@@ -1026,6 +1027,13 @@ internal fun humanDuration(seconds: Long): String = when {
     seconds < 60 -> "${seconds}s"
     seconds < 3600 -> "${seconds / 60}m ${(seconds % 60)}s"
     else -> "${seconds / 3600}h ${(seconds % 3600) / 60}m"
+}
+
+/** Effective tree throughput, using the bytes represented by the completed run. */
+internal fun humanRate(bytes: Long, durationMs: Long): String {
+    if (bytes <= 0L || durationMs <= 0L) return "—"
+    val perSecond = (bytes.toDouble() * 1000.0 / durationMs).toLong()
+    return "${AttachmentRef.humanSize(perSecond)}/s"
 }
 
 /** Grouped digits: 47930 and 47,930 are the same count but not the same read. */
