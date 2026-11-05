@@ -354,8 +354,9 @@ fun ScopeSheet(
     onToggle: (String) -> Unit,
     onRemove: (String) -> Unit,
     onAddFolder: () -> Unit,
-    onToggleExclude: (String) -> Unit,
-    onAddExcludeFolder: () -> Unit,
+    onToggleExclude: (String) -> Unit = {},
+    onAddExcludeFolder: () -> Unit = {},
+    showExcludePicker: Boolean = false,
     onEverything: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -373,6 +374,7 @@ fun ScopeSheet(
             onAddFolder = onAddFolder,
             onToggleExclude = onToggleExclude,
             onAddExcludeFolder = onAddExcludeFolder,
+            showExcludePicker = true,
             onEverything = onEverything,
             onDismiss = onDismiss,
         )
@@ -497,31 +499,34 @@ fun ScopeSheetContent(
             value = "browse the engine from $root",
             onPick = onAddFolder,
         )
-        HorizontalDivider()
-        Text("Folders to leave out", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "These folders stay excluded even when you back up everything or tick their parent.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (folders.isNotEmpty()) {
-            folders.forEach { name ->
-                FolderExcludeRow(
-                    name = name,
-                    excluded = name in excludes,
-                    onToggle = { onToggleExclude(name) },
-                )
+        if (showExcludePicker) {
+            HorizontalDivider()
+            Text("Folders to leave out", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "These folders stay excluded even when you back up everything or tick their parent.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (folders.isNotEmpty()) {
+                folders.forEach { name ->
+                    FolderExcludeRow(
+                        name = name,
+                        excluded = name in excludes,
+                        onToggle = { onToggleExclude(name) },
+                    )
+                }
             }
+            PickerRow(
+                label = "Exclude a folder deeper inside",
+                value = "browse inside $root",
+                onPick = onAddExcludeFolder,
+            )
+    
         }
-        PickerRow(
-            label = "Exclude a folder deeper inside",
-            value = "browse inside $root",
-            onPick = onAddExcludeFolder,
-        )
         if (excludes.isNotEmpty()) {
             HorizontalDivider()
             Text(
-                "Other exclusion rules (${excludes.size})",
+                if (showExcludePicker) "Other exclusion rules (${excludes.size})" else "Still left out inside whatever you tick (${excludes.size})",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
