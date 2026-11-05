@@ -207,7 +207,306 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(pad),
         ) {
-            if (askRestore && s != null) {
+            if (browseRoot && s != null) {
+                FolderBrowserSheet(
+                    history = history,
+                    start = rootDraft.ifBlank { s.root },
+                    pickLabel = "Back up this folder",
+                    bound = null,
+                    onDismiss = { browseRoot = false },
+                    onPick = { chosen ->
+                        browseRoot = false
+                        if (chosen != rootDraft) {
+                            rootDraft = chosen
+                            includesText = ""
+                            preview.value = null
+                            msg = "Root set to $chosen — folder picks were cleared because they named paths under the old root."
+                            msgIsError = false
+                        }
+                    },
+                )
+            } else if (addFolder && s != null) {
+                FolderBrowserSheet(
+                    history = history,
+                    start = rootDraft,
+                    pickLabel = "Back this folder up",
+                    bound = rootDraft,
+                    onDismiss = { addFolder = false },
+                    onPick = { chosen ->
+                        addFolder = false
+                        val rel = relativise(rootDraft, chosen)
+                        if (rel.startsWith("/")) {
+                            msg = "$chosen is not under the backup root $rootDraft."
+                            msgIsError = true
+                        } else if (rel.isBlank()) {
+                            msg = "That is the root itself, which already covers everything."
+                            msgIsError = false
+                        } else if (isAlreadyCovered(includes, rel)) {
+                            msg = "$rel is already inside a folder you picked."
+                            msgIsError = false
+                        } else {
+                            includesText = (includes + rel).sorted().joinToString("\n")
+                            preview.value = null
+                            showScope = true
+                        }
+                    },
+                )
+            } else if (addExcludeFolder && s != null) {
+                FolderBrowserSheet(
+                    history = history,
+                    start = rootDraft,
+                    pickLabel = "Never back up this folder",
+                    bound = rootDraft,
+                    onDismiss = { addExcludeFolder = false },
+                    onPick = { chosen ->
+                        addExcludeFolder = false
+                        val rel = relativise(rootDraft, chosen)
+                        if (rel.startsWith("/")) {
+                            msg = "$chosen is not under the backup root $rootDraft."
+                            msgIsError = true
+                        } else if (rel.isBlank()) {
+                            msg = "The backup root itself cannot be excluded here."
+                            msgIsError = true
+                        } else if (rel in excludes || "$rel/" in excludes) {
+                            msg = "$rel is already excluded."
+                            msgIsError = false
+                        } else {
+                            excludesText = (excludes + "$rel/").distinct().sorted().joinToString("\n")
+                            preview.value = null
+                            msg = "$rel/ will be excluded from the next backup."
+                            msgIsError = false
+                            showScope = true
+                        }
+                    },
+                )
+            } else if (showScope && s != null) {
+                ScopeSheetContent(
+                    root = rootDraft.ifBlank { s.root },
+                    includes = includes,
+                    excludes = excludes,
+                    folders = scopeFolders,
+                    foldersLoading = foldersLoading,
+                    foldersError = foldersError,
+                    foldersTruncated = foldersTruncated,
+                    onToggle = { name ->
+                        includesText = toggleFolder(includes, name).joinToString("\n")
+                        preview.value = null
+                    },
+                    onRemove = { gone ->
+                        includesText = dropPick(includes, gone).joinToString("\n")
+                        preview.value = null
+                    },
+                    onAddFolder = { showScope = false; addFolder = true },
+                    onToggleExclude = { name ->
+                        excludesText = toggleExcludedFolder(excludes, name).joinToString("\n")
+                        preview.value = null
+                    },
+                    onRemoveExclude = { name ->
+                        excludesText = excludes.filterNot { it == name }.joinToString("\n")
+                        preview.value = null
+                    },
+                    onAddExcludeFolder = { showScope = false; addExcludeFolder = true },
+                    onEverything = {
+                        includesText = ""
+                        preview.value = null
+                    },
+                    onDismiss = { showScope = false },
+                )
+            } else {
+            // Navigation stays visible while the selected workspace scrolls.
+            // Each tab has one job, instead of making the operator pass through
+            // every configuration card to reach the action they need.
+            ScrollableTabRow(
+                selectedTabIndex = selectedTab,
+                edgePadding = 16.dp,
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                tabLabels.forEachIndexed { index, label ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = { Text(label) },
+                    )
+                }
+            }
+
+            LastBackupStrip(s?.lastBackup)
+            HorizontalDivider()
+
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .widthIn(max = 760.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (readError.isNotBlank()) StatusBanner(readError, error = true)
+                if (msg.isNotBlank()) StatusBanner(msg, msgIsError)
+
+                when (selectedTab) {
+                    0 -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Backup activity", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Start a run, follow its progress, and inspect the last result.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        RunCard(
+                            status = s,
+                            now = now,
+                            busy = busy,
+                            onStart = {
+                                busy = true; msg = ""
+                                scope.launch {
+                                    val out = history.backupStart()
+                                    msg = out
+                                    msgIsError = !out.startsWith("Backup started")
+                                    load()
+                                    busy = false
+                                }
+                            },
+                            onRefresh = {
+                                busy = true
+                                scope.launch { load(); busy = false }
+                            },
+                        )
+                        s?.run?.let { RunResultCard(it) }
+                    }
+
+                    1 -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Choose folders", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Select what enters the backup and what must always stay out. " +
+                                    "An empty selection means the whole root folder.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        ScopeCard(
+                            status = s,
+                            root = rootDraft,
+                            includes = includes,
+                            excludesText = excludesText,
+                            onExcludes = { excludesText = it },
+                            busy = busy,
+                            onPickRoot = { browseRoot = true },
+                            onEditScope = { showScope = true },
+                            onSave = {
+                                busy = true; msg = ""
+                                scope.launch {
+                                    val out = history.saveBackupConfig(
+                                        token = token,
+                                        bucket = bucket,
+                                        prefix = prefix,
+                                        excludes = excludes,
+                                        includes = s?.includes?.let { includes },
+                                        root = rootDraft.takeIf { it != s?.root },
+                                    )
+                                    msg = out
+                                    msgIsError = !out.startsWith("Backup settings saved")
+                                    filled = false
+                                    load()
+                                    busy = false
+                                }
+                            },
+                        )
+                        PreviewCard(
+                            preview = preview.value,
+                            error = previewError.value,
+                            busy = busy,
+                            enabled = s != null && s.reportsScope && !s.running,
+                            lastRun = s?.run,
+                            onPreview = {
+                                busy = true; msg = ""
+                                previewError.value = ""
+                                scope.launch {
+                                    val read = history.backupPreview(
+                                        root = rootDraft.takeIf { it != s?.root },
+                                        includes = s?.includes?.let { includes },
+                                    )
+                                    preview.value = read.value
+                                    previewError.value = read.value?.let { "" } ?: read.error
+                                    load()
+                                    busy = false
+                                }
+                            },
+                        )
+                    }
+
+                    2 -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Storage destination", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Configure the bucket and credentials used by the engine, then restore when needed.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        BucketCard(
+                            status = s,
+                            token = token, onToken = { token = it },
+                            bucket = bucket, onBucket = { bucket = it },
+                            prefix = prefix, onPrefix = { prefix = it },
+                            showToken = showToken, onToggleToken = { showToken = !showToken },
+                            busy = busy,
+                            onSave = {
+                                busy = true; msg = ""
+                                scope.launch {
+                                    val out = history.saveBackupConfig(token, bucket, prefix)
+                                    msg = out
+                                    msgIsError = !out.startsWith("Backup settings saved")
+                                    filled = false
+                                    load()
+                                    busy = false
+                                }
+                            },
+                        )
+                        if (s != null) {
+                            RestoreCard(
+                                status = s,
+                                busy = busy,
+                                onRestore = { askRestore = true },
+                            )
+                        }
+                    }
+
+                    else -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Automatic backup", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Let the engine back up when the machine is idle, using the thresholds below.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        AutoBackupCard(
+                            auto = s?.auto,
+                            busy = busy,
+                            onSave = { enabled, idle, cpu, cooldown ->
+                                busy = true; msg = ""
+                                scope.launch {
+                                    val out = history.saveBackupAuto(enabled, idle, cpu, cooldown)
+                                    msg = out
+                                    msgIsError = !out.startsWith("Auto-backup saved")
+                                    filled = false
+                                    load()
+                                    busy = false
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            }
+        }
+    }
+
+    if (askRestore && s != null) {
         AlertDialog(
             onDismissRequest = { askRestore = false },
             title = { Text("Restore the backup?") },
