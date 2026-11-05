@@ -302,6 +302,8 @@ data class BackupStatus(
     val lastRun: String = "",
     /** The same answer as [lastRun], with every count the engine reported. */
     val run: BackupRun? = null,
+    /** Last successful backup, persisted by the engine across restarts. */
+    val lastBackup: BackupRun? = null,
     /**
      * The glob patterns this engine leaves out of a backup, or null when it does
      * not say. A backup scope is not something to guess at: an engine older than
@@ -481,6 +483,7 @@ internal fun parseBackupStatus(o: JSONObject): BackupStatus {
         bytesTotal = progress?.optLong("bytes_total") ?: 0L,
         lastRun = backupLastRun(o.optJSONObject("finished")),
         run = parseBackupRun(o.optJSONObject("finished")),
+        lastBackup = parseBackupRun(o.optJSONObject("last_backup")),
         excludes = if (o.has("excludes")) stringList(o.optJSONArray("excludes")) else null,
         includes = if (o.has("includes")) stringList(o.optJSONArray("includes")) else null,
         auto = parseAutoBackup(o.optJSONObject("auto")),
