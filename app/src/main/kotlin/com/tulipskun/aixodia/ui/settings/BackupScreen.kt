@@ -264,7 +264,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                             excludesText = excludesText,
                             onExcludes = { excludesText = it },
                             busy = busy,
-                            onPickRoot = { browseRoot = true },
                             onEditScope = { showScope = true },
                             onSave = {
                                 busy = true; msg = ""
