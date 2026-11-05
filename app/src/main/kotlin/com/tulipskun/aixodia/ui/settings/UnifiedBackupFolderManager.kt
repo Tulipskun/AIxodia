@@ -67,7 +67,7 @@ internal fun UnifiedBackupFolderManager(
         loading = false
     }
 
-    val withinRoot = isUnder(path, root)
+    val withinRoot = root.isNotBlank() && isUnder(path, root)
     val parent = listing?.parent.orEmpty()
 
     Column(
@@ -83,7 +83,6 @@ internal fun UnifiedBackupFolderManager(
                     if (path != root) {
                         onRootChange(path)
                         onIncludesChange(emptyList())
-                        path = path
                     }
                 },
                 enabled = path != root && !loading,
