@@ -119,6 +119,23 @@ class BackupScopeTest {
     }
 
     @Test
+    fun `one tap adds or removes a folder exclusion without changing other rules`() {
+        assertEquals(listOf(".cache"), toggleExcludedFolder(emptyList(), ".cache"))
+        assertEquals(
+            listOf(".cache", "target"),
+            toggleExcludedFolder(listOf(".cache"), "target"),
+        )
+        assertEquals(
+            listOf("target"),
+            toggleExcludedFolder(listOf(".cache", "target"), ".cache"),
+        )
+        assertEquals(
+            listOf("target"),
+            toggleExcludedFolder(listOf("target", "target"), "target"),
+        )
+    }
+
+    @Test
     fun `a pick the engine no longer lists stays removable`() {
         // The folder was renamed or deleted on the engine after it was chosen; the
         // scope still names it, so the sheet must show it and let it go.
