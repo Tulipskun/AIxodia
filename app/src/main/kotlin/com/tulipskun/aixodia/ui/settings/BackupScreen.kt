@@ -179,22 +179,10 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(when {
-                    browseRoot -> "Choose backup root"
-                    addFolder -> "Include folder"
-                    addExcludeFolder -> "Exclude folder"
-                    showScope -> "Folder scope"
-                    else -> "Backup & restore"
-                }) },
+                title = { Text(if (showScope) "Manage backup folders" else "Backup & restore") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        when {
-                            browseRoot -> { browseRoot = false; showScope = true }
-                            addFolder -> addFolder = false
-                            addExcludeFolder -> addExcludeFolder = false
-                            showScope -> showScope = false
-                            else -> onBack()
-                        }
+                        if (showScope) showScope = false else onBack()
                     }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
@@ -207,112 +195,29 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(pad),
         ) {
-            if (browseRoot && s != null) {
-                FolderBrowserSheet(
+            if (showScope && s != null) {
+                UnifiedBackupFolderManager(
                     history = history,
-                    start = rootDraft.ifBlank { s.root },
-                    pickLabel = "Back up this folder",
-                    bound = null,
-                    onDismiss = { browseRoot = false; showScope = true },
-                    onPick = { chosen ->
-                        browseRoot = false
-                        showScope = true
-                        if (chosen != rootDraft) {
-                            rootDraft = chosen
-                            includesText = ""
-                            preview.value = null
-                            msg = "Root set to $chosen — folder picks were cleared because they named paths under the old root."
-                            msgIsError = false
-                        }
-                    },
-                )
-            } else if (addFolder && s != null) {
-                FolderBrowserSheet(
-                    history = history,
-                    start = rootDraft,
-                    pickLabel = "Back this folder up",
-                    bound = rootDraft,
-                    onDismiss = { addFolder = false },
-                    onPick = { chosen ->
-                        addFolder = false
-                        val rel = relativise(rootDraft, chosen)
-                        if (rel.startsWith("/")) {
-                            msg = "$chosen is not under the backup root $rootDraft."
-                            msgIsError = true
-                        } else if (rel.isBlank()) {
-                            msg = "That is the root itself, which already covers everything."
-                            msgIsError = false
-                        } else if (isAlreadyCovered(includes, rel)) {
-                            msg = "$rel is already inside a folder you picked."
-                            msgIsError = false
-                        } else {
-                            includesText = (includes + rel).sorted().joinToString("\n")
-                            preview.value = null
-                            showScope = true
-                        }
-                    },
-                )
-            } else if (addExcludeFolder && s != null) {
-                FolderBrowserSheet(
-                    history = history,
-                    start = rootDraft,
-                    pickLabel = "Never back up this folder",
-                    bound = rootDraft,
-                    onDismiss = { addExcludeFolder = false },
-                    onPick = { chosen ->
-                        addExcludeFolder = false
-                        val rel = relativise(rootDraft, chosen)
-                        if (rel.startsWith("/")) {
-                            msg = "$chosen is not under the backup root $rootDraft."
-                            msgIsError = true
-                        } else if (rel.isBlank()) {
-                            msg = "The backup root itself cannot be excluded here."
-                            msgIsError = true
-                        } else if (rel in excludes || "$rel/" in excludes) {
-                            msg = "$rel is already excluded."
-                            msgIsError = false
-                        } else {
-                            excludesText = (excludes + "$rel/").distinct().sorted().joinToString("\n")
-                            preview.value = null
-                            msg = "$rel/ will be excluded from the next backup."
-                            msgIsError = false
-                            showScope = true
-                        }
-                    },
-                )
-            } else if (showScope && s != null) {
-                ScopeSheetContent(
                     root = rootDraft.ifBlank { s.root },
                     includes = includes,
                     excludes = excludes,
-                    folders = scopeFolders,
-                    foldersLoading = foldersLoading,
-                    foldersError = foldersError,
-                    foldersTruncated = foldersTruncated,
-                    onToggle = { name ->
-                        includesText = toggleFolder(includes, name).joinToString("\n")
-                        preview.value = null
-                    },
-                    onRemove = { gone ->
-                        includesText = dropPick(includes, gone).joinToString("\n")
-                        preview.value = null
-                    },
-                    onAddFolder = { showScope = false; addFolder = true },
-                    onToggleExclude = { name ->
-                        excludesText = toggleExcludedFolder(excludes, name).joinToString("\n")
-                        preview.value = null
-                    },
-                    onRemoveExclude = { name ->
-                        excludesText = excludes.filterNot { it == name }.joinToString("\n")
-                        preview.value = null
-                    },
-                    onAddExcludeFolder = { showScope = false; addExcludeFolder = true },
-                    onChangeRoot = { showScope = false; browseRoot = true },
-                    onEverything = {
+                    onRootChange = { chosen ->
+                        rootDraft = chosen
                         includesText = ""
+                        excludesText = ""
+                        preview.value = null
+                        msg = "Backup root changed to $chosen. Review folder rules, then save."
+                        msgIsError = false
+                    },
+                    onIncludesChange = { chosen ->
+                        includesText = chosen.joinToString("\n")
                         preview.value = null
                     },
-                    onDismiss = { showScope = false },
+                    onExcludesChange = { chosen ->
+                        excludesText = chosen.joinToString("\n")
+                        preview.value = null
+                    },
+                    onDone = { showScope = false },
                 )
             } else {
             // Navigation stays visible while the selected workspace scrolls.
