@@ -179,9 +179,9 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Backup & restore") },
+                title = { Text(if (showScope) "Choose folders" else "Backup & restore") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (showScope) showScope = false else onBack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -193,6 +193,40 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(pad),
         ) {
+            if (showScope && s != null) {
+                ScopeSheetContent(
+                    root = rootDraft.ifBlank { s.root },
+                    includes = includes,
+                    excludes = excludes,
+                    folders = scopeFolders,
+                    foldersLoading = foldersLoading,
+                    foldersError = foldersError,
+                    foldersTruncated = foldersTruncated,
+                    onToggle = { name ->
+                        includesText = toggleFolder(includes, name).joinToString("\n")
+                        preview.value = null
+                    },
+                    onRemove = { gone ->
+                        includesText = dropPick(includes, gone).joinToString("\n")
+                        preview.value = null
+                    },
+                    onAddFolder = { showScope = false; addFolder = true },
+                    onToggleExclude = { name ->
+                        excludesText = toggleExcludedFolder(excludes, name).joinToString("\n")
+                        preview.value = null
+                    },
+                    onRemoveExclude = { name ->
+                        excludesText = excludes.filterNot { it == name }.joinToString("\n")
+                        preview.value = null
+                    },
+                    onAddExcludeFolder = { showScope = false; addExcludeFolder = true },
+                    onEverything = {
+                        includesText = ""
+                        preview.value = null
+                    },
+                    onDismiss = { showScope = false },
+                )
+            } else {
             // Navigation stays visible while the selected workspace scrolls.
             // Each tab has one job, instead of making the operator pass through
             // every configuration card to reach the action they need.
@@ -383,41 +417,8 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 }
             }
         }
-    }
-
-    if (showScope && s != null) {
-        ScopeSheet(
-            root = rootDraft.ifBlank { s.root },
-            includes = includes,
-            excludes = excludes,
-            folders = scopeFolders,
-            foldersLoading = foldersLoading,
-            foldersError = foldersError,
-            foldersTruncated = foldersTruncated,
-            onToggle = { name ->
-                includesText = toggleFolder(includes, name).joinToString("\n")
-                preview.value = null
-            },
-            onRemove = { gone ->
-                includesText = dropPick(includes, gone).joinToString("\n")
-                preview.value = null
-            },
-            onAddFolder = { showScope = false; addFolder = true },
-            onToggleExclude = { name ->
-                excludesText = toggleExcludedFolder(excludes, name).joinToString("\n")
-                preview.value = null
-            },
-            onRemoveExclude = { name ->
-                excludesText = excludes.filterNot { it == name }.joinToString("\n")
-                preview.value = null
-            },
-            onAddExcludeFolder = { showScope = false; addExcludeFolder = true },
-            onEverything = {
-                includesText = ""
-                preview.value = null
-            },
-            onDismiss = { showScope = false },
-        )
+            }
+        }
     }
 
     if (browseRoot && s != null) {
