@@ -402,6 +402,7 @@ fun ScopeSheetContent(
     onRemove: (String) -> Unit,
     onAddFolder: () -> Unit,
     onToggleExclude: (String) -> Unit = {},
+    onRemoveExclude: (String) -> Unit = {},
     onAddExcludeFolder: () -> Unit = {},
     showExcludePicker: Boolean = false,
     onEverything: () -> Unit,
