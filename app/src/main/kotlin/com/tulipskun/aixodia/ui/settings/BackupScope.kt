@@ -516,8 +516,8 @@ fun ScopeSheetContent(
                 folders.forEach { name ->
                     FolderExcludeRow(
                         name = name,
-                        excluded = name in excludes,
-                        onToggle = { onToggleExclude(name) },
+                        excluded = name in excludes || "$name/" in excludes,
+                        onToggle = { onToggleExclude("$name/") },
                     )
                 }
             }
@@ -528,7 +528,8 @@ fun ScopeSheetContent(
             )
     
         }
-        val otherRules = if (showExcludePicker) excludes.filterNot { it in folders } else excludes
+        val folderRules = folders.flatMap { listOf(it, "$it/") }.toSet()
+        val otherRules = if (showExcludePicker) excludes.filterNot { it in folderRules } else excludes
         if (otherRules.isNotEmpty()) {
             HorizontalDivider()
             Text(
