@@ -673,13 +673,15 @@ internal fun RestoreCard(
     busy: Boolean,
     onRestore: () -> Unit,
 ) {
+    val restoreRoot = status.lastBackup?.takeIf { it.ok }?.report?.root
+        ?.ifBlank { status.root } ?: status.root
     SectionCard(
         "Restore",
         "The bucket holds one backup — the tree as the last successful run left it.",
     ) {
         Text(
-            "A restore overwrites files under ${status.root} on the engine with what the " +
-                "backup holds, and leaves the files it does not name where they are.",
+            "A restore writes the saved tree under $restoreRoot on the engine, and leaves " +
+                "files it does not name where they are.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
