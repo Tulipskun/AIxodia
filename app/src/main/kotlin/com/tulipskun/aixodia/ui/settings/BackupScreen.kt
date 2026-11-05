@@ -95,20 +95,8 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     // Sheets, one at a time: the scope sheet's "Add a folder" hands over to the
     // browser and takes the answer back, rather than stacking a sheet on a sheet.
     var showScope by remember { mutableStateOf(false) }
-    var browseRoot by remember { mutableStateOf(false) }
-    var addFolder by remember { mutableStateOf(false) }
-    var addExcludeFolder by remember { mutableStateOf(false) }
-
     val preview = remember { mutableStateOf<BackupPreview?>(null) }
     val previewError = remember { mutableStateOf("") }
-
-    // The root's own folders, read when the scope sheet opens. The sheet is the
-    // question "which folders do you want", so it answers with the folders the
-    // engine has, instead of making the reader walk a browser to find them.
-    var scopeFolders by remember { mutableStateOf<List<String>>(emptyList()) }
-    var foldersLoading by remember { mutableStateOf(false) }
-    var foldersError by remember { mutableStateOf("") }
-    var foldersTruncated by remember { mutableStateOf(false) }
 
     val includes = includesText.split('\n').map { it.trim() }.filter { it.isNotBlank() }
     val excludes = excludesText.split('\n').map { it.trim() }.filter { it.isNotBlank() }
@@ -146,31 +134,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
         while (status?.running == true) {
             now = System.currentTimeMillis()
             delay(1000L)
-        }
-    }
-
-    // Read on opening, and again if the root moves under the sheet. Not on the
-    // page's poll: a directory listing nobody is looking at is a request the
-    // engine should not be asked to answer every fifteen seconds.
-    LaunchedEffect(showScope, rootDraft) {
-        if (!showScope) return@LaunchedEffect
-        val from = rootDraft.ifBlank { status?.root }.orEmpty()
-        scopeFolders = emptyList()
-        foldersTruncated = false
-        if (from.isBlank()) {
-            foldersError = "No folder to back up is set yet."
-            return@LaunchedEffect
-        }
-        foldersLoading = true
-        foldersError = ""
-        val read = history.backupBrowse(from)
-        foldersLoading = false
-        val listed = read.value
-        if (listed == null) {
-            foldersError = read.error.ifBlank { "The engine did not list $from." }
-        } else {
-            scopeFolders = rootFolderNames(listed)
-            foldersTruncated = listed.truncated
         }
     }
 
