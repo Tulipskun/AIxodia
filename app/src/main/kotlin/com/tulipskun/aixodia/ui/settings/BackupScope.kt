@@ -155,6 +155,11 @@ internal fun toggleFolder(includes: List<String>, name: String): List<String> {
 internal fun dropPick(includes: List<String>, name: String): List<String> =
     includes.filter { it != name && !it.startsWith("$name/") }
 
+/** A bare exclusion names a folder component; a path exclusion names one folder under the root. */
+internal fun toggleExcludedFolder(excludes: List<String>, name: String): List<String> =
+    if (name in excludes) excludes.filterNot { it == name }.sorted()
+    else (excludes + name).distinct().sorted()
+
 /**
  * Picks whose first component is not in the current listing: a folder renamed or
  * deleted on the engine after it was chosen. They still shape the backup, so they
@@ -349,6 +354,8 @@ fun ScopeSheet(
     onToggle: (String) -> Unit,
     onRemove: (String) -> Unit,
     onAddFolder: () -> Unit,
+    onToggleExclude: (String) -> Unit,
+    onAddExcludeFolder: () -> Unit,
     onEverything: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -364,6 +371,8 @@ fun ScopeSheet(
             onToggle = onToggle,
             onRemove = onRemove,
             onAddFolder = onAddFolder,
+            onToggleExclude = onToggleExclude,
+            onAddExcludeFolder = onAddExcludeFolder,
             onEverything = onEverything,
             onDismiss = onDismiss,
         )
@@ -488,10 +497,31 @@ fun ScopeSheetContent(
             value = "browse the engine from $root",
             onPick = onAddFolder,
         )
+        HorizontalDivider()
+        Text("Folders to leave out", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "These folders stay excluded even when you back up everything or tick their parent.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (folders.isNotEmpty()) {
+            folders.forEach { name ->
+                FolderExcludeRow(
+                    name = name,
+                    excluded = name in excludes,
+                    onToggle = { onToggleExclude(name) },
+                )
+            }
+        }
+        PickerRow(
+            label = "Exclude a folder deeper inside",
+            value = "browse inside $root",
+            onPick = onAddExcludeFolder,
+        )
         if (excludes.isNotEmpty()) {
             HorizontalDivider()
             Text(
-                "Still left out inside whatever you tick (${excludes.size})",
+                "Other exclusion rules (${excludes.size})",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -589,6 +619,41 @@ private fun FolderCheckRow(
                 }
             }
         }
+    }
+}
+
+
+/** A folder can be explicitly excluded without writing a glob by hand. */
+@Composable
+private fun FolderExcludeRow(
+    name: String,
+    excluded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable(
+                onClickLabel = if (excluded) "Include $name in backup" else "Exclude $name from backup",
+                onClick = onToggle,
+            )
+            .padding(horizontal = 10.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = excluded, onCheckedChange = null)
+        Text(
+            name,
+            Modifier.weight(1f).padding(start = 6.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+        Icon(
+            Icons.Default.Folder,
+            contentDescription = null,
+            tint = if (excluded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+        )
     }
 }
 
