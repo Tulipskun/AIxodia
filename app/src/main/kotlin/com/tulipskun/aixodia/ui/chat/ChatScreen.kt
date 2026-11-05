@@ -387,6 +387,7 @@ fun ChatScreen(
             sessionId = vm.sessionId, onBack = { showSettings = false },
             discovery = discovery,
             onOpenBackup = { showSettings = false; showBackup = true },
+            onOpenFiles = { showSettings = false; showFiles = true },
         )
         return
     }
