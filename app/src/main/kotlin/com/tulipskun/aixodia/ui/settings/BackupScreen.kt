@@ -704,7 +704,6 @@ fun ScopeCard(
     excludesText: String,
     onExcludes: (String) -> Unit,
     busy: Boolean,
-    onPickRoot: () -> Unit,
     onEditScope: () -> Unit,
     onSave: () -> Unit,
 ) {
