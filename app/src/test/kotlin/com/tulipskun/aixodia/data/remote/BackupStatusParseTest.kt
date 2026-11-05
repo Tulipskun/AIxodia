@@ -245,4 +245,24 @@ class BackupStatusParseTest {
         assertTrue(whole.run!!.report!!.failed.isEmpty())
         assertFalse(whole.lastRun.contains("could not be written"))
     }
+
+    @Test
+    fun `last successful backup survives a newer restore result`() {
+        val status = parseBackupStatus(
+            JSONObject(
+                """
+                {
+                  "finished": {"operation": "restore", "started_at": 200, "finished_at": 210,
+                    "summary": {"ok": true, "report": {"files": 10, "duration_ms": 900}}},
+                  "last_backup": {"operation": "backup", "started_at": 100, "finished_at": 150,
+                    "summary": {"ok": true, "report": {"files": 12, "bytes": 2048, "uploaded_bytes": 512, "duration_ms": 1200}}}
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals("restore", status.run!!.operation)
+        assertEquals("backup", status.lastBackup!!.operation)
+        assertEquals(150L, status.lastBackup!!.finishedAt)
+        assertEquals(12, status.lastBackup!!.report!!.files)
+    }
 }
