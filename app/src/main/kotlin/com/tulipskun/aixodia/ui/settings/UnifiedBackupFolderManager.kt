@@ -36,9 +36,8 @@ import com.tulipskun.aixodia.data.remote.BackupBrowse
 import com.tulipskun.aixodia.data.remote.HistoryApi
 
 /**
- * One directory browser owns root selection and all folder rules.
- * A directory is navigated into to configure its children; no second picker,
- * scope sheet, or include/exclude browser is opened.
+ * One browser manages any number of independent source folders.
+ * The engine root is the filesystem root; includes/excludes are paths from "/".
  */
 @Composable
 internal fun UnifiedBackupFolderManager(
@@ -51,7 +50,7 @@ internal fun UnifiedBackupFolderManager(
     onExcludesChange: (List<String>) -> Unit,
     onDone: () -> Unit,
 ) {
-    var path by remember(root) { mutableStateOf(root.ifBlank { "/" }) }
+    var path by remember { mutableStateOf("/") }
     var listing by remember { mutableStateOf<BackupBrowse?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -65,33 +64,19 @@ internal fun UnifiedBackupFolderManager(
         loading = false
     }
 
-    val withinRoot = root.isNotBlank() && isUnder(path, root)
     val parent = listing?.parent.orEmpty()
-
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Backup location", style = MaterialTheme.typography.titleMedium)
-        Text(root.ifBlank { "No backup root selected" }, style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = {
-                    if (path != root) {
-                        onRootChange(path)
-                        onIncludesChange(emptyList())
-                    }
-                },
-                enabled = path != root && !loading,
-            ) { Text("Use current folder as backup root") }
-        }
-        HorizontalDivider()
+        Text("Backup folders", style = MaterialTheme.typography.titleMedium)
         Text(
-            if (withinRoot) "Folders under backup root · $path"
-            else "Browsing outside the backup root · choose this folder as the new root",
-            style = MaterialTheme.typography.titleSmall,
+            "Choose any number of folders from anywhere on the engine. Current source root: /",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Text(path, style = MaterialTheme.typography.titleSmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
                 onClick = { if (parent.isNotBlank()) path = parent },
@@ -104,25 +89,34 @@ internal fun UnifiedBackupFolderManager(
                 Icon(Icons.Default.Refresh, contentDescription = null)
                 Text("Reload")
             }
+            TextButton(onClick = {
+                onIncludesChange(emptyList())
+                onExcludesChange(emptyList())
+            }, enabled = includes.isNotEmpty() || excludes.isNotEmpty()) {
+                Text("Reset rules")
+            }
         }
+        Text(
+            if (includes.isEmpty()) "Backup: all folders (choose one to narrow the list)"
+            else "Backup: ${includes.size} selected folder(s)",
+            style = MaterialTheme.typography.labelMedium,
+        )
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             items(listing?.entries.orEmpty(), key = { it.path }) { entry ->
                 val canEnter = entry.isDir && entry.canEnter
-                val relative = if (withinRoot) relativise(root, entry.path) else ""
-                val excludedPath = if (relative.isBlank()) "" else "$relative/"
-                val excluded = excludedPath.isNotBlank() &&
-                    excludes.any {
-                        it == excludedPath || it == relative ||
-                            (it.endsWith("/") && relative.startsWith(it))
-                    }
-                val included = relative.isNotBlank() &&
+                val relative = entry.path.removePrefix("/").trim('/')
+                val include = relative.isNotBlank() &&
                     (includes.isEmpty() || includes.any {
                         it == relative || it.startsWith("$relative/") || relative.startsWith("$it/")
-                    }) && !excluded
+                    })
+                val excluded = relative.isNotBlank() && excludes.any {
+                    it == relative || it == "$relative/" ||
+                        (it.endsWith("/") && relative.startsWith(it))
+                }
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp)
                         .background(MaterialTheme.colorScheme.surfaceContainer)
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -134,13 +128,15 @@ internal fun UnifiedBackupFolderManager(
                             .clickable(enabled = canEnter) { path = entry.path },
                         maxLines = 1,
                     )
-                    if (withinRoot && canEnter && relative.isNotBlank()) {
+                    if (canEnter && relative.isNotBlank()) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Checkbox(
-                                checked = included,
+                                checked = include && !excluded,
                                 onCheckedChange = {
-                                    if (includes.isEmpty()) onExcludesChange(toggleExcludedFolder(excludes, relative))
-                                    else onIncludesChange(toggleFolder(includes, relative))
+                                    onIncludesChange(
+                                        if (includes.isEmpty()) listOf(relative)
+                                        else toggleFolder(includes, relative)
+                                    )
                                 },
                             )
                             Text("Backup", style = MaterialTheme.typography.labelSmall)
@@ -161,6 +157,17 @@ internal fun UnifiedBackupFolderManager(
             }
         }
         HorizontalDivider()
-        Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+        Text(
+            "Selected folders are stored as independent paths under /. For example, /root and /usr can both be included without choosing a shared parent folder.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(
+            onClick = {
+                onRootChange("/")
+                onDone()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Done") }
     }
 }
