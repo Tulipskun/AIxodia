@@ -176,7 +176,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 UnifiedBackupFolderManager(
                     history = history,
                     includes = includes,
-                    excludes = excludes,
                     onRootChange = { _ ->
                         rootDraft = "/"
                         preview.value = null
@@ -185,10 +184,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     },
                     onIncludesChange = { chosen ->
                         includesText = chosen.joinToString("\n")
-                        preview.value = null
-                    },
-                    onExcludesChange = { chosen ->
-                        excludesText = chosen.joinToString("\n")
                         preview.value = null
                     },
                     onDone = { showScope = false },
@@ -272,8 +267,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                             status = s,
                             root = rootDraft,
                             includes = includes,
-                            excludesText = excludesText,
-                            onExcludes = { excludesText = it },
                             busy = busy,
                             onEditScope = { showScope = true },
                             onSave = {
@@ -721,73 +714,29 @@ fun ScopeCard(
     onSave: () -> Unit,
 ) {
     val reportsScope = status?.reportsScope == true
-    val reportsExcludes = status?.reportsExcludes == true
-    var showPatterns by remember { mutableStateOf(false) }
     SectionCard(
         "What gets backed up",
-        if (reportsScope) "Chosen from the engine's own folders, on the engine."
+        if (reportsScope) "Only the files and folders you explicitly select."
         else "Stored on the engine, in D1.",
     ) {
         if (reportsScope) {
             PickerRow(
-                label = "Manage backup folders",
-                value = if (includes.isEmpty()) "Everything on the engine filesystem"
-                    else "${includes.size} folders included",
-                hint = "Select multiple source folders anywhere on the engine, and exclude folders in the same browser.",
+                label = "Manage backup files and folders",
+                value = if (includes.isEmpty()) "Nothing selected"
+                    else "${includes.size} selected",
+                hint = "Select files and folders independently. Tap a folder row to open it.",
                 onPick = onEditScope,
             )
-
-            if (reportsExcludes) {
-                TextButton(onClick = { showPatterns = !showPatterns }) {
-                    Text(if (showPatterns) "Hide the raw patterns" else "Edit the raw patterns")
-                }
-                if (showPatterns) {
-                    LabelledField(
-                        value = excludesText,
-                        onValueChange = onExcludes,
-                        label = "Leave these out",
-                        hint = "One pattern per line: a bare name skips that folder anywhere, " +
-                            "* and ? match a name, a pattern with / matches the whole path. " +
-                            "These still apply inside whatever you picked.",
-                        singleLine = false,
-                        minLines = 4,
-                    )
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onSave, enabled = !busy) { Text("Save selection") }
             }
-        } else if (reportsExcludes) {
-            DetailRow("root", status?.root.orEmpty().ifBlank { "not set" })
-            Text(
-                "This engine has no folder picker, so the root is shown as it is " +
-                    "stored and the scope is set by pattern below. Update the engine " +
-                    "to choose folders instead.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LabelledField(
-                value = excludesText,
-                onValueChange = onExcludes,
-                label = "Leave these out",
-                hint = "One pattern per line: a bare name skips that folder anywhere, " +
-                    "* and ? match a name, a pattern with / matches the whole path. " +
-                    "Clearing the list means nothing is left out, this engine's own " +
-                    "defaults included.",
-                singleLine = false,
-                minLines = 4,
-            )
         } else {
             DetailRow("root", status?.root.orEmpty().ifBlank { "not set" })
             Text(
-                "This engine does not report what it backs up or leaves out, so the " +
-                    "scope is not shown and will not be changed from here. Update the " +
-                    "engine to edit it.",
+                "This engine does not support selecting backup files and folders. Update the engine to use the picker.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        if (reportsScope || reportsExcludes) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onSave, enabled = !busy) { Text("Save the scope") }
-            }
         }
     }
 }
