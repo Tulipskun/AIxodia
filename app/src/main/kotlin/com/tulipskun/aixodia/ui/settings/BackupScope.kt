@@ -292,6 +292,7 @@ fun FolderBrowserSheet(
                 items(rows, key = { it.path }) { entry ->
                     BrowseRow(
                         entry = entry,
+                        onPick = { onPick(entry.path) },
                         onEnter = { path = entry.path },
                     )
                 }
@@ -315,18 +316,19 @@ fun FolderBrowserSheet(
 @Composable
 private fun BrowseRow(
     entry: BrowseEntry,
+    onPick: () -> Unit,
     onEnter: () -> Unit,
 ) {
     val canWalk = entry.isDir && entry.canEnter
     Surface(
-        onClick = onEnter,
+        onClick = onPick,
         enabled = canWalk,
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -339,21 +341,23 @@ private fun BrowseRow(
                 Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                 Text(
                     when {
-                        canWalk -> "Folder"
+                        canWalk -> "Tap to choose this folder"
                         !entry.isDir && !entry.isSymlink -> "File"
                         entry.isSymlink -> "Symbolic link"
-                        else -> "Cannot open this folder"
+                        else -> "Cannot choose this folder"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             if (canWalk) {
-                Icon(
-                    Icons.Default.FolderOpen,
-                    contentDescription = "Open folder",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                IconButton(onClick = onEnter) {
+                    Icon(
+                        Icons.Default.FolderOpen,
+                        contentDescription = "Open folder",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
