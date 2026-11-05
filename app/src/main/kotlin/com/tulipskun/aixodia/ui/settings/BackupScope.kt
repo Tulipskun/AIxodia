@@ -289,7 +289,13 @@ fun FolderBrowserSheet(
                 )
             }
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                items(rows, key = { it.path }) { entry -> BrowseRow(entry) { path = entry.path } }
+                items(rows, key = { it.path }) { entry ->
+                    BrowseRow(
+                        entry = entry,
+                        onEnter = { path = entry.path },
+                        onPick = { onPick(entry.path) },
+                    )
+                }
             }
             listing?.takeIf { it.truncated }?.let {
                 Text(
@@ -308,33 +314,43 @@ fun FolderBrowserSheet(
 }
 
 @Composable
-private fun BrowseRow(entry: BrowseEntry, onEnter: () -> Unit) {
+private fun BrowseRow(
+    entry: BrowseEntry,
+    onEnter: () -> Unit,
+    onPick: () -> Unit,
+) {
     val canWalk = entry.isDir && entry.canEnter
-    Surface(
-        onClick = { if (canWalk) onEnter() },
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Surface(
+            onClick = onEnter,
+            enabled = canWalk,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.weight(1f),
         ) {
-            Icon(
-                if (entry.isDir) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
-                contentDescription = null,
-                tint = if (canWalk) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                val why = when {
-                    canWalk -> ""
-                    !entry.isDir && !entry.isSymlink -> "a file — it is backed up with its folder"
-                    entry.isSymlink -> "a link — the walker does not follow it"
-                    else -> "another filesystem — the walker does not cross it"
-                }
-                if (why.isNotBlank()) {
+            Row(
+                Modifier.padding(vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (entry.isDir) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
+                    contentDescription = null,
+                    tint = if (canWalk) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                    Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                    val why = when {
+                        canWalk -> "Open folder"
+                        !entry.isDir && !entry.isSymlink -> "File"
+                        entry.isSymlink -> "Symbolic link"
+                        else -> "Cannot open this folder"
+                    }
                     Text(
                         why,
                         style = MaterialTheme.typography.labelSmall,
@@ -342,6 +358,12 @@ private fun BrowseRow(entry: BrowseEntry, onEnter: () -> Unit) {
                     )
                 }
             }
+        }
+        if (canWalk) {
+            TextButton(
+                onClick = onPick,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            ) { Text("Select") }
         }
     }
 }
