@@ -175,7 +175,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
             if (showScope && s != null) {
                 UnifiedBackupFolderManager(
                     history = history,
-                    root = "/",
                     includes = includes,
                     excludes = excludes,
                     onRootChange = { chosen ->
