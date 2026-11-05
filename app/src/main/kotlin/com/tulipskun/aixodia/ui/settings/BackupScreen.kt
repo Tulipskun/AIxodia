@@ -425,13 +425,13 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 } else if (rel.isBlank()) {
                     msg = "The backup root itself cannot be excluded here. Choose a folder inside it."
                     msgIsError = true
-                } else if (rel in excludes) {
+                } else if (rel in excludes || "$rel/" in excludes) {
                     msg = "$rel is already excluded."
                     msgIsError = false
                 } else {
-                    excludesText = (excludes + rel).distinct().sorted().joinToString("\n")
+                    excludesText = (excludes + "$rel/").distinct().sorted().joinToString("\n")
                     preview.value = null
-                    msg = "$rel will be excluded from the next backup."
+                    msg = "$rel/ will be excluded from the next backup."
                     msgIsError = false
                     showScope = true
                 }
