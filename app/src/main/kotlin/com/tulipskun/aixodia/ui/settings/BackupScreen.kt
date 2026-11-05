@@ -114,7 +114,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 filled = true
                 bucket = s.bucket
                 prefix = s.prefix
-                rootDraft = s.root
+                rootDraft = "/"
                 excludesText = s.excludes.orEmpty().joinToString("\n")
                 includesText = s.includes.orEmpty().joinToString("\n")
             }
@@ -161,15 +161,13 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
             if (showScope && s != null) {
                 UnifiedBackupFolderManager(
                     history = history,
-                    root = rootDraft.ifBlank { s.root },
+                    root = "/",
                     includes = includes,
                     excludes = excludes,
                     onRootChange = { chosen ->
-                        rootDraft = chosen
-                        includesText = ""
-                        excludesText = ""
+                        rootDraft = "/"
                         preview.value = null
-                        msg = "Backup root changed to $chosen. Review folder rules, then save."
+                        msg = "Backup filesystem root set to /. Select any source folders, then save."
                         msgIsError = false
                     },
                     onIncludesChange = { chosen ->
@@ -252,7 +250,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                             Text("Choose folders", style = MaterialTheme.typography.titleLarge)
                             Text(
                                 "Select what enters the backup and what must always stay out. " +
-                                    "An empty selection means the whole root folder.",
+                                    "An empty selection means all folders on the engine filesystem.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -274,7 +272,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                                         prefix = prefix,
                                         excludes = excludes,
                                         includes = s?.includes?.let { includes },
-                                        root = rootDraft.takeIf { it != s?.root },
+                                        root = "/".takeIf { it != s?.root }, 
                                     )
                                     msg = out
                                     msgIsError = !out.startsWith("Backup settings saved")
@@ -295,7 +293,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                                 previewError.value = ""
                                 scope.launch {
                                     val read = history.backupPreview(
-                                        root = rootDraft.takeIf { it != s?.root },
+                                        root = "/".takeIf { it != s?.root }, 
                                         includes = s?.includes?.let { includes },
                                     )
                                     preview.value = read.value
@@ -718,9 +716,9 @@ fun ScopeCard(
         if (reportsScope) {
             PickerRow(
                 label = "Manage backup folders",
-                value = if (includes.isEmpty()) "Everything under ${root.ifBlank { status?.root.orEmpty().ifBlank { "not set" } }}"
+                value = if (includes.isEmpty()) "Everything on the engine filesystem"
                     else "${includes.size} folders included",
-                hint = "Set the backup location, include folders, and exclude folders in one place.",
+                hint = "Select multiple source folders anywhere on the engine, and exclude folders in the same browser.",
                 onPick = onEditScope,
             )
 
