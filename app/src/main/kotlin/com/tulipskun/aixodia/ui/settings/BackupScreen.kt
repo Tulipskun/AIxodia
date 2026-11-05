@@ -50,6 +50,9 @@ import com.tulipskun.aixodia.data.remote.BackupStatus
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * The engine's own backup, on a page of its own.
@@ -206,6 +209,36 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     )
                 }
             }
+
+            val lastBackup = s?.lastBackup?.takeIf { it.ok && it.finishedAt > 0 }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Last successful backup",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        lastBackup?.let {
+                            SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
+                                .format(Date(it.finishedAt * 1000L))
+                        } ?: "No successful backup recorded",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                lastBackup?.report?.let { report ->
+                    Text(
+                        "${report.files} files",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            HorizontalDivider()
 
             Column(
                 Modifier
