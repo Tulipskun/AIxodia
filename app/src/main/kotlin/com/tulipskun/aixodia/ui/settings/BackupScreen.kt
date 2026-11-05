@@ -210,34 +210,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 }
             }
 
-            val lastBackup = s?.lastBackup?.takeIf { it.ok && it.finishedAt > 0 }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        "Last successful backup",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        lastBackup?.let {
-                            SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
-                                .format(Date(it.finishedAt * 1000L))
-                        } ?: "No successful backup recorded",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                lastBackup?.report?.let { report ->
-                    Text(
-                        "${report.files} files",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            LastBackupStrip(s?.lastBackup)
             HorizontalDivider()
 
             Column(
@@ -1012,6 +985,39 @@ internal fun DetailRow(label: String, value: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(value, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Persistent record of the last completed, successful backup. */
+@Composable
+internal fun LastBackupStrip(lastBackup: BackupRun?) {
+    val successful = lastBackup?.takeIf { it.ok && it.finishedAt > 0 }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "Last successful backup",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                successful?.let {
+                    SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
+                        .format(Date(it.finishedAt * 1000L))
+                } ?: "No successful backup recorded",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        successful?.report?.let { report ->
+            Text(
+                "${report.files} files",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
