@@ -66,10 +66,7 @@ class BackupScreenSnapshots {
         AIxodiaTheme {
             ScopeCard(
                 status = modern,
-                root = "/root",
                 includes = listOf("AIxodia", "projects/aixodia"),
-                excludesText = "node_modules\n.venv",
-                onExcludes = {},
                 busy = false,
                 onEditScope = {},
                 onSave = {},
@@ -78,14 +75,11 @@ class BackupScreenSnapshots {
     }
 
     @Test
-    fun scopeCardWholeTree() = paparazzi.snapshot {
+    fun scopeCardNoSelection() = paparazzi.snapshot {
         AIxodiaTheme {
             ScopeCard(
                 status = modern.copy(includes = emptyList()),
-                root = "/root",
                 includes = emptyList(),
-                excludesText = "node_modules\n.venv",
-                onExcludes = {},
                 busy = false,
                 onEditScope = {},
                 onSave = {},
@@ -98,10 +92,7 @@ class BackupScreenSnapshots {
         AIxodiaTheme {
             ScopeCard(
                 status = oldEngine,
-                root = "/root",
                 includes = emptyList(),
-                excludesText = "node_modules",
-                onExcludes = {},
                 busy = false,
                 onEditScope = {},
                 onSave = {},
@@ -304,10 +295,7 @@ class BackupScreenSnapshots {
                 )
                 ScopeCard(
                     status = idle,
-                    root = idle.root,
                     includes = idle.includes.orEmpty(),
-                    excludesText = idle.excludes.orEmpty().joinToString("\n"),
-                    onExcludes = {},
                     busy = false,
                         onEditScope = {},
                     onSave = {},
@@ -342,10 +330,7 @@ class BackupScreenSnapshots {
                 )
                 ScopeCard(
                     status = idle,
-                    root = idle.root,
                     includes = idle.includes.orEmpty(),
-                    excludesText = idle.excludes.orEmpty().joinToString("\n"),
-                    onExcludes = {},
                     busy = false,
                         onEditScope = {},
                     onSave = {},
