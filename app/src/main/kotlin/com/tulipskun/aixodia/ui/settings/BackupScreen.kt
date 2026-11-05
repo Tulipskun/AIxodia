@@ -857,15 +857,7 @@ fun ScopeCard(
                 hint = "Set the backup location, include folders, and exclude folders in one place.",
                 onPick = onEditScope,
             )
-            /*
-                hint = if (includes.isEmpty()) {
-                    "nothing picked = the whole tree, including folders made after this was saved"
-                } else {
-                    includes.take(3).joinToString(", ") +
-                        if (includes.size > 3) " …and ${includes.size - 3} more" else ""
-                },
-                onPick = onEditScope,
-            ) */
+
             if (reportsExcludes) {
                 TextButton(onClick = { showPatterns = !showPatterns }) {
                     Text(if (showPatterns) "Hide the raw patterns" else "Edit the raw patterns")
