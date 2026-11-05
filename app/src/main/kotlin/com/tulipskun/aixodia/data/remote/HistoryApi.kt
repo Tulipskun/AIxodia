@@ -398,8 +398,6 @@ internal fun parseBackupBrowse(o: JSONObject): BackupBrowse {
                     name = row.optString("name"),
                     path = row.optString("path"),
                     isDir = row.optBoolean("is_dir"),
-                    isSymlink = row.optBoolean("is_symlink"),
-                    canEnter = row.optBoolean("can_enter"),
                 ),
             )
         }
