@@ -324,7 +324,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
         ScopeSheet(
             root = rootDraft.ifBlank { s.root },
             includes = includes,
-            excludes = s.excludes.orEmpty(),
+            excludes = excludes,
             folders = scopeFolders,
             foldersLoading = foldersLoading,
             foldersError = foldersError,
