@@ -193,7 +193,6 @@ internal fun stalePicks(includes: List<String>, folders: List<String>): List<Str
 fun FolderBrowserSheet(
     history: HistoryApi,
     start: String,
-    title: String,
     pickLabel: String,
     bound: String?,
     onDismiss: () -> Unit,
@@ -224,12 +223,6 @@ fun FolderBrowserSheet(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close folder browser")
-                }
-                Text(title, style = MaterialTheme.typography.titleLarge)
-            }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalArrangement = Arrangement.Center,
