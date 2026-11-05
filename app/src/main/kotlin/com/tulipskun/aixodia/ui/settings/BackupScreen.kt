@@ -84,7 +84,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     var token by rememberSaveable { mutableStateOf("") }
     var bucket by rememberSaveable { mutableStateOf("") }
     var prefix by rememberSaveable { mutableStateOf("") }
-    var excludesText by rememberSaveable { mutableStateOf("") }
     // A newline-joined list rather than a List<String>, so the pick survives the
     // process being recreated. An empty string is the whole tree, not nothing.
     var includesText by rememberSaveable { mutableStateOf("") }
@@ -99,7 +98,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
     val previewError = remember { mutableStateOf("") }
 
     val includes = includesText.split('\n').map { it.trim() }.filter { it.isNotBlank() }
-    val excludes = excludesText.split('\n').map { it.trim() }.filter { it.isNotBlank() }
 
     val load: suspend () -> Unit = {
         val read = runCatchingCancellable { history.backupStatus() }
@@ -116,12 +114,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 prefix = s.prefix
                 val previousRoot = s.root.trimEnd('/').removePrefix("/")
                 rootDraft = "/"
-                excludesText = s.excludes.orEmpty().map { pattern ->
-                    if (previousRoot.isNotBlank() &&
-                        (pattern.contains("/") || pattern.endsWith("/")) &&
-                        !pattern.startsWith("$previousRoot/")
-                    ) "$previousRoot/${pattern.trimStart('/')}" else pattern
-                }.joinToString("\n")
                 includesText = if (previousRoot.isBlank()) {
                     s.includes.orEmpty().joinToString("\n")
                 } else {
@@ -265,7 +257,6 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                         }
                         ScopeCard(
                             status = s,
-                            root = rootDraft,
                             includes = includes,
                             busy = busy,
                             onEditScope = { showScope = true },
@@ -276,7 +267,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                                         token = token,
                                         bucket = bucket,
                                         prefix = prefix,
-                                        excludes = excludes,
+                                        excludes = emptyList(),
                                         includes = s?.includes?.let { includes },
                                         root = "/".takeIf { it != s?.root },
                                     )
@@ -301,6 +292,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                                     val read = history.backupPreview(
                                         root = "/".takeIf { it != s?.root }, 
                                         includes = s?.includes?.let { includes },
+                                        excludes = emptyList(),
                                     )
                                     preview.value = read.value
                                     previewError.value = read.value?.let { "" } ?: read.error
@@ -705,10 +697,7 @@ internal fun RestoreCard(
 @Composable
 fun ScopeCard(
     status: BackupStatus?,
-    root: String,
     includes: List<String>,
-    excludesText: String,
-    onExcludes: (String) -> Unit,
     busy: Boolean,
     onEditScope: () -> Unit,
     onSave: () -> Unit,
