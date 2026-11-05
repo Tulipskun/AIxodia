@@ -233,11 +233,29 @@ fun FolderBrowserSheet(
                 Text(title, style = MaterialTheme.typography.titleLarge)
             }
             Text(title, style = MaterialTheme.typography.titleMedium)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                TextButton(onClick = { path = "/" }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text("/", maxLines = 1)
+                }
+                var crumb = ""
+                path.split('/').filter { it.isNotBlank() }.forEach { segment ->
+                    crumb += "/$segment"
+                    val target = crumb
+                    Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(
+                        onClick = { path = target },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    ) { Text(segment, maxLines = 1) }
+                }
+            }
             Text(
                 path,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = if (outside) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
+                maxLines = 1,
             )
             if (outside) {
                 StatusBanner("This is outside $bound — the backup's root. Move back in to pick a folder.", error = true)
