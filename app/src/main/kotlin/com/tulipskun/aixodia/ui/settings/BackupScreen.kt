@@ -177,7 +177,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     history = history,
                     includes = includes,
                     excludes = excludes,
-                    onRootChange = { chosen ->
+                    onRootChange = { _ ->
                         rootDraft = "/"
                         preview.value = null
                         msg = "Backup filesystem root set to /. Select any source folders, then save."
@@ -285,7 +285,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                                         prefix = prefix,
                                         excludes = excludes,
                                         includes = s?.includes?.let { includes },
-                                        root = "/".takeIf { it != s?.root }, 
+                                        root = "/".takeIf { it != s?.root },
                                     )
                                     msg = out
                                     msgIsError = !out.startsWith("Backup settings saved")
