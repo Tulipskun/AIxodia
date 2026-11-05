@@ -2,6 +2,7 @@ package com.tulipskun.aixodia.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -113,12 +114,13 @@ internal fun UnifiedBackupFolderManager(
             items(listing?.entries.orEmpty(), key = { it.path }) { entry ->
                 val canEnter = entry.isDir && entry.canEnter
                 val relative = if (withinRoot) relativise(root, entry.path) else ""
-                val included = relative.isNotBlank() && includes.any {
-                    it == relative || it.startsWith("$relative/") || relative.startsWith("$it/")
-                }
                 val excludedPath = if (relative.isBlank()) "" else "$relative/"
                 val excluded = excludedPath.isNotBlank() &&
                     excludes.any { it == excludedPath || it == relative }
+                val included = relative.isNotBlank() &&
+                    (includes.isEmpty() || includes.any {
+                        it == relative || it.startsWith("$relative/") || relative.startsWith("$it/")
+                    }) && !excluded
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 5.dp)
                         .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -137,7 +139,8 @@ internal fun UnifiedBackupFolderManager(
                             Checkbox(
                                 checked = included,
                                 onCheckedChange = {
-                                    onIncludesChange(toggleFolder(includes, relative))
+                                    if (includes.isEmpty()) onExcludesChange(toggleExcludedFolder(excludes, relative))
+                                    else onIncludesChange(toggleFolder(includes, relative))
                                 },
                             )
                             Text("Backup", style = MaterialTheme.typography.labelSmall)
