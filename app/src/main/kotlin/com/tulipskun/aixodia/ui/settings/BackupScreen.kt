@@ -115,10 +115,15 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 includesText = if (previousRoot.isBlank()) {
                     s.includes.orEmpty().joinToString("\n")
                 } else {
-                    (s.includes.orEmpty().ifEmpty { listOf("") }).map { entry ->
-                        if (entry.isBlank()) previousRoot
-                        else if (entry == previousRoot || entry.startsWith("$previousRoot/")) entry
-                        else "$previousRoot/${entry.trimStart('/')}"
+                    s.includes.orEmpty().map { entry ->
+                        val excluded = entry.startsWith("!")
+                        val selectedPath = entry.removePrefix("!")
+                        val normalized = when {
+                            selectedPath.isBlank() -> previousRoot
+                            selectedPath == previousRoot || selectedPath.startsWith("$previousRoot/") -> selectedPath
+                            else -> "$previousRoot/${selectedPath.trimStart('/')}"
+                        }
+                        if (excluded) "!$normalized" else normalized
                     }.joinToString("\n")
                 }
             }
