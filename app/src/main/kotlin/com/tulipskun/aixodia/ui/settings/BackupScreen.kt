@@ -696,7 +696,7 @@ fun ScopeCard(
     val reportsScope = status?.reportsScope == true
     SectionCard(
         "What gets backed up",
-        if (reportsScope) "Only the files and folders you explicitly select."
+        if (reportsScope) "Selected folders include their contents; unchecked descendants are excluded."
         else "Stored on the engine, in D1.",
     ) {
         if (reportsScope) {
