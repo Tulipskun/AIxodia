@@ -101,6 +101,9 @@ fun ConnDot(c: ConnState) {
         ConnState.ONLINE -> stringResource(R.string.online) to MaterialTheme.aixodia.online
         ConnState.CONNECTING -> stringResource(R.string.connecting) to MaterialTheme.aixodia.connecting
         ConnState.OFFLINE -> stringResource(R.string.offline) to MaterialTheme.aixodia.offline
+        // Refusing the token is a red link too; the word is what separates it
+        // from a daemon that is simply not there.
+        ConnState.AUTH_FAILED -> stringResource(R.string.unauthorised) to MaterialTheme.aixodia.offline
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,

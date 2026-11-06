@@ -5,8 +5,17 @@ import com.tulipskun.aixodia.data.model.AttachmentRef
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** The connection state the chrome draws. */
-enum class ConnState { OFFLINE, CONNECTING, ONLINE }
+/**
+ * The connection state the chrome draws.
+ *
+ * [AUTH_FAILED] is its own state because it needs its own treatment: the daemon
+ * answered and refused the credential, so the link is up and nothing a retry can
+ * do will change the answer. Only the reader fixing the token changes it.
+ */
+enum class ConnState { OFFLINE, CONNECTING, ONLINE, AUTH_FAILED }
+
+/** The daemon answered and refused this credential. Another dial says the same. */
+internal fun isAuthFailure(code: Int): Boolean = code == 401 || code == 403
 
 /**
  * What the chat screen needs from a transport. [RunSocket] implements it: a

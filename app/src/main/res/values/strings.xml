@@ -13,6 +13,7 @@
 
     <string name="offline_title">Cannot reach daemon</string>
     <string name="offline_unknown_host">Host not found — check the daemon and tunnel are still running</string>
+    <string name="offline_auth">The daemon refused this token — check the API token in Settings</string>
     <string name="offline_retry">Retry</string>
 
     <string name="composer_label">Message</string>
@@ -48,6 +49,7 @@
     <string name="online">Online</string>
     <string name="connecting">Connecting</string>
     <string name="offline">Offline</string>
+    <string name="unauthorised">Not authorised</string>
     <string name="agent_main">main</string>
     <string name="agent_worker">WORKER</string>
     <string name="agent_user">You</string>

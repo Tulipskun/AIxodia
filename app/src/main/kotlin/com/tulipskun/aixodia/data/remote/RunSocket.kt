@@ -3,6 +3,7 @@ package com.tulipskun.aixodia.data.remote
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.tulipskun.aixodia.R
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.model.AiOutput
 import com.tulipskun.aixodia.data.model.AttachmentRef
@@ -150,12 +151,7 @@ class RunSocket(
             // up; the new chat's run is attached below, and a link that really
             // dropped is found by the next call, whose failure re-probes.
             if (_state.value != ConnState.ONLINE) {
-                var wait = 0L
-                while (scope.isActive) {
-                    if (wait > 0) delay(wait)
-                    if (probe()) break
-                    wait = 5_000L
-                }
+                probeUntilUsable()
                 if (!scope.isActive || _state.value != ConnState.ONLINE) return@launch
             }
             if (session != sessionId) return@launch
@@ -225,12 +221,7 @@ class RunSocket(
         probeJob?.cancel()
         probeJob = scope.launch {
             _state.value = ConnState.CONNECTING
-            var wait = 0L
-            while (scope.isActive) {
-                if (wait > 0) delay(wait)
-                if (probe()) break
-                wait = 5_000L
-            }
+            probeUntilUsable()
             if (!scope.isActive || _state.value != ConnState.ONLINE) return@launch
             val id = runId
             if (id != null && streamJob?.isActive != true) {
@@ -356,7 +347,12 @@ class RunSocket(
             http.newCall(request).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    _state.value = if (response.code >= 500) ConnState.OFFLINE else ConnState.ONLINE
+                    if (isAuthFailure(response.code)) {
+                        _state.value = ConnState.AUTH_FAILED
+                        lastError.value = R.string.offline_auth
+                    } else {
+                        _state.value = if (response.code >= 500) ConnState.OFFLINE else ConnState.ONLINE
+                    }
                     val message = runCatching {
                         JSONObject(raw).optJSONObject("error")?.optString("message")
                     }.getOrNull().orEmpty().ifBlank { "run failed: HTTP ${response.code}" }
@@ -375,6 +371,7 @@ class RunSocket(
                     return@use true
                 }
                 _state.value = ConnState.ONLINE
+                lastError.value = 0
                 // The create response is the acknowledgement: the daemon has
                 // stored the question and owns the turn now.
                 if (!req.retry) {
@@ -447,9 +444,19 @@ class RunSocket(
                             clearRun()
                             return
                         }
+                        if (isAuthFailure(response.code)) {
+                            // The daemon answered and refused the credential. The
+                            // backoff below would dial into the same 401 forever,
+                            // so the stream ends here and the banner says what the
+                            // reader has to do: fix the token, then retry.
+                            _state.value = ConnState.AUTH_FAILED
+                            lastError.value = R.string.offline_auth
+                            return
+                        }
                         _state.value = ConnState.OFFLINE
                     } else {
                         _state.value = ConnState.ONLINE
+                        lastError.value = 0
                         backoff = 1_000L
                         val source = response.body?.source() ?: return
                         var event = ""
@@ -561,6 +568,22 @@ class RunSocket(
         }
     }
 
+    /**
+     * Probes until the daemon answers, waiting five seconds between tries, and
+     * gives up on a refused credential. A 401 says the same thing every time it
+     * is asked, so dialing again on a timer is not a retry: it spends the
+     * battery and the tunnel and leaves the reader staring at CONNECTING for as
+     * long as the app is open. Only the token being fixed changes the answer.
+     */
+    private suspend fun probeUntilUsable() {
+        var wait = 0L
+        while (scope.isActive && _state.value != ConnState.AUTH_FAILED) {
+            if (wait > 0) delay(wait)
+            if (probe()) return
+            wait = 5_000L
+        }
+    }
+
     private suspend fun probe(): Boolean {
         _state.value = ConnState.CONNECTING
         val cfg = config() ?: run {
@@ -578,7 +601,12 @@ class RunSocket(
             http.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     _state.value = ConnState.ONLINE
+                    lastError.value = 0
                     true
+                } else if (isAuthFailure(response.code)) {
+                    _state.value = ConnState.AUTH_FAILED
+                    lastError.value = R.string.offline_auth
+                    false
                 } else {
                     _state.value = if (response.code >= 500) ConnState.OFFLINE else ConnState.ONLINE
                     if (response.code >= 500) rediscoverIfNeeded()

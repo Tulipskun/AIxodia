@@ -464,6 +464,7 @@ fun SettingsScreen(
                 ConnState.ONLINE -> "Online ($curDaemon)"
                 ConnState.CONNECTING -> "Connecting…"
                 ConnState.OFFLINE -> "Offline"
+                ConnState.AUTH_FAILED -> "Not authorised"
             }) {
                 Text(
                     "session: $curSession · App v${BuildConfig.VERSION_NAME}",
