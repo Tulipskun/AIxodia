@@ -31,7 +31,7 @@ class BackupScopeParseTest {
         assertEquals("/", browse.parent)
         assertEquals(2, browse.entries.size)
         assertEquals(".codex", browse.entries[0].name)
-        assertTrue(browse.entries[0].canEnter)
+        assertTrue(browse.entries[0].isDir)
         assertFalse(browse.entries[1].isDir)
         assertEquals("/root/notes.txt", browse.entries[1].path)
         assertFalse(browse.truncated)
