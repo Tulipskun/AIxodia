@@ -12,15 +12,15 @@ import org.junit.Test
  */
 class RunSocketAddressTest {
 
-    private val held = "https://old-host.example.trycloudflare.com"
+    private val held = "https://old-host.example.com"
 
     private fun node(url: String, online: Boolean) = NodeInfo(tunnelUrl = url, online = online)
 
     @Test
     fun aDaemonThatMovedIsFollowed() {
         assertEquals(
-            "https://new-host.example.trycloudflare.com",
-            pickDaemonAddress(held, node("https://new-host.example.trycloudflare.com", true)),
+            "https://aixodia.dpdns.org",
+            pickDaemonAddress(held, node("https://aixodia.dpdns.org", true)),
         )
     }
 
@@ -35,7 +35,7 @@ class RunSocketAddressTest {
      */
     @Test
     fun anUnavailableEndpointIsNotAdopted() {
-        assertNull(pickDaemonAddress(held, node("https://new-host.example.trycloudflare.com", false)))
+        assertNull(pickDaemonAddress(held, node("https://aixodia.dpdns.org", false)))
     }
 
     @Test
@@ -48,6 +48,6 @@ class RunSocketAddressTest {
     /** The first dial of all: no address in hand yet, so any live one is an adoption. */
     @Test
     fun anEmptyHandTakesWhatTheDaemonSays() {
-        assertEquals("https://new-host.example.trycloudflare.com", pickDaemonAddress("", node("https://new-host.example.trycloudflare.com", true)))
+        assertEquals("https://aixodia.dpdns.org", pickDaemonAddress("", node("https://aixodia.dpdns.org", true)))
     }
 }
