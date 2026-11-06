@@ -17,7 +17,7 @@ class DaemonDiscoveryTest {
         NodeInfo(tunnelUrl = url, version = version, online = online)
 
     @Test
-    fun `a live daemon at a new url is adopted`() {
+    fun `a configured endpoint at a new url is adopted`() {
         val action = DaemonDiscovery.decide(
             currentUrl = "https://old.example.com",
             node = node("https://aixodia.dpdns.org", online = true),
