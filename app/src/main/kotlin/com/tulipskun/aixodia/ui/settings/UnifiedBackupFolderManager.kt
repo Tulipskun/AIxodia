@@ -111,7 +111,6 @@ internal fun UnifiedBackupFolderManager(
                             onIncludesChange(next.distinct().sorted())
                         },
                     )
-                    Text("Select", style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
