@@ -16,7 +16,6 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -82,7 +81,7 @@ internal fun UnifiedBackupFolderManager(
                 Text("Clear selection")
             }
         }
-        Text("Selected: ${includes.size}", style = MaterialTheme.typography.labelMedium)
+        Text("Selection rules: ${includes.size}", style = MaterialTheme.typography.labelMedium)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
