@@ -193,6 +193,8 @@ fun AutoBackupCard(
         )
         HorizontalDivider()
         Text("CPU usage · last 15 minutes", style = MaterialTheme.typography.titleSmall)
+        val gridColor = MaterialTheme.colorScheme.outlineVariant
+        val graphColor = MaterialTheme.colorScheme.primary
         Canvas(Modifier.fillMaxWidth().height(112.dp)) {
             val top = 6.dp.toPx()
             val bottom = size.height - 6.dp.toPx()
@@ -200,7 +202,7 @@ fun AutoBackupCard(
             for (line in 0..4) {
                 val y = top + chartHeight * line / 4f
                 drawLine(
-                    color = MaterialTheme.colorScheme.outlineVariant,
+                    color = gridColor,
                     start = Offset(0f, y),
                     end = Offset(size.width, y),
                     strokeWidth = 1.dp.toPx(),
@@ -216,7 +218,7 @@ fun AutoBackupCard(
                 }
                 drawPath(
                     path = path,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = graphColor,
                     style = Stroke(width = 2.dp.toPx()),
                 )
             }
@@ -235,11 +237,6 @@ fun AutoBackupCard(
         Text(
             buildString {
                 append("idle streak ${a.idleStreakSecs}s · cpu now ${fmt1(a.cpuCurrent)}%")
-                append(if (a.lastAutoBackupAt > 0) " · last automatic run ${atUtc(a.lastAutoBackupAt)}" else " · no automatic run yet")
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
                 append(if (a.lastAutoBackupAt > 0) " · last automatic run ${atUtc(a.lastAutoBackupAt)}" else " · no automatic run yet")
             },
             style = MaterialTheme.typography.labelSmall,
