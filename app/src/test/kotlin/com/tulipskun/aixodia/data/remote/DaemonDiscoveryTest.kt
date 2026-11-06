@@ -13,8 +13,8 @@ import org.junit.Test
  */
 class DaemonDiscoveryTest {
 
-    private fun node(url: String, online: Boolean, ageS: Long = 5, version: String = "abc1234") =
-        NodeInfo(tunnelUrl = url, version = version, online = online, ageS = ageS)
+    private fun node(url: String, online: Boolean, version: String = "abc1234") =
+        NodeInfo(tunnelUrl = url, version = version, online = online)
 
     @Test
     fun `a live daemon at a new url is adopted`() {
@@ -50,7 +50,7 @@ class DaemonDiscoveryTest {
         // Online state comes from the actual socket; KV only stores configuration.
         val action = DaemonDiscovery.decide(
             currentUrl = "https://old.trycloudflare.com",
-            node = node("https://dead.trycloudflare.com", online = false, ageS = 400),
+            node = node("https://dead.trycloudflare.com", online = false),
         )
         assertEquals(Discovery.Wait, action)
     }
@@ -68,7 +68,7 @@ class DaemonDiscoveryTest {
     fun `a blank url is not an address even when the endpoint is marked available`() {
         val action = DaemonDiscovery.decide(
             currentUrl = "https://old.trycloudflare.com",
-            node = NodeInfo(tunnelUrl = "   ", version = "abc", online = true, ageS = 1),
+            node = NodeInfo(tunnelUrl = "   ", version = "abc", online = true),
         )
         assertEquals(Discovery.Wait, action)
     }
