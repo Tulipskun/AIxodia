@@ -75,7 +75,8 @@ data class NodeInfo(
     @Json(name = "tunnel_url") val tunnelUrl: String = "",
     @Json(name = "version") val version: String = "",
     @Json(name = "online") val online: Boolean = false,
-    @Json(name = "heartbeat_age_s") val ageS: Long = -1,
+    /** No heartbeat is stored; -1 means age is intentionally unavailable. */
+    val ageS: Long = -1,
     /** Unix second the daemon process started; 0 when unknown. */
     @Json(name = "started") val startedAt: Long = 0,
     /**
