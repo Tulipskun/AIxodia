@@ -24,6 +24,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TriStateCheckbox
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -86,7 +88,8 @@ internal fun UnifiedBackupFolderManager(
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             items(listing?.entries.orEmpty(), key = { it.path }) { entry ->
                 val relative = entry.path.removePrefix("/").trim('/')
-                val selected = relative.isNotBlank() && relative in includes
+                val selectionState = if (relative.isBlank()) ToggleableState.Off
+                    else backupPathState(relative, includes)
                 Row(
                     Modifier.fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -100,15 +103,15 @@ internal fun UnifiedBackupFolderManager(
                         tint = if (entry.isDir) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(entry.name, Modifier.weight(1f).padding(horizontal = 12.dp), maxLines = 1)
-                    Checkbox(
-                        checked = selected,
-                        onCheckedChange = {
-                            val next = if (selected) {
-                                includes - relative
-                            } else {
-                                includes + relative
-                            }
-                            onIncludesChange(next.distinct().sorted())
+                    TriStateCheckbox(
+                        state = selectionState,
+                        onClick = {
+                            val next = updateBackupPathSelection(
+                                relative,
+                                selectionState != ToggleableState.On,
+                                includes,
+                            )
+                            onIncludesChange(next)
                         },
                     )
                 }
@@ -127,4 +130,50 @@ internal fun UnifiedBackupFolderManager(
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Done") }
     }
+}
+
+
+private fun backupPathState(path: String, rules: List<String>): ToggleableState {
+    fun selected(candidate: String): Boolean {
+        val match = rules.mapNotNull { raw ->
+            val excluded = raw.startsWith("!")
+            val rule = raw.removePrefix("!")
+            if (candidate == rule || candidate.startsWith("$rule/")) {
+                rule.length to !excluded
+            } else null
+        }.maxByOrNull { it.first }
+        return match?.second ?: false
+    }
+    val own = selected(path)
+    val descendants = rules.any { raw ->
+        val rule = raw.removePrefix("!")
+        rule.startsWith("$path/")
+    }
+    return when {
+        own && !descendants -> ToggleableState.On
+        !own && !descendants -> ToggleableState.Off
+        else -> ToggleableState.Indeterminate
+    }
+}
+
+private fun updateBackupPathSelection(
+    path: String,
+    select: Boolean,
+    rules: List<String>,
+): List<String> {
+    val prefix = "$path/"
+    val withoutSubtree = rules.filterNot { raw ->
+        val rule = raw.removePrefix("!")
+        rule == path || rule.startsWith(prefix)
+    }.toMutableList()
+    if (select) {
+        withoutSubtree += path
+    } else {
+        val inherited = rules.any { raw ->
+            !raw.startsWith("!") &&
+                (path.startsWith(raw.removePrefix("!") + "/"))
+        }
+        if (inherited) withoutSubtree += "!$path"
+    }
+    return withoutSubtree.distinct().sorted()
 }
