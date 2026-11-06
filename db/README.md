@@ -5,11 +5,10 @@ directly** (D-011), so this directory holds only the schema. It is applied with
 wrangler, which speaks the same API — nothing is deployed.
 
 What each side uses it for: the engine keeps provider config, the chat history
-(`chat_sessions`/`chat_turns`) and its own `system_state` rows (`daemon/url`,
-`daemon/version`, `daemon/heartbeat`) in this database; the engine's
-`ensure_turns` adds the newer turn columns itself. The app reads
-`system_state` (`D1Api.node()`) to discover the current tunnel URL and whether
-the daemon is alive, and falls back to reading `chat_sessions`/`chat_turns`
+(`chat_sessions`/`chat_turns`) and runtime state in `system_state` in this database; the engine's
+`ensure_turns` adds the newer turn columns itself. The app reads daemon discovery
+from Workers KV namespace `AIXODIA_CONFIG` (`daemon/url`, `daemon/version`) and
+falls back to reading `chat_sessions`/`chat_turns`
 directly (`chatSessions()`/`chatTurns()`) when the tunnel cannot be dialled —
 history stays visible with the engine down. Chat writes always go through the
 engine, never from the phone to D1.
@@ -33,8 +32,7 @@ running `db/schema.sql` (or `migrate.py`, which creates tables if missing as a
 fallback). The tables in `schema.sql` are:
 
 - `llm_providers` — provider keys and endpoints;
-- `system_state` — opaque JSON blobs and daemon keys (daemon/url, daemon/version,
-  daemon/heartbeat, kernel/*, sync/*, etc.).
+- `system_state` — opaque JSON blobs and daemon keys (kernel/*, sync/*, etc.).
 
 `schema.sql` lists exactly these two. The chat tables predate the rename and
 are not re-created by this file; the engine's `ensure_turns` keeps their
