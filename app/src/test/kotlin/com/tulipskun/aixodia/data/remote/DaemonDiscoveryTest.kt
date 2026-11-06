@@ -19,10 +19,10 @@ class DaemonDiscoveryTest {
     @Test
     fun `a live daemon at a new url is adopted`() {
         val action = DaemonDiscovery.decide(
-            currentUrl = "https://old.trycloudflare.com",
-            node = node("https://new.trycloudflare.com", online = true),
+            currentUrl = "https://old.example.com",
+            node = node("https://aixodia.dpdns.org", online = true),
         )
-        assertEquals(Discovery.Adopt("https://new.trycloudflare.com"), action)
+        assertEquals(Discovery.Adopt("https://aixodia.dpdns.org"), action)
     }
 
     @Test
@@ -30,8 +30,8 @@ class DaemonDiscoveryTest {
         // Writing it again would reset the socket's backoff on every poll and
         // make the connection flap for no reason.
         val action = DaemonDiscovery.decide(
-            currentUrl = "https://same.trycloudflare.com",
-            node = node("https://same.trycloudflare.com", online = true),
+            currentUrl = "https://aixodia.dpdns.org",
+            node = node("https://aixodia.dpdns.org", online = true),
         )
         assertEquals(Discovery.Keep, action)
     }
@@ -39,8 +39,8 @@ class DaemonDiscoveryTest {
     @Test
     fun `a trailing slash is the same address`() {
         val action = DaemonDiscovery.decide(
-            currentUrl = "https://same.trycloudflare.com",
-            node = node("https://same.trycloudflare.com/", online = true),
+            currentUrl = "https://aixodia.dpdns.org",
+            node = node("https://aixodia.dpdns.org/", online = true),
         )
         assertEquals(Discovery.Keep, action)
     }
@@ -49,25 +49,25 @@ class DaemonDiscoveryTest {
     fun `a missing live connection does not make the stored endpoint disappear`() {
         // Online state comes from the actual socket; KV only stores configuration.
         val action = DaemonDiscovery.decide(
-            currentUrl = "https://old.trycloudflare.com",
-            node = node("https://dead.trycloudflare.com", online = false),
+            currentUrl = "https://old.example.com",
+            node = node("https://dead.example.com", online = false),
         )
         assertEquals(Discovery.Wait, action)
     }
 
     @Test
     fun `an empty row is waited on, not treated as an address`() {
-        assertEquals(Discovery.Wait, DaemonDiscovery.decide("https://old.trycloudflare.com", null))
+        assertEquals(Discovery.Wait, DaemonDiscovery.decide("https://old.example.com", null))
         assertEquals(
             Discovery.Wait,
-            DaemonDiscovery.decide("https://old.trycloudflare.com", node("", online = false)),
+            DaemonDiscovery.decide("https://old.example.com", node("", online = false)),
         )
     }
 
     @Test
     fun `a blank url is not an address even when the endpoint is marked available`() {
         val action = DaemonDiscovery.decide(
-            currentUrl = "https://old.trycloudflare.com",
+            currentUrl = "https://old.example.com",
             node = NodeInfo(tunnelUrl = "   ", version = "abc", online = true),
         )
         assertEquals(Discovery.Wait, action)
@@ -75,16 +75,16 @@ class DaemonDiscoveryTest {
 
     @Test
     fun `discovery keeps the address it has when KV has no endpoint`() {
-        var stored = "https://old.trycloudflare.com"
+        var stored = "https://old.example.com"
         val actions = listOf(
             DaemonDiscovery.decide(stored, null),
-            DaemonDiscovery.decide(stored, node("https://dead.trycloudflare.com", online = false)),
+            DaemonDiscovery.decide(stored, node("https://dead.example.com", online = false)),
             DaemonDiscovery.decide(stored, node("", online = false)),
         )
         for (action in actions) {
             if (action is Discovery.Adopt) stored = action.url
         }
-        assertEquals("https://old.trycloudflare.com", stored)
+        assertEquals("https://old.example.com", stored)
         assertTrue(actions.none { it is Discovery.Adopt })
     }
 }
