@@ -31,11 +31,22 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
+import kotlin.random.Random
 
 private const val TAG = "TerminalSocket"
 
 /** The gap between connection attempts. Discovery polls every 30s, so this covers it. */
 private const val RETRY_MS = 1_500L
+
+/** How long a retry curve is allowed to grow to. */
+private const val MAX_BACKOFF_MS = 10_000L
+
+/**
+ * How long a link has to hold, once the engine has answered, to count as a
+ * session rather than a refusal. Anything under this is a connection the engine
+ * let go again on purpose, and the redial does not get to start fresh.
+ */
+private const val LONG_SESSION_MS = 10_000L
 
 /**
  * How long a freshly opened socket may stay silent before it is treated as
@@ -903,8 +914,8 @@ class TerminalSocket(
             }
             if (ticket.isNullOrBlank()) {
                 link.updateDetail("could not get a terminal ticket")
-                delay(backoff)
-                backoff = minOf(backoff * 2, 10_000L)
+                delay(jitteredBackoff(backoff, Random.nextDouble()))
+                backoff = minOf(backoff * 2, MAX_BACKOFF_MS)
                 continue
             }
 
@@ -997,8 +1008,8 @@ class TerminalSocket(
             } catch (t: Throwable) {
                 Log.w(TAG, "could not open terminal socket", t)
                 link.updateDetail("invalid terminal address")
-                delay(backoff)
-                backoff = minOf(backoff * 2, 10_000L)
+                delay(jitteredBackoff(backoff, Random.nextDouble()))
+                backoff = minOf(backoff * 2, MAX_BACKOFF_MS)
                 continue
             }
             link.socket = ws
@@ -1021,12 +1032,15 @@ class TerminalSocket(
                 // has already reported why; wait a little longer each time.
                 if (link.socket === ws) link.socket = null
                 ws.cancel()
-                delay(backoff)
-                backoff = minOf(backoff * 2, 10_000L)
+                delay(jitteredBackoff(backoff, Random.nextDouble()))
+                backoff = minOf(backoff * 2, MAX_BACKOFF_MS)
                 continue
             }
 
-            backoff = RETRY_MS
+            // The engine answered. From here the question is not how many times
+            // the dial failed but how long this link held, so the curve is left
+            // where it is and only a session worth the name brings it down.
+            val readyAt = System.currentTimeMillis()
             // The view can be laid out while the socket handshake is in
             // flight. Its resize was stored but could not be sent before the
             // ready frame; now that the shell exists, send the latest size.
@@ -1046,11 +1060,14 @@ class TerminalSocket(
             if (shellEnded) return
             // The link dropped under a window that is still open — the app was
             // backgrounded, the engine moved, Wi-Fi changed. Reconnect instead
-            // of leaving the tab on a dead connection.
+            // of leaving the tab on a dead connection, at a pace that depends on
+            // what was dropped: see [redialWaits].
+            val (wait, next) = redialWaits(System.currentTimeMillis() - readyAt, backoff)
+            backoff = next
             link.setState(TermState.CONNECTING)
             link.updateError(0)
             link.updateDetail("disconnected; reconnecting")
-            delay(RETRY_MS)
+            delay(jitteredBackoff(wait, Random.nextDouble()))
         }
     }
 
@@ -1182,6 +1199,27 @@ class TerminalSocket(
         }
     }
 }
+
+/**
+ * What a dropped link waits before redialling, and what the wait after the drop
+ * that follows it will be.
+ *
+ * [heldMillis] is how long the connection stayed up once the engine had answered
+ * with ready. A link that held was a session, and whatever ended it — the phone
+ * backgrounded, a tunnel restarted — says nothing about whether the engine wants
+ * us back, so the next dial starts the curve again. A link let go seconds after
+ * ready is the engine refusing the reattach politely; resetting for that turns
+ * one refusal into a redial every [RETRY_MS] forever, so for those the curve
+ * keeps growing up to [MAX_BACKOFF_MS], exactly as the failures before the
+ * handshake do.
+ */
+internal fun redialWaits(heldMillis: Long, backoff: Long): Pair<Long, Long> =
+    if (heldMillis >= LONG_SESSION_MS) {
+        RETRY_MS to minOf(RETRY_MS * 2, MAX_BACKOFF_MS)
+    } else {
+        val wait = maxOf(backoff, RETRY_MS)
+        wait to minOf(wait * 2, MAX_BACKOFF_MS)
+    }
 
 /**
  * The size the view measured after the open frame was already sent. A layout

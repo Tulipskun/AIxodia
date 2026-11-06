@@ -30,6 +30,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 private const val TAG = "RunSocket"
 
@@ -510,8 +511,11 @@ class RunSocket(
                 rediscoverIfNeeded()
                 // Waited out, not slept through: reconnect() has just proved a
                 // live address, and the curve starts again from a second so the
-                // turn is fetched from there rather than from here in 15s.
-                val woken = withTimeoutOrNull(backoff) { wakeSignal.receive() } != null
+                // turn is fetched from there rather than from here in 15s. The
+                // jitter is on the wait, never on the curve, so it cannot
+                // compound into the growth.
+                val wait = jitteredBackoff(backoff, Random.nextDouble())
+                val woken = withTimeoutOrNull(wait) { wakeSignal.receive() } != null
                 backoff = if (woken) 1_000L else (backoff * 2).coerceAtMost(15_000L)
             }
         }

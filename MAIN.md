@@ -1,11 +1,12 @@
 GOAL:
-[IN_PROCESS] Fix connection-state handling and reconnect logic in the run/terminal sockets (v1.175): auth failure as its own state, Discovery reflecting the live link, reconnect interrupting backoff, terminal backoff that stays grown.
+[IN_PROCESS] Fix connection-state handling and reconnect logic in the run/terminal sockets (v1.175): auth failure as its own state, Discovery reflecting the live link, reconnect interrupting backoff, terminal backoff that stays grown. All four built and tested; #24 is in main, #25 and #26 stacked behind it.
 
 PLAN:
 [COMPLETED] RunSocket: 401/403 stops the retry loop, new ConnState.AUTH_FAILED, error reaches the UI.
 [COMPLETED] DaemonDiscovery: CONNECTED also requires the transport ONLINE; settings screen reads the intermediate state.
 [COMPLETED] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
-[IN_PROCESS] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
+[COMPLETED] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
+[IN_PROCESS] Ship them: #24 (steps 1+2) is merged into main; #25 (step 3) and this branch's PR (step 4) sit on top of it, one commit each. Stacked because all three edit RunSocket's dial path and share `FakeDaemon` — merge in that order and each diff reads as its own step.
 
 ARCHIVE:
 v1.174 `ab4c00e` backup/restore: round-trip scoped after a root change, restore gated on a real bucket backup, picker/browser polish — the "push main, watch the release workflow" step was left unverified by the next session
@@ -51,3 +52,4 @@ NOTE:
 - v1.175 test bed: `FakeDaemon` (app/src/test/.../remote) hand-rolls HTTP/1.1 on `ServerSocket` — the unit-test compile classpath is android.jar, which carries no `com.sun.net.httpserver`. Rules match the **longest** path prefix, query stripped. Stub the run cursor with plain values (`getString("run:s", null)`): an `any()` on that nullable default silently skips `resumeRemembered`.
 - v1.175: `android.util.Log` is not mocked here (no `testOptions.returnDefaultValues`), so a test path that reaches a `Log` call dies mid-coroutine and leaves the state stuck where it was — read a stalled CONNECTING as "this path logs", not as a hung socket.
 - v1.175 reconnect: a backoff test that sleeps a fixed time passes by luck — the natural next dial can land inside the window (one did). `afterNextPoll` catches the wait at its **start**, where no step is under 1s and a 400 ms window can only hold the wake. Run `RunSocketReconnectTest` against the old code before believing it.
+- v1.175 backoff: `jitteredBackoff(millis, draw)` (ChatTransport.kt) takes its draw rather than rolling one so a test can name both ends. It spreads the **wait**, never the curve, so a capped 10s step really can be waited 8–12s — that is the point, not a bug to fix.
