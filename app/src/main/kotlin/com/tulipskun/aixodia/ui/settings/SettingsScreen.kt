@@ -313,7 +313,7 @@ fun SettingsScreen(
                     value = address,
                     onValueChange = { address = it },
                     label = "Daemon address (tunnel)",
-                    placeholder = "https://xxxx.trycloudflare.com",
+                    placeholder = "https://aixodia.dpdns.org",
                     hint = if (address.isBlank()) {
                         "Leave blank — history still reads/writes D1 directly · live chat connects to wss://<host>/ws"
                     } else {
