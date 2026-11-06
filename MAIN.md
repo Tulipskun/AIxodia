@@ -1,12 +1,14 @@
 GOAL:
-[IN_PROCESS] Fix the backup/restore system and refine its UI (v1.174): scope round-trip after a root change, restore gating on a real bucket backup, picker/browser polish.
+[IN_PROCESS] Fix connection-state handling and reconnect logic in the run/terminal sockets (v1.175): auth failure as its own state, Discovery reflecting the live link, reconnect interrupting backoff, terminal backoff that stays grown.
 
 PLAN:
-[COMPLETED] Unwrap old-root include rules to /-relative paths; resend includes on both config saves.
-[COMPLETED] Gate RestoreCard on lastBackup.ok; browser matches selections at any depth; UI cleanup + tests.
-[IN_PROCESS] Push main, watch the Android Release workflow build.
+[COMPLETED] RunSocket: 401/403 stops the retry loop, new ConnState.AUTH_FAILED, error reaches the UI.
+[COMPLETED] DaemonDiscovery: CONNECTED also requires the transport ONLINE; settings screen reads the intermediate state.
+[IN_PROCESS] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
+[PENDING] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
 
 ARCHIVE:
+v1.174 `ab4c00e` backup/restore: round-trip scoped after a root change, restore gated on a real bucket backup, picker/browser polish — the "push main, watch the release workflow" step was left unverified by the next session
 v1.172 `e2eeda2` terminal: the page is remembered by the *text* at its top, not its row number — tmux re-wraps a replayed pane at the new width, so the number is the thing a rebuild destroys; `TerminalRow.text()` was added for it
 v1.172 `66ff8cb` net: `RunSocket.rediscoverIfNeeded()` reads the daemon's D1 row on a failed dial (15 s rate limit) and `pickDaemonAddress` decides; the terminal already did this, the run stream never had a way to
 v1.172 `e297d54` header: `boot=` rides the version column, `SettingsStore.saveDaemonClocks` caches both, `ChatScreen` renders `uptimeSince` = boot else start
@@ -31,19 +33,20 @@ d84406f backup: one backup, one restore, no version list
 +~100 earlier goals: terminal fixes, streaming, drawer, keyboard, provider UI, settings, history, session store, tool cards, chat UX, a11y audit, self-update flow
 
 NOTE:
-- The SFTP file-manager goal from the previous session was left mid-flight in MAIN.md (API client + Files nav); its code state was not verified here — check git log/diff before resuming it.
+- The SFTP file-manager goal from a previous session was left mid-flight in MAIN.md (API client + Files nav); its code state was not verified — check git log/diff before resuming it.
 - Scope rule form: the engine stores `/`-relative paths (absolute ones fail `validate_scope`), `BackupScreen.load` unwraps old-root-prefixed rules to that form, and the browser matches ancestors at any depth. Keep all three in that form or checkboxes desync again.
 - Engine contract facts (verified against aixodia-io/src/backup.rs @ HEAD): `restorable` answers token+bucket only, never whether the bucket holds a manifest — gate a restore offer on `last_backup.ok`; an omitted field on `PUT /api/backup/config` keeps its stored value; a successful restore requires a clean `failed` list before auto-backup unlocks (`mark_restore_complete`).
 - Where a backup's minutes go, measured on an idle box (53.4 s for 48,692 files / 4.6 GB): walk+plan 6.8 s, **packing 37.9 s**, asking the bucket and uploading 517 MB 5.5 s (~94 MB/s), manifest 2.7 s, publish 0.7 s. The wire is not the cost; reading the tree and rebuilding containers is.
-- A terminal's history is usually not the app's. Replaying 3 s of the live pane stream left the emulator holding **1** scrollback row while tmux held **1,510**: an inline TUI repaints its viewport, so nothing ever scrolls off our screen to drag through. The engine answers this by replaying `capture-pane -p -e -S -2000` at attach, which puts the pane's lines in the app's scrollback where a drag costs no round trip.
-- A resize does not cost the phone its page; the **replay that follows it** does. `attach()` always answers with `RIS` + the pane's history, and a reset empties the scrollback that `scrollTopPx` is measured against, so the offset survives the rebuild only if something re-derives it. Two consequences: hold the page by the row's *text*, and open the retry window at the **shrink**, not at the finger.
-- A render between two time-bounded states is not free: Paparazzi's `SystemClock.uptimeMillis()` is fake and `snapshot()` advances it, so anything with a deadline stamped before a snapshot has expired by the one after. Treat "passes as a test, differs as a picture" as a clock problem, not flakiness.
+- A terminal's history is usually not the app's. Replaying 3 s of the live pane stream left the emulator holding **1** scrollback row while tmux held **1,510**: an inline TUI repaints its viewport, so nothing ever scrolls off our screen to drag through. The engine answers this by replaying `capture-pane -p -e -S -2000` at attach.
+- A resize does not cost the phone its page; the **replay that follows it** does. `attach()` always answers with `RIS` + the pane's history, so the offset survives a rebuild only if something re-derives it. Hold the page by the row's *text*; open the retry window at the **shrink**, not at the finger.
+- A render between two time-bounded states is not free: Paparazzi's `SystemClock.uptimeMillis()` is fake and `snapshot()` advances it. Treat "passes as a test, differs as a picture" as a clock problem, not flakiness.
 - Discovery cannot be pushed over the connection it describes. Both transports now read the D1 row themselves when a dial fails; `DaemonDiscovery` remains the fast path while the socket is alive.
 - The uptime chain is the version column: `daemon/version` is `… started=<unix> boot=<unix>`; an engine without `boot=` degrades to counting its own start.
 - A preedit cannot be sent as a cursor movement: `\e[nD` is a *key* to readline; only a delete means the same thing everywhere, counted in code points.
-- Speed as measured on v1.168: warm backup 109.6 s (48,354 files / 4.58 GB, 607 MB uploaded, 46,107 reused); restore 82.2 s (47,925 files, `failed: 0`) — end to end, not just in tests.
-- UI is not done until it has been looked at: `./gradlew :app:testDebugUnitTest --tests "*Snapshots*"` writes PNGs under `app/build/reports/paparazzi/debug/images/`; map test→file via `runs/*.js`. Read them. A golden that moves is a finding, not churn.
 - Phone app builds from `main` and publishes under a single rolling `latest` tag; deleting the draft-izes the release and `releases/latest` 404s, so `release.sh` moves the tag and passes `--draft=false`.
 - The Android SDK lives outside the backed-up tree; `scripts/setup-build-box.sh` restores `/opt/android-sdk` in one command.
-- Building here: `export ANDROID_HOME=/opt/android-sdk` and run gradle under `unshare -Cm` (the cgroup-namespace warning breaks `jmod`). This sandbox denies `unshare`; plain gradle compiled and tested fine anyway — try `unshare` first elsewhere.
+- Building here: `export ANDROID_HOME=/opt/android-sdk` and run gradle under `unshare -Cm` (the cgroup-namespace warning breaks `jmod`). This sandbox may deny `unshare` — fall back to plain gradle.
 - Scope, root, browse and preview need an engine that reports `includes`; an older one falls back to the read-only root and the raw pattern textarea.
+- v1.175 state: the repo has **no** HTTP mock server dependency (tests reach privates by reflection, per `RunSocketOwnershipTest`); `ChatTransport.lastError` had no writer before this goal. `ConnState.AUTH_FAILED` is deliberately not-ONLINE, so the `== ConnState.ONLINE` call sites stay correct; the two exhaustive `when`s (`ConnDot`, Settings About card) are the compile-time catch.
+- v1.175 test bed: `FakeDaemon` (app/src/test/.../remote) hand-rolls HTTP/1.1 on `ServerSocket` — the unit-test compile classpath is android.jar, which carries no `com.sun.net.httpserver`. Rules match the **longest** path prefix, query stripped. Stub the run cursor with plain values (`getString("run:s", null)`): an `any()` on that nullable default silently skips `resumeRemembered`.
+- v1.175: `android.util.Log` is not mocked here (no `testOptions.returnDefaultValues`), so a test path that reaches a `Log` call dies mid-coroutine and leaves the state stuck where it was — read a stalled CONNECTING as "this path logs", not as a hung socket.

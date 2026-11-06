@@ -927,8 +927,10 @@ fun ChatScreen(
                 // The discovery row saying the daemon is alive is not proof
                 // that this phone's run stream reached it: a bad token or a
                 // stale tunnel can leave the dot red while D1 looks healthy.
-                // Show the card whenever the live link is down.
-                if (conn == ConnState.OFFLINE) {
+                // Show the card whenever the live link is down, and whenever the
+                // daemon answered but refused this token — the banner then says
+                // which of the two it is, because only one of them fixes itself.
+                if (conn == ConnState.OFFLINE || conn == ConnState.AUTH_FAILED) {
                     kotlinx.coroutines.delay(1500L)
                     showOfflineCard = true
                 } else {

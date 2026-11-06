@@ -66,15 +66,20 @@ class DaemonDiscovery(
             }
         }
         scope.launch {
+            // The row is re-read every thirty seconds, but the half of the label
+            // the reader is actually asking about — *can this phone reach it* —
+            // changes whenever the socket likes. Republish on every transition,
+            // and never re-run the address decision here: that would turn a
+            // socket flap into a reconnect loop.
+            socket.state.collect { lastRow?.let { _state.value = shownFor(it) } }
+        }
+        scope.launch {
             while (isActive) {
                 try {
                     handleNode(history.node())
                 } catch (e: Exception) {
                     Log.w(TAG, "Workers KV discovery failed: ${e.message}")
-                    _state.value = DiscoveryState(
-                        phase = DiscoveryPhase.UNREACHABLE,
-                        error = e.message?.take(120).orEmpty(),
-                    )
+                    report(DiscoveryPhase.UNREACHABLE, error = e.message?.take(120).orEmpty())
                 }
                 delay(30_000)
             }
@@ -98,22 +103,15 @@ class DaemonDiscovery(
             settings.current()
         } catch (e: Exception) {
             Log.w(TAG, "settings read failed: ${e.message}")
-            _state.value = DiscoveryState(
-                phase = DiscoveryPhase.UNREACHABLE,
-                error = e.message?.take(120).orEmpty(),
-            )
+            report(DiscoveryPhase.UNREACHABLE, error = e.message?.take(120).orEmpty())
             return
         }
         if (current.token.isBlank()) {
-            _state.value = DiscoveryState(phase = DiscoveryPhase.NO_TOKEN)
+            report(DiscoveryPhase.NO_TOKEN)
             return
         }
         if (node == null) {
-            _state.value = DiscoveryState(
-                phase = DiscoveryPhase.IDLE,
-                tunnelUrl = current.daemonUrl,
-                online = false,
-            )
+            report(DiscoveryPhase.IDLE, tunnelUrl = current.daemonUrl)
             return
         }
 
@@ -125,12 +123,7 @@ class DaemonDiscovery(
                 Log.i(TAG, "daemon endpoint changed: adopting ${action.url}")
                 settings.saveDaemon(action.url)
                 socket.reconnect()
-                _state.value = DiscoveryState(
-                    phase = DiscoveryPhase.CONNECTED,
-                    tunnelUrl = action.url,
-                    version = node.version,
-                    online = true,
-                )
+                report(DiscoveryPhase.CONNECTED, tunnelUrl = action.url, version = node.version)
             }
 
             Discovery.Keep -> {
@@ -138,23 +131,49 @@ class DaemonDiscovery(
                     Log.i(TAG, "engine restarted at $started; redialing socket and terminal")
                     socket.reconnect()
                 }
-                _state.value = DiscoveryState(
-                    phase = DiscoveryPhase.CONNECTED,
-                    tunnelUrl = node.tunnelUrl,
-                    version = node.version,
-                    online = true,
-                )
+                report(DiscoveryPhase.CONNECTED, tunnelUrl = node.tunnelUrl, version = node.version)
             }
 
-            Discovery.Wait -> {
-                _state.value = DiscoveryState(
-                    phase = DiscoveryPhase.IDLE,
-                    tunnelUrl = current.daemonUrl,
-                    online = false,
-                )
-            }
+            Discovery.Wait -> report(DiscoveryPhase.IDLE, tunnelUrl = current.daemonUrl)
         }
     }
+
+    /**
+     * Records what the row said and publishes it through the socket's answer.
+     * The row is only remembered so a later socket transition can be reported
+     * without reading Workers KV again.
+     */
+    private fun report(
+        phase: DiscoveryPhase,
+        tunnelUrl: String = "",
+        version: String = "",
+        error: String = "",
+    ) {
+        val row = Row(phase, tunnelUrl, version, error)
+        lastRow = row
+        _state.value = shownFor(row)
+    }
+
+    private fun shownFor(row: Row): DiscoveryState {
+        val shown = phaseFor(row.phase, socket.state.value)
+        return DiscoveryState(
+            phase = shown,
+            tunnelUrl = row.tunnelUrl,
+            version = row.version,
+            online = shown == DiscoveryPhase.CONNECTED,
+            error = row.error,
+        )
+    }
+
+    /** The last thing Workers KV said, kept for the socket's side of the label. */
+    private data class Row(
+        val phase: DiscoveryPhase,
+        val tunnelUrl: String,
+        val version: String,
+        val error: String,
+    )
+
+    private var lastRow: Row? = null
 
     companion object {
         /** Reads a push into a decision. Separate from the frame handling so it can be tested. */
@@ -168,6 +187,18 @@ class DaemonDiscovery(
             return Discovery.Adopt(url)
         }
 
+        /**
+         * Reads the row and the live socket into what the settings screen may
+         * claim. Separate from the publishing so it can be tested: the row names
+         * an engine, and only the transport says whether this phone has it.
+         */
+        fun phaseFor(row: DiscoveryPhase, transport: ConnState): DiscoveryPhase =
+            if (row == DiscoveryPhase.CONNECTED && transport != ConnState.ONLINE) {
+                DiscoveryPhase.ANNOUNCED
+            } else {
+                row
+            }
+
         /** A trailing slash is not a different daemon, and would rewrite settings. */
         private fun normalise(url: String): String = url.trim().trimEnd('/')
     }
@@ -180,7 +211,14 @@ enum class DiscoveryPhase {
     /** No endpoint is configured in KV. The stored address is left as it is. */
     IDLE,
 
-    /** A live daemon is known and its address is the stored one. */
+    /**
+     * Workers KV names a live engine at this address and the phone is not
+     * talking to it: the address is right, the connection is not. The engine is
+     * up — someone else is using it — and this device cannot reach it.
+     */
+    ANNOUNCED,
+
+    /** The row names this address *and* the transport is on it. */
     CONNECTED,
 
     /** The Workers KV namespace could not be read. */
