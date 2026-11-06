@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -111,19 +111,29 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                 filled = true
                 bucket = s.bucket
                 prefix = s.prefix
+                // The picker speaks in paths relative to `/` — the engine refuses
+                // an include that starts with one. A rule carrying the old root
+                // as a prefix is unwrapped here so the browser can match it;
+                // leaving it would show every folder unchecked after a root
+                // change and persist a scope that matches nothing.
                 val previousRoot = s.root.trimEnd('/').removePrefix("/")
                 includesText = if (previousRoot.isBlank()) {
                     s.includes.orEmpty().joinToString("\n")
                 } else {
-                    s.includes.orEmpty().map { entry ->
+                    s.includes.orEmpty().mapNotNull { entry ->
                         val excluded = entry.startsWith("!")
                         val selectedPath = entry.removePrefix("!")
-                        val normalized = when {
-                            selectedPath.isBlank() -> previousRoot
-                            selectedPath == previousRoot || selectedPath.startsWith("$previousRoot/") -> selectedPath
-                            else -> "$previousRoot/${selectedPath.trimStart('/')}"
+                        val relative = when {
+                            selectedPath == previousRoot -> ""
+                            selectedPath.startsWith("$previousRoot/") ->
+                                selectedPath.removePrefix("$previousRoot/")
+                            else -> selectedPath.trimStart('/')
                         }
-                        if (excluded) "!$normalized" else normalized
+                        when {
+                            relative.isBlank() && !excluded -> null
+                            excluded -> "!$relative"
+                            else -> relative
+                        }
                     }.joinToString("\n")
                 }
             }
@@ -156,7 +166,7 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     IconButton(onClick = {
                         if (showScope) showScope = false else onBack()
                     }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
             )
@@ -190,6 +200,9 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
+                        // The widest label sizes every tab, so switching tabs
+                        // does not slide the indicator under a reader's finger.
+                        modifier = Modifier.widthIn(min = 96.dp),
                         text = { Text(label) },
                     )
                 }
@@ -264,6 +277,11 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                                         bucket = bucket,
                                         prefix = prefix,
                                         excludes = emptyList(),
+                                        // The engine keeps an omitted field, so
+                                        // the on-screen selection is resent as
+                                        // relative paths. Sending it explicitly
+                                        // also means a save here cannot strand
+                                        // old-root rules in D1.
                                         includes = s?.includes?.let { includes },
                                         root = "/".takeIf { it != s?.root },
                                     )
@@ -318,7 +336,16 @@ fun BackupScreen(history: HistoryApi, onBack: () -> Unit) {
                             onSave = {
                                 busy = true; msg = ""
                                 scope.launch {
-                                    val out = history.saveBackupConfig(token, bucket, prefix)
+                                    val out = history.saveBackupConfig(
+                                        token = token,
+                                        bucket = bucket,
+                                        prefix = prefix,
+                                        // The engine keeps an omitted field: the
+                                        // selection is resent as relative paths so
+                                        // saving the bucket never strands old-root
+                                        // rules in D1.
+                                        includes = s?.includes?.let { includes },
+                                    )
                                     msg = out
                                     msgIsError = !out.startsWith("Backup settings saved")
                                     filled = false
@@ -455,6 +482,13 @@ internal fun RunCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        } else if (!s.configured && s.needs.isNotEmpty()) {
+            // Say what is missing instead of leaving a greyed-out button.
+            Text(
+                "A backup still needs: " + s.needs.joinToString(", "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
@@ -575,23 +609,26 @@ internal fun RunResultCard(run: BackupRun) {
         DetailRow("files", humanCount(r.files))
         if (r.dirs > 0) DetailRow("directories", humanCount(r.dirs))
         if (r.symlinks > 0) DetailRow("symlinks", humanCount(r.symlinks))
-        DetailRow("tree size", AttachmentRef.humanSize(r.bytes))
-        if (!restore) {
+        // A restore writes the manifest's bytes; a backup reports what it put on
+        // the wire, which is the number that says how much the run cost.
+        if (restore) {
+            DetailRow("bytes written", AttachmentRef.humanSize(r.bytes))
+            if (r.unchanged > 0) DetailRow("already correct", humanCount(r.unchanged))
+        } else {
+            DetailRow("tree size", AttachmentRef.humanSize(r.bytes))
             DetailRow("uploaded this run", AttachmentRef.humanSize(r.uploadedBytes))
             DetailRow("files already current", humanCount(r.filesReused))
             if (r.objectsReused > 0) {
                 DetailRow("objects already in the bucket", humanCount(r.objectsReused))
             }
-        } else {
-            DetailRow("already correct", humanCount(r.unchanged))
-        }
-        if (r.deletedManifests > 0) {
-            DetailRow("replaced", "${r.deletedManifests} previous manifest(s)")
+            if (r.deletedManifests > 0) {
+                DetailRow("replaced", "${r.deletedManifests} previous manifest(s)")
+            }
         }
         if (r.root.isNotBlank()) DetailRow("root", r.root)
         if (r.bucket.isNotBlank()) DetailRow("bucket", r.bucket)
         DetailRow("took", humanDuration(r.durationMs / 1000))
-        DetailRow("effective throughput", humanRate(r.bytes, r.durationMs))
+        if (!restore) DetailRow("effective throughput", humanRate(r.bytes, r.durationMs))
         if (r.skipped.isNotEmpty()) {
             HorizontalDivider()
             // A path that could not be read is missing from the backup and the
@@ -656,6 +693,11 @@ internal fun RestoreCard(
 ) {
     val restoreRoot = status.lastBackup?.takeIf { it.ok }?.report?.root
         ?.ifBlank { status.root } ?: status.root
+    // `restorable` answers whether the engine *could* run a restore — token and
+    // bucket set. It does not know whether the bucket holds anything; only the
+    // persisted last backup does. Gating on restorable alone invites a tap that
+    // the engine refuses with "the bucket holds no backup yet".
+    val hasBackup = status.lastBackup?.ok == true
     SectionCard(
         "Restore",
         "The bucket holds one backup — the tree as the last successful run left it.",
@@ -666,15 +708,23 @@ internal fun RestoreCard(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        val restorable = status.restorable && !status.running
+        val restorable = status.restorable && !status.running && hasBackup
         FilledTonalButton(
             onClick = onRestore,
             enabled = busy.not() && restorable,
         ) { Text("Restore the backup") }
-        if (!restorable && !status.running) {
+        if (!restorable) {
             Text(
-                if (status.configured) "Idle." else "A restore still needs: " +
-                    status.needsRestore.joinToString(", ").ifBlank { "the hub token and the bucket" },
+                when {
+                    status.running -> "A ${status.operation} is running; a restore starts when the engine is idle."
+                    !hasBackup -> if (status.configured) {
+                        "Nothing to restore yet — back up at least once before restoring."
+                    } else {
+                        "A restore still needs: " +
+                            status.needsRestore.joinToString(", ").ifBlank { "the hub token and the bucket" }
+                    }
+                    else -> "Idle."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -811,9 +861,18 @@ internal fun LastBackupStrip(lastBackup: BackupRun?) {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        successful?.report?.let { report ->
+        if (successful?.report != null) {
+            val report = successful.report
             Text(
-                "${report.files} files",
+                buildString {
+                    append(humanCount(report.files)).append(" files")
+                    // An old engine's report may carry no byte count; say
+                    // nothing rather than "0 B", which reads as a backup of
+                    // nothing.
+                    if (report.bytes > 0L) {
+                        append(" · ").append(AttachmentRef.humanSize(report.bytes))
+                    }
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

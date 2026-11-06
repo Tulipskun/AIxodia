@@ -362,4 +362,30 @@ class BackupScreenSnapshots {
             }
         }
     }
+
+    /** A fresh engine with a bucket set but nothing in it yet. */
+    @Test
+    fun restoreCardNothingToRestore() = paparazzi.snapshot {
+        AIxodiaTheme {
+            RestoreCard(
+                status = modern.copy(lastBackup = null),
+                busy = false,
+                onRestore = {},
+            )
+        }
+    }
+
+    /** A failed backup must not invite a restore that would hit a stale tree. */
+    @Test
+    fun restoreCardLastBackupFailed() = paparazzi.snapshot {
+        AIxodiaTheme {
+            RestoreCard(
+                status = modern.copy(
+                    lastBackup = BackupRun(operation = "backup", ok = false, error = "disk full"),
+                ),
+                busy = false,
+                onRestore = {},
+            )
+        }
+    }
 }

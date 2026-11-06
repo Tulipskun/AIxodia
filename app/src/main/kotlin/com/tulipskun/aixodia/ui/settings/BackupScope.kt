@@ -197,33 +197,36 @@ fun AutoBackupCard(
             val gridColor = MaterialTheme.colorScheme.outlineVariant
             val graphColor = MaterialTheme.colorScheme.primary
             Canvas(Modifier.fillMaxWidth().height(112.dp)) {
-            val top = 6.dp.toPx()
-            val bottom = size.height - 6.dp.toPx()
-            val chartHeight = bottom - top
-            for (line in 0..4) {
-                val y = top + chartHeight * line / 4f
-                drawLine(
-                    color = gridColor,
-                    start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = 1.dp.toPx(),
-                )
-            }
-            val values = a.cpuHistory.takeLast(60)
-            if (values.size >= 2) {
-                val path = Path()
-                values.forEachIndexed { index, value ->
-                    val x = size.width * index / (values.size - 1).toFloat()
-                    val y = bottom - (value.toFloat().coerceIn(0f, 100f) / 100f) * chartHeight
-                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                val left = 4.dp.toPx()
+                val right = size.width - 4.dp.toPx()
+                val span = right - left
+                val top = 6.dp.toPx()
+                val bottom = size.height - 6.dp.toPx()
+                val chartHeight = bottom - top
+                for (line in 0..4) {
+                    val y = top + chartHeight * line / 4f
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(left, y),
+                        end = Offset(right, y),
+                        strokeWidth = 1.dp.toPx(),
+                    )
                 }
-                drawPath(
-                    path = path,
-                    color = graphColor,
-                    style = Stroke(width = 2.dp.toPx()),
-                )
+                val values = a.cpuHistory.takeLast(60)
+                if (values.size >= 2) {
+                    val path = Path()
+                    values.forEachIndexed { index, value ->
+                        val x = left + span * index / (values.size - 1).toFloat()
+                        val y = bottom - (value.toFloat().coerceIn(0f, 100f) / 100f) * chartHeight
+                        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    drawPath(
+                        path = path,
+                        color = graphColor,
+                        style = Stroke(width = 2.dp.toPx()),
+                    )
+                }
             }
-        }
             Text(
                 if (a.cpuHistory.size < 2) "Collecting CPU samples…" else "0% — 100%",
                 style = MaterialTheme.typography.labelSmall,
