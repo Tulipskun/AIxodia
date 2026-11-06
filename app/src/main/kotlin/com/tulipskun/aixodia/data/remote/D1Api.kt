@@ -304,7 +304,6 @@ class D1Api(private val settings: SettingsStore) {
             tunnelUrl = url,
             version = version,
             online = true,
-            ageS = -1L,
             startedAt = started,
             bootAt = boot,
         )
