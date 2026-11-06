@@ -706,10 +706,9 @@ private fun NodeCard(
     var checking by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
 
-    // When discovery is running it is already polling this row on its own, so
-    // the button is a way to look now rather than the only way to look at all.
-    // Both sides of the elvis have to be StateFlow, or the expression infers
-    // Any and the delegate below has nothing to read.
+    // Discovery polls Workers KV automatically; this button performs an
+    // immediate lookup. Both sides of the elvis are StateFlow so the delegate
+    // below retains a concrete state type.
     val fallback = remember { MutableStateFlow(DiscoveryState()) }
     val auto by (discovery?.state ?: fallback).collectAsStateWithLifecycle()
 
