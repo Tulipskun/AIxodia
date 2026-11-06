@@ -68,7 +68,7 @@ One credential, three paths:
 - **Terminal WebSocket** — one dedicated `/terminal` socket per open tab,
   opened by the native terminal and authenticated with a short-lived ticket
   rather than the long-lived API token.
-- **D1 REST** — discovery (`D1Api.node()`: the daemon's tunnel URL, version and heartbeat) and the history fallback: `D1Api.chatSessions()` / `D1Api.chatTurns()` read `chat_sessions`/`chat_turns` when the tunnel is down. Nothing the phone edits lives in D1; the app's chat writes always go to the engine.
+- **D1 REST** — the history fallback: `D1Api.chatSessions()` / `D1Api.chatTurns()` read `chat_sessions`/`chat_turns` when the tunnel is down. **Workers KV REST** — discovery (`D1Api.node()`: stable daemon URL and process version). Nothing the phone edits lives in D1; the app's chat writes always go to the engine.
 
 ## Authentication — one token, two steps
 
@@ -169,7 +169,7 @@ phone (AX-083..094).
 ## Terminal transport
 
 There is no P2P/WebRTC/TURN path. The terminal is a dedicated WebSocket through
-the same Cloudflare quick tunnel. The app owns both halves of the screen —
+the same Cloudflare Named Tunnel. The app owns both halves of the screen —
 `TerminalEmulator` parses VT/ANSI and `TerminalView` paints the grid — and sends
 binary input; output is replayed from a 4 MiB ring preceded by a reset and the
 saved terminal modes, with no external terminal library involved.
