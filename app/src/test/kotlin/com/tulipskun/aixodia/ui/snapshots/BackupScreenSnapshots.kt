@@ -178,6 +178,7 @@ class BackupScreenSnapshots {
                     idleSecs = 300,
                     cpuThreshold = 10.0,
                     cooldownSecs = 1800,
+                    restoreReady = true,
                 ),
                 busy = false,
                 onSave = { _, _, _, _ -> },
