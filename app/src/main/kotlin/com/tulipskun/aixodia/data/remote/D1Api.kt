@@ -14,14 +14,11 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Cloudflare D1 over its REST API. D1 is the chat store (the engine has no
- * local database), so the phone reads two things from it straight:
- * the daemon's own row out of `system_state` so it knows where the quick
- * tunnel is (`node()`), and — when the tunnel cannot be dialled — the chat
- * list and the pages of a thread out of `chat_sessions`/`chat_turns`
- * (`chatSessions()`, `chatTurns()`), the same tables the engine serves on
- * `/v1/...`. The tables carry the columns the engine's schema ensures
- * (`generation_ms`, `reasoning_content`, `block`), so one SELECT shape covers
- * every database the engine could be talking to.
+ * local database), so the phone reads chat lists and thread pages from
+ * `chat_sessions`/`chat_turns` when the tunnel cannot be dialled. Daemon
+ * discovery (`node()`) reads the stable endpoint and process version from
+ * Workers KV namespace `AIXODIA_CONFIG`. The D1 tables carry the columns the
+ * engine's schema ensures (`generation_ms`, `reasoning_content`, `block`).
  *
  * One credential is enough: the account and the database are resolved from the
  * token with the same three calls the engine makes (`/user/tokens/verify`,
