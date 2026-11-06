@@ -446,6 +446,8 @@ data class AutoBackupStatus(
     val idleSecs: Long = 300,
     val cpuThreshold: Double = 10.0,
     val cooldownSecs: Long = 1800,
+    val restoreReady: Boolean = false,
+    val cpuHistory: List<Double> = emptyList(),
 )
 
 /** Reads one `/api/backup` answer. Only the fields that are there are read. */
@@ -493,6 +495,10 @@ private fun parseAutoBackup(o: JSONObject?): AutoBackupStatus? {
         idleSecs = o.optLong("idle_secs", 300),
         cpuThreshold = o.optDouble("cpu_threshold", 10.0),
         cooldownSecs = o.optLong("cooldown_secs", 1800),
+        restoreReady = o.optBoolean("restore_ready", false),
+        cpuHistory = o.optJSONArray("cpu_history")?.let { values ->
+            (0 until values.length()).map { index -> values.optDouble(index).coerceIn(0.0, 100.0) }
+        }.orEmpty(),
     )
 }
 
