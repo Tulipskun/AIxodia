@@ -191,7 +191,6 @@ data class DiscoveryState(
     val phase: DiscoveryPhase = DiscoveryPhase.IDLE,
     val tunnelUrl: String = "",
     val version: String = "",
-    val ageS: Long = -1,
     val online: Boolean = false,
     val error: String = "",
 )
