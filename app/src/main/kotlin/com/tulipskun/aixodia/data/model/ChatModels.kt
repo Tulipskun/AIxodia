@@ -271,7 +271,6 @@ data class AiOutput(
     // chat reducer ignores it and the discovery layer reads it.
     @Json(name = "daemon_url") val daemonUrl: String = "",
     @Json(name = "daemon_version") val daemonVersion: String = "",
-    @Json(name = "daemon_heartbeat") val daemonHeartbeat: Long = 0L,
     @Json(name = "daemon_started") val daemonStarted: Long = 0L,
     @Json(name = "daemon_online") val daemonOnline: Boolean = false,
 )
