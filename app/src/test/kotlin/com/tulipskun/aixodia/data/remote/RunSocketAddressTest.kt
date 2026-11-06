@@ -7,11 +7,8 @@ import org.junit.Test
 /**
  * The reading a retry makes of the address the daemon announced.
  *
- * A quick tunnel's host dies with the engine that opened it, so the phone's
- * stored URL is a name that resolves to nothing until it reads the new one.
- * What it reads is not always worth dialling: the row is written by whichever
- * process last had one, and adopting whatever is in it would let a stale or
- * half-written announcement replace an address the phone can still reach.
+ * The Named Tunnel hostname is stable. Discovery reads the configured endpoint
+ * from KV; an absent endpoint must never replace the address already in use.
  */
 class RunSocketAddressTest {
 
@@ -34,12 +31,10 @@ class RunSocketAddressTest {
     }
 
     /**
-     * The half of the complaint the fix must not overshoot: a row whose writer
-     * stopped beating describes a tunnel that is gone. Trading a live address
-     * for that would turn a working app into a broken one.
+     * A missing endpoint must not replace a URL already in use.
      */
     @Test
-    fun anAnnouncementWithNoHeartbeatBehindItIsRefused() {
+    fun anUnavailableEndpointIsNotAdopted() {
         assertNull(pickDaemonAddress(held, node("https://new-host.example.trycloudflare.com", false)))
     }
 
