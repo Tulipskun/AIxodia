@@ -25,7 +25,7 @@ in this project (D-011).
 ## Layout
 
 ```text
-app/            Android client (.kt, Compose Material3, Room, OkHttp WS, D1 REST)
+app/            Android client (.kt, Compose Material3, Room, OkHttp WS, D1 + Workers KV REST)
 db/             Cloudflare D1 schema + migrations (applied with wrangler, no Worker)
 ```
 
@@ -38,13 +38,13 @@ db/             Cloudflare D1 schema + migrations (applied with wrangler, no Wor
 2. **Workers KV**: create namespace `AIXODIA_CONFIG` and set `tunnel_token` to the
    Named Tunnel connector token and `tunnel_url` to `https://aixodia.dpdns.org`.
    The engine writes `daemon/url` and `daemon/version` only when their values change.
-2. **Daemon**: run `Tulipskun/aixodia-engine` — it serves the run API, the terminal
+3. **Daemon**: run `Tulipskun/aixodia-engine` — it serves the run API, the terminal
    WebSocket and `/v1/...`, starts the Named Tunnel from Workers KV, publishes its stable endpoint to KV after
    edge registration, and keeps chat history in D1.
-3. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
+4. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
    **Cloudflare API token** — the account and database ids are resolved from it
    and cached, so no id is ever typed. Discovery then finds the daemon's tunnel
-   URL by itself (one `system_state` read every 30s, `DaemonDiscovery`), so
+   URL by itself (one Workers KV read every 30s, `DaemonDiscovery`), so
    there is no address to paste. Providers, their write-only key pools and the
    per-agent model routes live on the same screen.
 
