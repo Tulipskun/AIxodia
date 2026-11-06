@@ -66,7 +66,7 @@ internal fun UnifiedBackupFolderManager(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Select backup files and folders", style = MaterialTheme.typography.titleMedium)
-        Text("Select any number of files or folders from anywhere on the engine.", style = MaterialTheme.typography.bodySmall)
+        Text("Select a folder to include everything inside it. Uncheck a child to exclude that subtree.", style = MaterialTheme.typography.bodySmall)
         Text(path, style = MaterialTheme.typography.titleSmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { if (parent.isNotBlank()) path = parent }, enabled = parent.isNotBlank() && !loading) {
@@ -118,7 +118,7 @@ internal fun UnifiedBackupFolderManager(
         }
         HorizontalDivider()
         Text(
-            "Selected paths are backed up independently. For example, select /root and /usr in the same list.",
+            "A selected folder includes all its contents. Unchecked items inside it are excluded; a partial checkbox marks that some contents are excluded.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
