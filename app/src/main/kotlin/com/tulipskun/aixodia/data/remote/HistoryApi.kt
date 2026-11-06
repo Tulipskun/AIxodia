@@ -75,7 +75,6 @@ data class NodeInfo(
     @Json(name = "tunnel_url") val tunnelUrl: String = "",
     @Json(name = "version") val version: String = "",
     @Json(name = "online") val online: Boolean = false,
-    @Json(name = "heartbeat_age_s") val ageS: Long = -1,
     /** Unix second the daemon process started; 0 when unknown. */
     @Json(name = "started") val startedAt: Long = 0,
     /**
@@ -791,7 +790,7 @@ class HistoryApi(
     /**
      * One page of history, oldest-first — the daemon over the tunnel, or
      * straight out of D1's `chat_turns` when the tunnel cannot be dialled (a
-     * moved trycloudflare URL, an engine that is down, a fresh install before
+     * a changed Named Tunnel endpoint, an engine that is down, a fresh install before
      * the first announcement). Both paths yield the same TurnRow shape, so
      * the merge logic never learns which one answered.
      */

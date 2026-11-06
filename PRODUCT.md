@@ -22,12 +22,12 @@ Success means leaving the app changes nothing about the work. A turn keeps runni
 
 **Chat is a run, not a request.** Every turn is a numbered, replayable run on the server: `POST /v1/runs` returns an id immediately, events arrive over SSE with sequence numbers, and a reconnect resumes at the last applied seq. Closing the app, killing it or losing the tunnel does not stop the agent, and the run is durable in D1 before an event can be missed. A chat client that executes in the app cannot copy this without moving execution out of the app and making it resumable.
 
-The second distinguishing mechanism is the credential model: one Cloudflare API token is the only secret. Typed once in Settings, it is sealed at rest with AES-GCM under an Android-keystore key and excluded from auto-backup, resolves the account and database by itself, discovers the daemon's current quick-tunnel URL from D1, and authenticates every API call; terminal sockets trade it for single-use 90-second tickets so it never appears in a URL. There is no second token, no Worker, and no address to configure.
+The second distinguishing mechanism is the credential model: one Cloudflare API token is the only secret. Typed once in Settings, it is sealed at rest with AES-GCM under an Android-keystore key and excluded from auto-backup, resolves the account and database by itself, discovers the daemon's stable Named Tunnel URL from Workers KV, and authenticates every API call; terminal sockets trade it for single-use 90-second tickets so it never appears in a URL. There is no second token, no Worker, and no address to configure.
 
 ## Operating Context
 
-- One phone, one engine, one Cloudflare account. The engine listens on localhost, publishes itself through a Cloudflare quick tunnel whose random URL changes, and writes its URL, version and heartbeat into D1 `system_state`. The app finds it there.
-- History and settings live in Cloudflare D1 (`chat_sessions`, `chat_turns`, `system_state`, `runs`, `run_events`); providers and their key pools live in Workers KV. The engine keeps no local database.
+- One phone, one engine, one Cloudflare account. The engine listens on localhost and publishes itself through a Cloudflare Named Tunnel with a stable hostname. Connector credentials and hostname live in Workers KV `AIXODIA_CONFIG`; the engine writes `daemon/url` and `daemon/version` there only when values change. The app discovers the endpoint from KV.
+- History, settings and run state live in Cloudflare D1 (`chat_sessions`, `chat_turns`, `system_state`, `runs`, `run_events`); providers and their key pools live in `aixodia-providers` Workers KV; Named Tunnel configuration and daemon discovery live in `AIXODIA_CONFIG` Workers KV. The engine keeps no local database.
 - Room on the phone is a cache: the drawer and the open chat draw from it first, then refresh.
 - Shells live in tmux on the engine host, so a terminal survives an engine or app restart and can be reattached from the terminal's session list.
 - Providers are configured from the phone: catalogue, key pools, health, per-agent model routes, per-chat model pins, generation parameters.
@@ -41,7 +41,7 @@ The second distinguishing mechanism is the credential model: one Cloudflare API 
 - **Sessions**: drawer organize (rename, delete, ordering), per-chat model pin, goals/plans card and the handover note left by the engine.
 - **Terminal**: a native VT/ANSI emulator and grid view owned by the app (no xterm.js, no WebView terminal), one WebSocket per tab opened with a single-use ticket, output replayed from a 4 MiB ring with saved modes, close per tab or all, surviving sessions listed and reattachable.
 - **Providers and models**: provider catalogue with write-only key pools, health checks, per-agent model routes (`main`, `worker`), model capabilities reported by the daemon; controls appear only for parameters the selected model accepts.
-- **Connection honesty**: online / connecting / offline states, discovery polling, `offline` once the heartbeat is older than 90 seconds, retry, and D1 read fallback for the chat list and turns when the tunnel cannot be dialled. Writes always travel to the engine.
+- **Connection honesty**: online / connecting / offline states reflect actual socket reachability; discovery polls the stable endpoint in KV, retries, and reads chat lists and turns from D1 when the tunnel cannot be dialled. No heartbeat is persisted. Writes always travel to the engine.
 - **Technical requirements**: minSdk 26, targetSdk 35, arm64-v8a only, Kotlin + Compose Material3 + Room + OkHttp.
 - **Not in the product**: user accounts, multi-tenancy, a web client, a Worker, P2P/WebRTC, iOS. A tablet-specific layout is not established. No second authentication token may be added without approval.
 

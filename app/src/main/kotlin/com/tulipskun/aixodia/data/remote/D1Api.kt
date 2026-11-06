@@ -9,18 +9,16 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
  * Cloudflare D1 over its REST API. D1 is the chat store (the engine has no
- * local database), so the phone reads two things from it straight:
- * the daemon's own row out of `system_state` so it knows where the quick
- * tunnel is (`node()`), and — when the tunnel cannot be dialled — the chat
- * list and the pages of a thread out of `chat_sessions`/`chat_turns`
- * (`chatSessions()`, `chatTurns()`), the same tables the engine serves on
- * `/v1/...`. The tables carry the columns the engine's schema ensures
- * (`generation_ms`, `reasoning_content`, `block`), so one SELECT shape covers
- * every database the engine could be talking to.
+ * local database), so the phone reads chat lists and thread pages from
+ * `chat_sessions`/`chat_turns` when the tunnel cannot be dialled. Daemon
+ * discovery (`node()`) reads the stable endpoint and process version from
+ * Workers KV namespace `AIXODIA_CONFIG`. The D1 tables carry the columns the
+ * engine's schema ensures (`generation_ms`, `reasoning_content`, `block`).
  *
  * One credential is enough: the account and the database are resolved from the
  * token with the same three calls the engine makes (`/user/tokens/verify`,
@@ -55,6 +53,9 @@ class D1Api(private val settings: SettingsStore) {
     // resolves itself again.
     private var cachedTarget: Target? = null
     private var cachedFor: String = ""
+    private var cachedConfigNamespaceId: String? = null
+    private var cachedConfigNamespaceToken: String = ""
+    private var cachedConfigNamespaceAccount: String = ""
 
     // ------------------------------------------------------------ D1 transport
 
@@ -233,56 +234,80 @@ class D1Api(private val settings: SettingsStore) {
         }
     }
 
+    /** Finds the existing Workers KV namespace used for daemon configuration. */
+    private suspend fun configNamespace(token: String, accountId: String): String {
+        if (cachedConfigNamespaceToken == token && cachedConfigNamespaceAccount == accountId) {
+            cachedConfigNamespaceId?.let { return it }
+        }
+        val namespaces = objects(
+            get(token, "/accounts/$accountId/storage/kv/namespaces?per_page=100")
+                .optJSONArray("result"),
+        )
+        val found = namespaces.firstOrNull { it.optString("title") == CONFIG_KV_NAMESPACE }
+            ?: throw IllegalStateException(
+                "Workers KV namespace $CONFIG_KV_NAMESPACE not found; create it in Cloudflare",
+            )
+        val id = found.optString("id").takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Workers KV namespace has no id")
+        cachedConfigNamespaceToken = token
+        cachedConfigNamespaceAccount = accountId
+        cachedConfigNamespaceId = id
+        return id
+    }
+
+    /** Reads a raw Workers KV value (the values endpoint is not a JSON envelope). */
+    private suspend fun kvValue(
+        token: String,
+        accountId: String,
+        namespaceId: String,
+        key: String,
+    ): String? = withContext(Dispatchers.IO) {
+        val encoded = URLEncoder.encode(key, "UTF-8").replace("+", "%20")
+        val reqBuilder = Request.Builder()
+            .url("$API_BASE/accounts/$accountId/storage/kv/namespaces/$namespaceId/values/$encoded")
+            .header("Accept", "text/plain")
+        if (token.contains(":")) {
+            val parts = token.split(":", limit = 2)
+            reqBuilder.header("X-Auth-Email", parts[0])
+            reqBuilder.header("X-Auth-Key", parts[1])
+        } else {
+            reqBuilder.header("Authorization", "Bearer $token")
+        }
+        client.newCall(reqBuilder.build()).execute().use { response ->
+            if (response.code == 404) return@use null
+            if (response.code == 401 || response.code == 403) {
+                throw IllegalStateException("Workers KV read rejected: token lacks KV read permission")
+            }
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IllegalStateException("Workers KV read HTTP ${response.code}: $body")
+            body
+        }
+    }
+
     /**
-     * The daemon's single `tunnel` row: its public URL, its version (which
-     * carries the start time) and its last heartbeat. ai-engine rewrites this
-     * row every 30s, so the phone reads it once and counts uptime locally —
-     * no periodic call is needed. This is the only daemon row; there is no
-     * separate nodes table.
+     * Reads the stable endpoint and process metadata from Workers KV. A configured
+     * URL is not a heartbeat: the socket's actual connection state determines
+     * whether the engine is reachable.
      */
     suspend fun node(): NodeInfo? {
-        // New schema: daemon keys live in system_state. Fall back to the old
-        // tunnel row when the database predates the rename (or the keys are absent).
-        val triple = try {
-            val url = query("SELECT value FROM system_state WHERE key = ?", "daemon/url")
-                .rows.firstOrNull()?.optString("value")?.trim().orEmpty()
-            if (url.isBlank()) null
-            else Triple(
-                url,
-                query("SELECT value FROM system_state WHERE key = ?", "daemon/version")
-                    .rows.firstOrNull()?.optString("value").orEmpty(),
-                query("SELECT value FROM system_state WHERE key = ?", "daemon/heartbeat")
-                    .rows.firstOrNull()?.optString("value").orEmpty(),
-            )
-        } catch (e: Exception) {
-            if (!e.message.orEmpty().contains("no such table", ignoreCase = true)) throw e
-            null
-        }
-        val (urlRaw, version, heartbeatStr) = if (triple != null) triple else {
-            val row = query("SELECT url, version, heartbeat FROM tunnel LIMIT 1")
-                .rows.firstOrNull() ?: return null
-            Triple(row.optString("url"), row.optString("version"), row.optString("heartbeat"))
-        }
-        val url = urlRaw.trim().trimEnd('/')
+        val token = settings.current().token
+        if (token.isBlank()) throw IllegalStateException("Cloudflare API token not set")
+        val account = target(token).accountId
+        val namespace = configNamespace(token, account)
+        val url = kvValue(token, account, namespace, "daemon/url")
+            ?.trim()?.trimEnd('/').orEmpty()
         if (url.isBlank()) return null
+        val version = kvValue(token, account, namespace, "daemon/version").orEmpty()
         val started = Regex("started=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
         val boot = Regex("boot=(\\d+)").find(version)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-        val heartbeat = heartbeatStr.toLongOrNull() ?: 0L
-        val ageS = if (heartbeat > 0L) nowSeconds() - heartbeat else -1L
         return NodeInfo(
             tunnelUrl = url,
             version = version,
-            // The daemon rewrites this row every 30s. A beat older than 90s
-            // means it stopped writing. A negative age (phone clock behind the
-            // server's) still counts as alive.
-            online = ageS < 90,
-            ageS = ageS,
+            online = true,
             startedAt = started,
             bootAt = boot,
         )
     }
-
-    private fun nowSeconds(): Long = System.currentTimeMillis() / 1000
 
     // ------------------------------------------------------ chat store reads
 
@@ -329,6 +354,8 @@ class D1Api(private val settings: SettingsStore) {
 
         /** The database `discover` prefers when the token can see several. */
         private const val DEFAULT_DATABASE = "aixodia"
+
+        private const val CONFIG_KV_NAMESPACE = "AIXODIA_CONFIG"
 
         /** A chat_turns row's columns, in the order the reader maps them. */
         internal const val TURN_COLUMNS =

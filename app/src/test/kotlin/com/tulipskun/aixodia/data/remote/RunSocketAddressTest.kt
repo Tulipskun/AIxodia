@@ -7,23 +7,20 @@ import org.junit.Test
 /**
  * The reading a retry makes of the address the daemon announced.
  *
- * A quick tunnel's host dies with the engine that opened it, so the phone's
- * stored URL is a name that resolves to nothing until it reads the new one.
- * What it reads is not always worth dialling: the row is written by whichever
- * process last had one, and adopting whatever is in it would let a stale or
- * half-written announcement replace an address the phone can still reach.
+ * The Named Tunnel hostname is stable. Discovery reads the configured endpoint
+ * from KV; an absent endpoint must never replace the address already in use.
  */
 class RunSocketAddressTest {
 
-    private val held = "https://old-host.example.trycloudflare.com"
+    private val held = "https://old-host.example.com"
 
     private fun node(url: String, online: Boolean) = NodeInfo(tunnelUrl = url, online = online)
 
     @Test
     fun aDaemonThatMovedIsFollowed() {
         assertEquals(
-            "https://new-host.example.trycloudflare.com",
-            pickDaemonAddress(held, node("https://new-host.example.trycloudflare.com", true)),
+            "https://aixodia.dpdns.org",
+            pickDaemonAddress(held, node("https://aixodia.dpdns.org", true)),
         )
     }
 
@@ -34,13 +31,11 @@ class RunSocketAddressTest {
     }
 
     /**
-     * The half of the complaint the fix must not overshoot: a row whose writer
-     * stopped beating describes a tunnel that is gone. Trading a live address
-     * for that would turn a working app into a broken one.
+     * A missing endpoint must not replace a URL already in use.
      */
     @Test
-    fun anAnnouncementWithNoHeartbeatBehindItIsRefused() {
-        assertNull(pickDaemonAddress(held, node("https://new-host.example.trycloudflare.com", false)))
+    fun anUnavailableEndpointIsNotAdopted() {
+        assertNull(pickDaemonAddress(held, node("https://aixodia.dpdns.org", false)))
     }
 
     @Test
@@ -53,6 +48,6 @@ class RunSocketAddressTest {
     /** The first dial of all: no address in hand yet, so any live one is an adoption. */
     @Test
     fun anEmptyHandTakesWhatTheDaemonSays() {
-        assertEquals("https://new-host.example.trycloudflare.com", pickDaemonAddress("", node("https://new-host.example.trycloudflare.com", true)))
+        assertEquals("https://aixodia.dpdns.org", pickDaemonAddress("", node("https://aixodia.dpdns.org", true)))
     }
 }

@@ -32,9 +32,8 @@ import java.util.concurrent.TimeUnit
 private const val TAG = "RunSocket"
 
 /**
- * The daemon heartbeats a quiet run stream every 15s (`: ping`). Reads are
- * still timed out so a request a dead tunnel never answers cannot hold the
- * turn forever.
+ * The run stream sends an SSE keepalive every 15s (`: ping`). Reads are still
+ * timed out so a request a dead tunnel never answers cannot hold the turn forever.
  */
 internal const val STREAM_READ_TIMEOUT_MS = 45_000L
 
@@ -47,20 +46,18 @@ internal const val POLL_HOT_MS = 60L
 internal const val POLL_IDLE_MS = 300L
 
 /**
- * How often a failing dial may go looking for a daemon that moved. A quick
- * tunnel's host dies with the engine that opened it, and the D1 row is the only
- * place the new one is written, so a socket that keeps dialing the address it
- * holds is dialing a name that no longer resolves to anything. One look per
- * backoff step: the step caps at 15s, and a read more often would spend the
- * phone's Cloudflare quota on a daemon that is simply down.
+ * How often a failing dial may go looking for a daemon that moved. A Named Tunnel hostname stays stable, while the endpoint and process version are
+ * discovered from Workers KV. One lookup per backoff step: the step caps at 15s,
+ * and a read more often would spend the phone's Cloudflare quota while the daemon
+ * is simply down.
  */
 private const val ADDRESS_RECHECK_MS = 15_000L
 
 /**
  * What a failed dial makes of the address the daemon announced: either a new
  * one to adopt, or nothing to go with. A trailing slash is not a different
- * daemon, and a row whose heartbeat stopped is a name that no longer resolves
- * — keeping the address in hand beats trading it for a dead one.
+ * daemon, and a missing configured endpoint must not replace the address already
+ * in hand.
  */
 internal fun pickDaemonAddress(currentUrl: String, node: NodeInfo?): String? {
     val url = node?.tunnelUrl?.trim()?.trimEnd('/') ?: return null
@@ -72,7 +69,7 @@ internal fun pickDaemonAddress(currentUrl: String, node: NodeInfo?): String? {
 /**
  * Chat over POST /v1/runs + short polls of GET /v1/runs/{id}/events.
  *
- * The daemon also offers a live SSE stream, but Cloudflare Quick Tunnels
+ * The daemon also offers a live SSE stream, but Cloudflare Tunnels
  * buffer `text/event-stream` until the origin closes it: through the tunnel a
  * held stream delivered the whole turn in one burst at the end, so the phone
  * showed nothing while it was being written. A poll with the sequence cursor
