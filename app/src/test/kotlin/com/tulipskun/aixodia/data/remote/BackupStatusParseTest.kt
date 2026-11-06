@@ -192,7 +192,8 @@ class BackupStatusParseTest {
                 """
                 {"auto": {"enabled": true, "idle_secs": 600, "cpu_threshold": 10.0,
                           "cooldown_secs": 1800, "idle_streak_secs": 45,
-                          "cpu_current": 3.5, "last_auto_backup_at": 1730400000}}
+                          "cpu_current": 3.5, "last_auto_backup_at": 1730400000,
+                          "restore_ready": true, "cpu_history": [12.5, 8.0, 3.5]}}
                 """.trimIndent(),
             ),
         ).auto!!
@@ -203,6 +204,14 @@ class BackupStatusParseTest {
         assertEquals(45L, auto.idleStreakSecs)
         assertEquals(3.5, auto.cpuCurrent, 0.001)
         assertEquals(1730400000L, auto.lastAutoBackupAt)
+        assertTrue(auto.restoreReady)
+        assertEquals(listOf(12.5, 8.0, 3.5), auto.cpuHistory)
+
+        val blocked = parseBackupStatus(
+            JSONObject("""{"auto": {"enabled": true, "restore_ready": false}}"""),
+        ).auto!!
+        assertFalse(blocked.restoreReady)
+        assertTrue(blocked.cpuHistory.isEmpty())
 
         // An engine with no automatic backup is not an engine with one switched
         // off: the card says so and offers nothing to set.
