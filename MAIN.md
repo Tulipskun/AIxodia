@@ -1,12 +1,12 @@
 GOAL:
-[IN_PROCESS] Fix connection-state handling and reconnect logic in the run/terminal sockets (v1.175): auth failure as its own state, Discovery reflecting the live link, reconnect interrupting backoff, terminal backoff that stays grown. All four built and tested on local branches; none pushed — see PLAN.
+[IN_PROCESS] Fix connection-state handling and reconnect logic in the run/terminal sockets (v1.175): auth failure as its own state, Discovery reflecting the live link, reconnect interrupting backoff, terminal backoff that stays grown. All four built and tested; #24 is in main, #25 and #26 stacked behind it.
 
 PLAN:
 [COMPLETED] RunSocket: 401/403 stops the retry loop, new ConnState.AUTH_FAILED, error reaches the UI.
 [COMPLETED] DaemonDiscovery: CONNECTED also requires the transport ONLINE; settings screen reads the intermediate state.
 [COMPLETED] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
 [COMPLETED] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
-[IN_PROCESS] Ship them: nothing is pushed. `conn-auth-and-discovery` (steps 1+2) → `reconnect-wakes-backoff` (3) → `terminal-backoff-jitter` (4), each one commit deep, stacked because all three edit RunSocket's dial path and share `FakeDaemon`.
+[IN_PROCESS] Ship them: #24 (steps 1+2) is merged into main; #25 (step 3) and this branch's PR (step 4) sit on top of it, one commit each. Stacked because all three edit RunSocket's dial path and share `FakeDaemon` — merge in that order and each diff reads as its own step.
 
 ARCHIVE:
 v1.174 `ab4c00e` backup/restore: round-trip scoped after a root change, restore gated on a real bucket backup, picker/browser polish — the "push main, watch the release workflow" step was left unverified by the next session
