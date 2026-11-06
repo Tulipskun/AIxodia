@@ -4,8 +4,8 @@ GOAL:
 PLAN:
 [COMPLETED] RunSocket: 401/403 stops the retry loop, new ConnState.AUTH_FAILED, error reaches the UI.
 [COMPLETED] DaemonDiscovery: CONNECTED also requires the transport ONLINE; settings screen reads the intermediate state.
-[IN_PROCESS] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
-[PENDING] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
+[COMPLETED] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
+[IN_PROCESS] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
 
 ARCHIVE:
 v1.174 `ab4c00e` backup/restore: round-trip scoped after a root change, restore gated on a real bucket backup, picker/browser polish — the "push main, watch the release workflow" step was left unverified by the next session
@@ -50,3 +50,4 @@ NOTE:
 - v1.175 state: the repo has **no** HTTP mock server dependency (tests reach privates by reflection, per `RunSocketOwnershipTest`); `ChatTransport.lastError` had no writer before this goal. `ConnState.AUTH_FAILED` is deliberately not-ONLINE, so the `== ConnState.ONLINE` call sites stay correct; the two exhaustive `when`s (`ConnDot`, Settings About card) are the compile-time catch.
 - v1.175 test bed: `FakeDaemon` (app/src/test/.../remote) hand-rolls HTTP/1.1 on `ServerSocket` — the unit-test compile classpath is android.jar, which carries no `com.sun.net.httpserver`. Rules match the **longest** path prefix, query stripped. Stub the run cursor with plain values (`getString("run:s", null)`): an `any()` on that nullable default silently skips `resumeRemembered`.
 - v1.175: `android.util.Log` is not mocked here (no `testOptions.returnDefaultValues`), so a test path that reaches a `Log` call dies mid-coroutine and leaves the state stuck where it was — read a stalled CONNECTING as "this path logs", not as a hung socket.
+- v1.175 reconnect: a backoff test that sleeps a fixed time passes by luck — the natural next dial can land inside the window (one did). `afterNextPoll` catches the wait at its **start**, where no step is under 1s and a 400 ms window can only hold the wake. Run `RunSocketReconnectTest` against the old code before believing it.
