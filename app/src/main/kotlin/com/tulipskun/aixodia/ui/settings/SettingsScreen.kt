@@ -725,6 +725,12 @@ private fun NodeCard(
                 DiscoveryPhase.NO_TOKEN ->
                     "○ Cloudflare token not set — set it to discover automatically" to
                         MaterialTheme.colorScheme.onSurfaceVariant
+                DiscoveryPhase.ANNOUNCED ->
+                    // The row is a fact about the engine; this line is a fact
+                    // about this phone. Saying "found" here is what made a dead
+                    // chat look like a working one.
+                    "● Engine online at ${auto.tunnelUrl}${if (auto.version.isNotBlank()) " (${auto.version})" else ""} — this phone cannot connect" to
+                        MaterialTheme.colorScheme.error
                 DiscoveryPhase.CONNECTED ->
                     "● Endpoint found at ${auto.tunnelUrl}${if (auto.version.isNotBlank()) " (${auto.version})" else ""}" to
                         MaterialTheme.colorScheme.primary

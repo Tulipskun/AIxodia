@@ -3,8 +3,8 @@ GOAL:
 
 PLAN:
 [COMPLETED] RunSocket: 401/403 stops the retry loop, new ConnState.AUTH_FAILED, error reaches the UI.
-[IN_PROCESS] DaemonDiscovery: CONNECTED also requires the transport ONLINE; settings screen reads the intermediate state.
-[PENDING] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
+[COMPLETED] DaemonDiscovery: CONNECTED also requires the transport ONLINE; settings screen reads the intermediate state.
+[IN_PROCESS] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
 [PENDING] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
 
 ARCHIVE:
