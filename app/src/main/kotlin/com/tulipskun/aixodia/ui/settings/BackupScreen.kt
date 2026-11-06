@@ -698,8 +698,8 @@ fun ScopeCard(
             PickerRow(
                 label = "Manage backup files and folders",
                 value = if (includes.isEmpty()) "Nothing selected"
-                    else "${includes.size} selected",
-                hint = "Select files and folders independently. Tap a folder row to open it.",
+                    else "${includes.size} rules",
+                hint = "A checked folder includes its contents. A partial checkbox marks excluded items inside it.",
                 onPick = onEditScope,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
