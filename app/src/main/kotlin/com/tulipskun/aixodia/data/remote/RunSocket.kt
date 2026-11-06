@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -132,6 +133,9 @@ class RunSocket(
     private var streamJob: Job? = null
     private var probeJob: Job? = null
     @Volatile private var currentCall: Call? = null
+    // One message that means "dial again now". Conflated, because three signals
+    // arriving before a waiting stream wakes up are the same instruction.
+    private val wakeSignal = Channel<Unit>(Channel.CONFLATED)
 
     // When a failing dial last went looking for a moved daemon. Not a timer: a
     // socket that is healthy never reads the row at all.
@@ -224,11 +228,17 @@ class RunSocket(
             probeUntilUsable()
             if (!scope.isActive || _state.value != ConnState.ONLINE) return@launch
             val id = runId
-            if (id != null && streamJob?.isActive != true) {
+            if (id == null) {
+                resumeRemembered(session)
+                return@launch
+            }
+            // A stream that is already running is woken rather than joined by a
+            // second one, whose deltas would land in a turn that has them; it
+            // re-reads the address on its next dial, which is the point.
+            if (streamJob?.isActive == true) wakeSignal.trySend(Unit)
+            else {
                 terminal = false
                 startStream(id)
-            } else if (id == null) {
-                resumeRemembered(session)
             }
         }
     }
@@ -498,8 +508,11 @@ class RunSocket(
                 // next iteration reads the address again, so a fresh one is
                 // dialed instead of this dead one.
                 rediscoverIfNeeded()
-                delay(backoff)
-                backoff = (backoff * 2).coerceAtMost(15_000L)
+                // Waited out, not slept through: reconnect() has just proved a
+                // live address, and the curve starts again from a second so the
+                // turn is fetched from there rather than from here in 15s.
+                val woken = withTimeoutOrNull(backoff) { wakeSignal.receive() } != null
+                backoff = if (woken) 1_000L else (backoff * 2).coerceAtMost(15_000L)
             }
         }
     }
