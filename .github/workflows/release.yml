@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  pull_request:
 
 permissions:
   contents: write
@@ -58,6 +59,7 @@ jobs:
             app/build/reports/paparazzi/debug/
 
       - name: Build, sign and publish
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AIXODIA_KEYSTORE_B64: ${{ secrets.AIXODIA_KEYSTORE_B64 }}
