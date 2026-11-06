@@ -716,7 +716,7 @@ private fun NodeCard(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
         Text(
-            "ai daemon — discovered automatically from the tunnel row in D1",
+            "ai daemon — endpoint discovered automatically from Workers KV",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -726,13 +726,13 @@ private fun NodeCard(
                     "○ Cloudflare token not set — set it to discover automatically" to
                         MaterialTheme.colorScheme.onSurfaceVariant
                 DiscoveryPhase.CONNECTED ->
-                    "● Connected at ${auto.tunnelUrl} (heartbeat ${auto.ageS}s${if (auto.version.isNotBlank()) ", ${auto.version}" else ""})" to
+                    "● Endpoint found at ${auto.tunnelUrl}${if (auto.version.isNotBlank()) " (${auto.version})" else ""}" to
                         MaterialTheme.colorScheme.primary
                 DiscoveryPhase.IDLE ->
-                    "○ No daemon heartbeat — will find it on the next round" to
+                    "○ No daemon endpoint in KV — will check again" to
                         MaterialTheme.colorScheme.onSurfaceVariant
                 DiscoveryPhase.UNREACHABLE ->
-                    "○ Cannot read D1${if (auto.error.isNotBlank()) ": ${auto.error}" else ""} — keep using the existing URL" to
+                    "○ Cannot read Workers KV${if (auto.error.isNotBlank()) ": ${auto.error}" else ""} — keep using the existing URL" to
                         MaterialTheme.colorScheme.error
             }
             Text(
@@ -749,7 +749,7 @@ private fun NodeCard(
                         runCatching { history.node() }
                             .onSuccess { found ->
                                 node = found
-                                if (found == null) err = "No tunnel row yet — daemon has not heartbeated"
+                                if (found == null) err = "No daemon endpoint in Workers KV yet — start the engine first"
                             }
                             .onFailure { err = it.message ?: "error" }
                         checking = false
@@ -765,8 +765,8 @@ private fun NodeCard(
         val n = node
         if (n != null && discovery == null) {
             Text(
-                if (n.online) "● daemon online (${n.tunnelUrl}, heartbeat ${n.ageS}s, ${n.version})"
-                else "● daemon offline (heartbeat missing over 90s) — run ai to open a tunnel first",
+                if (n.online) "● endpoint configured (${n.tunnelUrl}, ${n.version})"
+                else "○ no endpoint configured — start aixodia on the engine host",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
