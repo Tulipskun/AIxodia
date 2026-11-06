@@ -55,6 +55,7 @@ class D1Api(private val settings: SettingsStore) {
     private var cachedFor: String = ""
     private var cachedConfigNamespaceId: String? = null
     private var cachedConfigNamespaceToken: String = ""
+    private var cachedConfigNamespaceAccount: String = ""
 
     // ------------------------------------------------------------ D1 transport
 
@@ -235,7 +236,7 @@ class D1Api(private val settings: SettingsStore) {
 
     /** Finds the existing Workers KV namespace used for daemon configuration. */
     private suspend fun configNamespace(token: String, accountId: String): String {
-        if (cachedConfigNamespaceToken == token) {
+        if (cachedConfigNamespaceToken == token && cachedConfigNamespaceAccount == accountId) {
             cachedConfigNamespaceId?.let { return it }
         }
         val namespaces = objects(
@@ -249,6 +250,7 @@ class D1Api(private val settings: SettingsStore) {
         val id = found.optString("id").takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Workers KV namespace has no id")
         cachedConfigNamespaceToken = token
+        cachedConfigNamespaceAccount = accountId
         cachedConfigNamespaceId = id
         return id
     }
