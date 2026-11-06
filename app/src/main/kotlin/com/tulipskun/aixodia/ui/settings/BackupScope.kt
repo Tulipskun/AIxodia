@@ -1,11 +1,13 @@
 package com.tulipskun.aixodia.ui.settings
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -21,6 +23,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.data.model.AttachmentRef
@@ -187,9 +192,54 @@ fun AutoBackupCard(
             onPick = { cooldown = it },
         )
         HorizontalDivider()
+        Text("CPU usage · last 15 minutes", style = MaterialTheme.typography.titleSmall)
+        Canvas(Modifier.fillMaxWidth().height(112.dp)) {
+            val top = 6.dp.toPx()
+            val bottom = size.height - 6.dp.toPx()
+            val chartHeight = bottom - top
+            for (line in 0..4) {
+                val y = top + chartHeight * line / 4f
+                drawLine(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+            val values = a.cpuHistory.takeLast(60)
+            if (values.size >= 2) {
+                val path = Path()
+                values.forEachIndexed { index, value ->
+                    val x = size.width * index / (values.size - 1).toFloat()
+                    val y = bottom - (value.toFloat().coerceIn(0f, 100f) / 100f) * chartHeight
+                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(
+                    path = path,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+            }
+        }
+        Text(
+            if (a.cpuHistory.size < 2) "Collecting CPU samples…" else "0% — 100%",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!a.restoreReady) {
+            StatusBanner(
+                "Auto-backup is blocked until a restore completes successfully. This prevents an incomplete local tree from replacing the existing backup.",
+                error = true,
+            )
+        }
         Text(
             buildString {
                 append("idle streak ${a.idleStreakSecs}s · cpu now ${fmt1(a.cpuCurrent)}%")
+                append(if (a.lastAutoBackupAt > 0) " · last automatic run ${atUtc(a.lastAutoBackupAt)}" else " · no automatic run yet")
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
                 append(if (a.lastAutoBackupAt > 0) " · last automatic run ${atUtc(a.lastAutoBackupAt)}" else " · no automatic run yet")
             },
             style = MaterialTheme.typography.labelSmall,
