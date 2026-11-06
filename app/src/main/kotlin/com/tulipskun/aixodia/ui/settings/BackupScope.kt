@@ -192,10 +192,11 @@ fun AutoBackupCard(
             onPick = { cooldown = it },
         )
         HorizontalDivider()
-        Text("CPU usage · last 15 minutes", style = MaterialTheme.typography.titleSmall)
-        val gridColor = MaterialTheme.colorScheme.outlineVariant
-        val graphColor = MaterialTheme.colorScheme.primary
-        Canvas(Modifier.fillMaxWidth().height(112.dp)) {
+        if (a.cpuHistory.isNotEmpty()) {
+            Text("CPU usage · last 15 minutes", style = MaterialTheme.typography.titleSmall)
+            val gridColor = MaterialTheme.colorScheme.outlineVariant
+            val graphColor = MaterialTheme.colorScheme.primary
+            Canvas(Modifier.fillMaxWidth().height(112.dp)) {
             val top = 6.dp.toPx()
             val bottom = size.height - 6.dp.toPx()
             val chartHeight = bottom - top
@@ -223,11 +224,12 @@ fun AutoBackupCard(
                 )
             }
         }
-        Text(
-            if (a.cpuHistory.size < 2) "Collecting CPU samples…" else "0% — 100%",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+            Text(
+                if (a.cpuHistory.size < 2) "Collecting CPU samples…" else "0% — 100%",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (!a.restoreReady) {
             StatusBanner(
                 "Auto-backup is blocked until a restore completes successfully. This prevents an incomplete local tree from replacing the existing backup.",
