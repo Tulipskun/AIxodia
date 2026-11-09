@@ -1,14 +1,12 @@
 GOAL:
-[COMPLETE] Fix connection-state handling and reconnect logic in the run/terminal sockets (v1.175): auth failure as its own state, Discovery reflecting the live link, reconnect interrupting backoff, terminal backoff that stays grown. Shipped through #24 (steps 1+2), #25 (3), #26 (4); main is `0237ea3` and its release run went green.
+[IN_PROCESS] Remove the worker middleman so engine and client talk directly; track every step in task.md (v1.176)
 
 PLAN:
-[COMPLETED] RunSocket: 401/403 stops the retry loop, new ConnState.AUTH_FAILED, error reaches the UI.
-[COMPLETED] DaemonDiscovery: CONNECTED also requires the transport ONLINE; settings screen reads the intermediate state.
-[COMPLETED] RunSocket.reconnect(): interrupt the stream's backoff wait, reset it to 1s, guard two streams.
-[COMPLETED] TerminalSocket.dialLink: backoff resets only after a long-enough session; ±20% jitter in both sockets.
-[COMPLETED] Ship them: stacked PRs, merged in order — squash-merging a stack means cherry-picking the next step onto the new main and force-pushing its branch, or the PR diff drags the already-merged steps with it.
+[IN_PROCESS] Decide which "worker" the operator means — see task.md.
+[IN_PROCESS] Implement direct engine↔client path; commit + push after EVERY change.
 
 ARCHIVE:
+v1.175 0237ea3 connection-state/reconnect fixes shipped via #24-#26 (auth-failed state, discovery gating, backoff wake, ±20% jitter).
 v1.175 `0237ea3` net: 401/403 as `ConnState.AUTH_FAILED` (banner + dot + Settings), `DiscoveryPhase.ANNOUNCED` so a KV row cannot call itself connected, `wakeSignal` cutting the run stream's backoff short on reconnect, `redialWaits` growing the terminal's curve across an immediate post-ready drop, ±20% `jitteredBackoff` in both — and the release workflow on main went green, which v1.174 left unverified.
 v1.174 `ab4c00e` backup/restore: round-trip scoped after a root change, restore gated on a real bucket backup, picker/browser polish — the "push main, watch the release workflow" step was left unverified by the next session
 v1.172 `e2eeda2` terminal: the page is remembered by the *text* at its top, not its row number — tmux re-wraps a replayed pane at the new width, so the number is the thing a rebuild destroys; `TerminalRow.text()` was added for it
@@ -35,6 +33,8 @@ d84406f backup: one backup, one restore, no version list
 +~100 earlier goals: terminal fixes, streaming, drawer, keyboard, provider UI, settings, history, session store, tool cards, chat UX, a11y audit, self-update flow
 
 NOTE:
+- task.md is the cross-repo handoff tracker: update it and push in the SAME commit as any edit; operator requires zero unpushed work (another AI may take over mid-task).
+- Pending operator decision (see task.md): which "worker" to remove. This app already talks to the engine directly through the Named Tunnel (D-011) — no Cloudflare Worker in its path.
 - The SFTP file-manager goal from a previous session was left mid-flight in MAIN.md (API client + Files nav); its code state was not verified — check git log/diff before resuming it.
 - Scope rule form: the engine stores `/`-relative paths (absolute ones fail `validate_scope`), `BackupScreen.load` unwraps old-root-prefixed rules to that form, and the browser matches ancestors at any depth. Keep all three in that form or checkboxes desync again.
 - Engine contract facts (verified against aixodia-io/src/backup.rs @ HEAD): `restorable` answers token+bucket only, never whether the bucket holds a manifest — gate a restore offer on `last_backup.ok`; an omitted field on `PUT /api/backup/config` keeps its stored value; a successful restore requires a clean `failed` list before auto-backup unlocks (`mark_restore_complete`).
