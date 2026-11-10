@@ -17,7 +17,7 @@ import java.util.Base64
  */
 object GitHubOAuthFlow {
     const val CLIENT_ID = "Ov23lieKSrKCRs5YKwdO"
-    const val REDIRECT_URI = "https://dashboard.aixodia.dpdns.org/"
+    const val REDIRECT_URI = "https://dashboard.aixodia.dpdns.org"
     const val CALLBACK_URI = "aixodia://oauth/callback"
     private const val PREFS = "aixodia_oauth_pending"
     private const val KEY_STATE = "state"
