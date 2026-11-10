@@ -1,6 +1,6 @@
 -- AX-095: the footer of one answer travels with the turn.
 -- Apply to a database created before this change:
---   wrangler d1 execute aixodia --file=worker/migrations/0002_turn_footer.sql
+--   wrangler d1 execute aixodia --file=db/migrations/0002_turn_footer.sql
 -- Adding a column is all it takes: old rows keep an empty footer, and the app
 -- simply shows no numbers for them.
 ALTER TABLE turns ADD COLUMN model TEXT NOT NULL DEFAULT '';

@@ -1,3 +1,10 @@
+> **Update (worker removal):** The dashboard Cloudflare Worker is gone; both clients
+> talk to the engine directly. The engine now issues short-lived opaque session
+> tokens via `POST /v1/auth/token` in exchange for a GitHub token checked against
+> `ALLOWED_GITHUB_USERS`. This is an operator-approved exception to any
+> "no second token" wording below: `CF_TOKEN` never reaches a browser. Android
+> may keep using `CF_TOKEN` until its own migration (see `task.md`).
+
 # Product
 
 <!-- impeccable:product-schema 1 -->
