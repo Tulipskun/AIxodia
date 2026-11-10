@@ -15,7 +15,7 @@
 **Local clones:** `/workspace/aixodia-work/<repo-name>`
 **Auth:** `gh auth status` OK as `Tulipskun` (OAuth `gho_…`, scopes repo/read:org/gist); per-repo git identity set to `Tulipskun <Tulipskun@users.noreply.github.com>`.
 **Blocker:** "worker" is ambiguous — see *Decision needed*. Do NOT guess; ask the operator.
-**Repo conventions:** `AGENTS.md` requires updating `MAIN.md` in the SAME turn as any non-read/search tool call. `MAIN.md` must stay under 60 lines.
+**Repo conventions:** shared handoff, code maps, checkpoints, and agent coordination rules live in the private `Tulipskun/Agents` repository; project task details remain in this `task.md`.
 
 ## เป้าหมาย (จาก operator)
 
@@ -67,8 +67,8 @@
 
 | # | สถานะ | สิ่งที่ทำ | Commit |
 | --- | --- | --- | --- |
-| 1 | ✅ | clone 3 repo, สำรวจสถาปัตยกรรม, สร้าง `task.md` (+ `MAIN.md`), push ทั้ง 3 repo | `engine afd4f94` / `AIxodia ad939f9` / `dashboard e9ffba7` |
-| 2 | ✅ | บันทึกคำตอบ operator (client = ทั้งคู่, auth = engine short-lived token) ลง `task.md` + `MAIN.md` | (this commit) |
+| 1 | ✅ | clone 3 repo, สำรวจสถาปัตยกรรม, สร้าง `task.md` (+ `central Agents repository`), push ทั้ง 3 repo | `engine afd4f94` / `AIxodia ad939f9` / `dashboard e9ffba7` |
+| 2 | ✅ | บันทึกคำตอบ operator (client = ทั้งคู่, auth = engine short-lived token) ลง `task.md` + `central Agents repository` | (this commit) |
 | 3 | ✅ | ยืนยันขอบเขต worker (operator ปฏิเสธตอบเพิ่ม → ถือ working assumption: ลบ dashboard worker + relay, เก็บ KV/D1/Tunnel) | `16a6129` |
 | 4 | ✅ | implement ทีละขั้น + commit/push ทุกขั้น ตามกฎ operator | (engine/dashboard หลาย commits) |
 | 5 | ✅ | Android Kotlin migrate: `ClientToken.kt` ใหม่ (exchange CF_TOKEN→short-lived, in-memory, Mutex, refresh ก่อน expiry, fallback 404/401) + wiring `RunSocket`/`TerminalSocket`/`HistoryApi`/`FilesApi`/`FilesScreen`/`AixodiaApp`; **`compileDebugKotlin` BUILD SUCCESSFUL** + `ClientTokenTest.kt` (7 cases) | (this commit) |
@@ -78,7 +78,7 @@
 
 1. อ่าน `task.md` ใน **ทั้ง 3 repo** (เนื้อหาเหมือนกันต่างกันเฉพาะ findings)
 2. การตัดสินใจสำคัญทั้งหมดได้รับการยืนยันแล้ว (ดู *Operator decisions* + checkpoint log) — ไม่ต้องถาม operator ซ้ำ
-3. กฎที่ยังคงบังคับ: แก้ → update `task.md` (checkpoint) → `git add -A` → `commit` → `git push origin main` **ทุกขั้น**; ใน engine/AIxodia ต้อง update `MAIN.md` พร้อมกันตาม `AGENTS.md`
+3. กฎที่ยังคงบังคับ: แก้ → update `task.md` (checkpoint) → `git add -A` → `commit` → `git push origin main` **ทุกขั้น**; ใน engine/AIxodia ต้อง update `central Agents repository` พร้อมกันตาม `AGENTS.md`
 4. ตรวจทดสอบ Android: `./gradlew :app:testDebugUnitTest --console=plain` (SDK ที่ `/opt/android-sdk`)
 5. อย่า deploy/release โดยไม่มีคำสั่งชัดเจน; หากคืน CI ให้ dashboard ให้ใช้ `docs/deploy-build-only.yml.example` หลังได้ `workflow` scope
 
