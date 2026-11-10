@@ -5,6 +5,8 @@
 
 package com.tulipskun.aixodia.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -81,13 +83,18 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
+import com.tulipskun.aixodia.data.remote.DeviceCodeInfo
+import com.tulipskun.aixodia.data.remote.DeviceFlowException
 import com.tulipskun.aixodia.data.remote.DiscoveryPhase
 import com.tulipskun.aixodia.data.remote.DiscoveryState
+import com.tulipskun.aixodia.data.remote.GitHubDeviceFlow
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import com.tulipskun.aixodia.update.UpdateManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The Settings screen is split: the main page, and a page only for providers and keys. */
 private enum class SettingsPage { Main, Connection, Agent, About }
@@ -241,6 +248,96 @@ fun SettingsScreen(
             }
 
             if (page == SettingsPage.Connection) {
+            SectionCard(
+                "Sign in",
+                "",
+            ) {
+                val curGithub by settings.githubTokenFlow.collectAsStateWithLifecycle(initialValue = "")
+                val context = androidx.compose.ui.platform.LocalContext.current
+                var ghBusy by remember { mutableStateOf(false) }
+                var ghCode by remember { mutableStateOf<DeviceCodeInfo?>(null) }
+                if (curGithub.isNotBlank()) {
+                    Text(
+                        "ล็อกอินด้วย GitHub แล้ว — แอปแลกเป็น token ระยะสั้นที่ engine เอง ไม่มีการเก็บ Cloudflare token บนเครื่อง",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(
+                        onClick = { scope.launch { settings.saveGithubToken("") } },
+                        enabled = !ghBusy,
+                    ) { Text("Sign out") }
+                } else if (com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID.isBlank()) {
+                    Text(
+                        "Device Flow sign-in needs the GitHub OAuth App client id. Build with -PGithubClientId=<client id>.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    val code = ghCode
+                    if (code == null) {
+                        Button(
+                            onClick = {
+                                ghBusy = true; msg = ""; msgIsError = false
+                                scope.launch {
+                                    val outcome = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            val flow = GitHubDeviceFlow()
+                                            val info = flow.requestDeviceCode(
+                                                com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID,
+                                            )
+                                            ghCode = info
+                                            flow.pollForToken(
+                                                com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID,
+                                                info,
+                                            )
+                                        }
+                                    }
+                                    outcome.fold(
+                                        onSuccess = { token ->
+                                            settings.saveGithubToken(token)
+                                            msg = "ล็อกอิน GitHub สำเร็จ — แอปจะแลกเป็น token ระยะสั้นที่ engine"
+                                            msgIsError = false
+                                            ghCode = null
+                                        },
+                                        onFailure = { e ->
+                                            msg = (e as? DeviceFlowException)?.message
+                                                ?: (e.message ?: "ล็อกอินไม่สำเร็จ")
+                                            msgIsError = true
+                                            ghCode = null
+                                        },
+                                    )
+                                    ghBusy = false
+                                }
+                            },
+                            enabled = !ghBusy,
+                        ) { Text("Sign in with GitHub") }
+                    } else {
+                        Text(
+                            "ป้อนรหัสนี้ที่ GitHub:",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            code.userCode,
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(code.verificationUri)),
+                                    )
+                                },
+                            ) { Text("เปิดหน้ายืนยัน") }
+                            OutlinedButton(onClick = { ghCode = null }) { Text("ยกเลิก") }
+                        }
+                        Text(
+                            "รอการยืนยันในเบราว์เซอร์…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             SectionCard(
                 "Connection",
                 "",

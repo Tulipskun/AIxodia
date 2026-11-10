@@ -21,6 +21,14 @@ android {
         // build — one that is never published — carries.
         versionCode = (findProperty("aixodiaVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (findProperty("aixodiaVersionName") as String?) ?: "0.1.0"
+        // The GitHub OAuth App client id that enables Device Flow sign-in. It is
+        // not a secret (device-flow apps are public clients); set it with
+        // -PGithubClientId=… locally or the GithubClientId Gradle property in CI.
+        buildConfigField(
+            "String",
+            "GITHUB_CLIENT_ID",
+            "\"${findProperty("GithubClientId") ?: ""}\"",
+        )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters += listOf("arm64-v8a") }
