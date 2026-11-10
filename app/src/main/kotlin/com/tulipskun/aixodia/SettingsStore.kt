@@ -28,6 +28,12 @@ class SettingsStore(private val ctx: Context) {
     private val endpoint = stringPreferencesKey("endpoint")
     private val daemonUrl = stringPreferencesKey("daemon_url")
     private val token = stringPreferencesKey("token")
+    // The GitHub OAuth access token from the Device Flow sign-in. Sealed with
+    // the same Keystore cipher as the legacy Cloudflare token; it is exchanged
+    // at the engine for a short-lived session token and never sent anywhere
+    // else. The legacy `token` (a Cloudflare API token) is only kept for
+    // existing installs and is no longer written by the app.
+    private val githubToken = stringPreferencesKey("github_token")
     private val accountId = stringPreferencesKey("account_id")
     private val databaseId = stringPreferencesKey("database_id")
     private val sessionId = stringPreferencesKey("session_id")
@@ -118,6 +124,7 @@ class SettingsStore(private val ctx: Context) {
             endpoint = prefs[endpoint].orEmpty(),
             daemonUrl = prefs[daemonUrl].orEmpty(),
             token = TokenCipher.open(prefs[token].orEmpty()),
+            githubToken = TokenCipher.open(prefs[githubToken].orEmpty()),
             accountId = prefs[accountId].orEmpty(),
             databaseId = prefs[databaseId].orEmpty(),
             sessionId = prefs[sessionId].orEmpty(),
@@ -144,6 +151,13 @@ class SettingsStore(private val ctx: Context) {
             it[databaseId] = databaseValue
         }
     }
+
+    /** Stores the GitHub OAuth token from a completed Device Flow sign-in. */
+    suspend fun saveGithubToken(value: String) {
+        ctx.ds.edit { it[githubToken] = TokenCipher.seal(value.trim()) }
+    }
+
+    val githubTokenFlow: Flow<String> = ctx.ds.data.map { TokenCipher.open(it[githubToken].orEmpty()) }
 
     suspend fun saveProvidersCache(daemonUrl: String, json: String) {
         ctx.ds.edit {
@@ -314,4 +328,6 @@ data class ConnConfig(
     val accountId: String,
     val databaseId: String,
     val sessionId: String,
+    /** GitHub OAuth token from the Device Flow; blank until the user signs in. */
+    val githubToken: String = "",
 )

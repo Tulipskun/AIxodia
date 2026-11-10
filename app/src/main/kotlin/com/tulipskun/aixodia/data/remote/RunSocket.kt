@@ -716,7 +716,7 @@ class RunSocket(
         if (!base.startsWith("http://") && !base.startsWith("https://")) return null
         // Every run request authenticates with the engine's short-lived token.
         // CF_TOKEN is only used to obtain it (or as a fallback for old engines).
-        return Config(base, clientToken.get(current.token, base))
+        return Config(base, clientToken.get(current.githubToken.ifBlank { current.token }, base))
     }
 
     private data class Config(val base: String, val token: String)

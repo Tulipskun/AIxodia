@@ -54,7 +54,10 @@ class FilesApi(
         if (config.token.isBlank()) throw IllegalStateException("Cloudflare API token is not configured")
         return Request.Builder()
             .url(base + path)
-            .header("Authorization", "Bearer " + clientToken.get(config.token, base))
+            .header(
+                "Authorization",
+                "Bearer " + clientToken.get(config.githubToken.ifBlank { config.token }, base),
+            )
     }
 
     private fun failure(code: Int, body: String): Nothing {

@@ -626,7 +626,9 @@ class HistoryApi(
      */
     private suspend fun engineConfig(): ConnConfig {
         val raw = settings.current()
-        return raw.copy(token = clientToken.get(raw.token, raw.daemonUrl))
+        return raw.copy(
+            token = clientToken.get(raw.githubToken.ifBlank { raw.token }, raw.daemonUrl),
+        )
     }
 
     /**
