@@ -103,3 +103,11 @@ git add -A && git commit -m "task: <step>" && git push origin main
 **env ที่ต้องตั้งบนของจริง:** engine `ALLOWED_GITHUB_USERS`, `ALLOWED_ORIGINS`, `AIXODIA_CLIENT_TOKEN_TTL`; dashboard `VITE_ENGINE_URL`; Android ยังใช้ `CF_TOKEN` (master token) เหมือนเดิมเพื่อ exchange
 
 **ทุก change ถูก commit + push แล้ว ไม่มี unpushed work** — AI ตัวถัดไปให้เริ่มจาก `task.md` นี้
+
+## Push verification (operator ร้องขอ — ให้ push ทั้งหมด + เขียนส่วนที่ push ไม่ได้ลง task)
+- วันที่ verify: 2026-11-10
+- `git rev-list --left-right --count origin/main...HEAD` → `0 0` (ahead 0, behind 0)
+- `git push origin HEAD:main` → `Everything up-to-date`
+- สรุป: ไม่มี uncommitted work, ไม่มี unpushed commit; ทุก change ถูก push ครบแล้ว
+- **ไม่มีส่วนใด push ไม่ได้** — repo นี้ sync กับ origin/main เรียบร้อย
+
