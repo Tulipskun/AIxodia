@@ -20,9 +20,9 @@ class AixodiaApp : Application() {
         super.onCreate()
         CrashLog.install(this)
         container = AppContainer(this)
-        // Started here rather than from a screen: the address can change while
-        // the app is in the background (a kernel ends, a new one is pushed), and
-        // the chat should be current on the next open without anyone asking.
+        // Observe the Engine's announced URL and health state while the app is
+        // running. The default Named Tunnel URL is already configured locally;
+        // discovery never reads Cloudflare KV or requires a Cloudflare token.
         container.discovery.start()
     }
 }
@@ -32,8 +32,8 @@ class AppContainer(app: Application) {
 
     val db: AppDatabase = AppDatabase.get(app)
     val settings = SettingsStore(app)
-    // One app-wide provider: every engine call shares the same short-lived token,
-    // exchanged from CF_TOKEN once and refreshed just before it expires.
+    // One app-wide provider: API calls pass the already-issued Engine session.
+    // GitHub OAuth is used only during the explicit sign-in exchange.
     val clientToken: ClientToken = ClientToken.shared
     val historyApi = HistoryApi(settings, clientToken = clientToken)
     // No shared socket: chat is POST + SSE and the terminal is its own

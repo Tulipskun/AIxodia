@@ -908,12 +908,9 @@ class TerminalSocket(
             val (cols, rows) = pendingSize ?: (80 to 24)
             link.updateDetail("opening terminal stream")
             val ticket = try {
-                // The ticket request authenticates with the engine's short-lived
-                // token, resolved here so TerminalSocket owns its own credential
-                // just like every other transport.
-                // The GitHub token (Device Flow) is the credential; the legacy stored
-                // token only answers for installs that never signed in with GitHub.
-                val auth = clientToken.get(c.githubToken.ifBlank { c.token }, c.daemonUrl)
+                // The ticket request authenticates with the Engine session, like
+                // every other transport.
+                val auth = clientToken.get(c.sessionToken, c.daemonUrl)
                 withTimeoutOrNull(8_000) { history.terminalTicket(auth) }
             } catch (t: Throwable) {
                 Log.w(TAG, "terminal ticket failed", t)
@@ -1144,7 +1141,7 @@ class TerminalSocket(
         } catch (t: Throwable) {
             return false
         }
-        if (current.token.isBlank()) return false
+        if (current.sessionToken.isBlank()) return false
         val node = try {
             withTimeoutOrNull(5_000) { history.node() }
         } catch (t: Throwable) {

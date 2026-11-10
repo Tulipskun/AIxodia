@@ -10,17 +10,11 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * The one credential, at rest.
+ * Protects the Engine-issued app session at rest.
  *
- * The Cloudflare token can administer the account's D1 databases, so it is not
- * kept as plain text in the preferences file: it is sealed with AES-GCM under a
- * key that lives in the Android keystore and never leaves it. A backup of the
- * preference file is therefore a backup of ciphertext, useless on another
- * phone, where the keystore key does not exist.
- *
- * Values written before this existed are plain text. They are read as they are
- * and sealed on the next save, so an update does not lock the operator out of
- * their own account.
+ * The opaque bearer session is sealed with AES-GCM under a key that lives in
+ * Android Keystore and never leaves it. A backup of the preferences file is
+ * therefore only ciphertext, useless on another phone without the key.
  */
 object TokenCipher {
     private const val KEY_ALIAS = "aixodia_token_v1"
@@ -42,12 +36,7 @@ object TokenCipher {
         }.getOrDefault(plain)
     }
 
-    /**
-     * The plain token. A value this keystore can no longer open — the key was
-     * invalidated, or the file was restored onto another phone — is treated as
-     * absent. Asking for the token again is honest; showing a token that will
-     * fail every request is not.
-     */
+    /** A value this keystore cannot open is treated as absent. */
     fun open(stored: String): String {
         if (stored.isEmpty()) return ""
         if (!stored.startsWith(PREFIX)) return stored

@@ -4,38 +4,27 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 
 private val Context.ds by preferencesDataStore("aixodia")
 
+const val DEFAULT_DAEMON_URL = "https://aixodia.dpdns.org"
+
 /**
- * Every connection value is runtime configuration entered by the user in the
- * settings screen — nothing is baked into the app, and no secret ships in the
- * repo. Defaults are intentionally empty so an unconfigured app asks instead of
- * silently talking to a wrong endpoint.
- *
- * There is exactly one credential: the Cloudflare API token, which
- * the app uses against the D1 REST API and hands to the daemon in the WebSocket
- * hello. The account and database ids are the token's own answer — discovered
- * and cached, never required from the operator — and the daemon address only
- * carries the live socket and the provider/model API.
+ * The Engine URL defaults to the stable Named Tunnel hostname. GitHub Device
+ * Flow provides the account credential; its OAuth token is sealed with Android
+ * Keystore and exchanged for a short-lived Engine session token. No Cloudflare
+ * API token, account id, or database id is needed by the Android app.
  */
 class SettingsStore(private val ctx: Context) {
     private val endpoint = stringPreferencesKey("endpoint")
     private val daemonUrl = stringPreferencesKey("daemon_url")
-    private val token = stringPreferencesKey("token")
-    // The GitHub OAuth access token from the Device Flow sign-in. Sealed with
-    // the same Keystore cipher as the legacy Cloudflare token; it is exchanged
-    // at the engine for a short-lived session token and never sent anywhere
-    // else. The legacy `token` (a Cloudflare API token) is only kept for
-    // existing installs and is no longer written by the app.
-    private val githubToken = stringPreferencesKey("github_token")
-    private val accountId = stringPreferencesKey("account_id")
-    private val databaseId = stringPreferencesKey("database_id")
+    // Opaque Engine-issued session token, protected by Android Keystore.
+    private val sessionToken = stringPreferencesKey("session_token")
+    private val sessionExpiresAt = stringPreferencesKey("session_expires_at")
+    private val legacyGithubToken = stringPreferencesKey("github_token")
     private val sessionId = stringPreferencesKey("session_id")
     private val terminalSessionId = stringPreferencesKey("terminal_session_id")
     private val terminalSessionIds = stringPreferencesKey("terminal_session_ids")
@@ -48,7 +37,7 @@ class SettingsStore(private val ctx: Context) {
     // the tab must stay gone — outlive the process.
     private val terminalClosedIds = stringPreferencesKey("terminal_closed_ids")
     // The daemon's start time, kept so the header's uptime counter has a number
-    // the moment the app opens — the D1 query that confirms it has not landed yet.
+    // the moment the app opens — before the Engine health check confirms it.
     private val daemonStartedAt = stringPreferencesKey("daemon_started_at")
     // When the machine the daemon runs on booted. The counter shows this rather
     // than the process start, because an engine update restarts the process and
@@ -91,15 +80,8 @@ class SettingsStore(private val ctx: Context) {
         }
     }
 
-    val endpointFlow: Flow<String> = ctx.ds.data.map { it[endpoint] ?: "" }
-    val daemonUrlFlow: Flow<String> = ctx.ds.data.map { it[daemonUrl] ?: "" }
-    // The token is sealed at rest (see TokenCipher), so every read goes through
-    // the keystore: off the main thread, because a flow mapped on the main
-    // dispatcher would do a keystore round trip there.
-    val tokenFlow: Flow<String> =
-        ctx.ds.data.map { TokenCipher.open(it[token].orEmpty()) }.flowOn(Dispatchers.IO)
-    val accountIdFlow: Flow<String> = ctx.ds.data.map { it[accountId] ?: "" }
-    val databaseIdFlow: Flow<String> = ctx.ds.data.map { it[databaseId] ?: "" }
+    val endpointFlow: Flow<String> = ctx.ds.data.map { it[endpoint]?.takeIf(String::isNotBlank) ?: DEFAULT_DAEMON_URL }
+    val daemonUrlFlow: Flow<String> = ctx.ds.data.map { it[daemonUrl]?.takeIf(String::isNotBlank) ?: DEFAULT_DAEMON_URL }
     val sessionFlow: Flow<String> = ctx.ds.data.map { it[sessionId] ?: "" }
     /** The cached daemon start time (unix second), 0 when never seen. */
     val terminalSessionIdFlow: Flow<String> = ctx.ds.data.map { it[terminalSessionId] ?: "" }
@@ -118,46 +100,49 @@ class SettingsStore(private val ctx: Context) {
     suspend fun current(): ConnConfig {
         // One snapshot, not seven independent first() reads: saveDaemon() writes
         // endpoint and daemonUrl in one edit, and reading them across edits
-        // could pair a new address with the old socket or token.
+        // could pair a new address with the old socket or session.
         val prefs = ctx.ds.data.first()
+        val expiresAt = prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L
+        val validSession = expiresAt > System.currentTimeMillis() / 1000
+        if (!validSession && !prefs[sessionToken].isNullOrBlank()) {
+            ctx.ds.edit {
+                it.remove(sessionToken)
+                it.remove(sessionExpiresAt)
+                it.remove(legacyGithubToken)
+            }
+        }
         return ConnConfig(
-            endpoint = prefs[endpoint].orEmpty(),
-            daemonUrl = prefs[daemonUrl].orEmpty(),
-            token = TokenCipher.open(prefs[token].orEmpty()),
-            githubToken = TokenCipher.open(prefs[githubToken].orEmpty()),
-            accountId = prefs[accountId].orEmpty(),
-            databaseId = prefs[databaseId].orEmpty(),
+            endpoint = prefs[endpoint]?.takeIf(String::isNotBlank) ?: DEFAULT_DAEMON_URL,
+            daemonUrl = prefs[daemonUrl]?.takeIf(String::isNotBlank) ?: DEFAULT_DAEMON_URL,
+            token = "",
+            sessionToken = if (validSession) TokenCipher.open(prefs[sessionToken].orEmpty()) else "",
             sessionId = prefs[sessionId].orEmpty(),
         )
     }
 
-    /**
-     * The one credential, plus the ids when they are already known. Blank ids
-     * stay blank on purpose: D1Api resolves them from the token and writes them
-     * back here, so nobody has to type a Cloudflare id.
-     */
-    suspend fun saveD1(tokenValue: String, accountValue: String = "", databaseValue: String = "") {
-        ctx.ds.edit {
-            it[token] = TokenCipher.seal(tokenValue.trim())
-            if (accountValue.isNotBlank()) it[accountId] = accountValue.trim()
-            if (databaseValue.isNotBlank()) it[databaseId] = databaseValue.trim()
+    /** Stores only the opaque Engine session; the temporary GitHub token is discarded. */
+    suspend fun saveSessionToken(value: String, expiresAt: Long) {
+        ctx.ds.edit { prefs ->
+            prefs.remove(legacyGithubToken)
+            val clean = value.trim()
+            if (clean.isBlank() || expiresAt <= System.currentTimeMillis() / 1000) {
+                prefs.remove(sessionToken)
+                prefs.remove(sessionExpiresAt)
+            } else {
+                prefs[sessionToken] = TokenCipher.seal(clean)
+                prefs[sessionExpiresAt] = expiresAt.toString()
+            }
+            prefs.remove(stringPreferencesKey("token"))
+            prefs.remove(stringPreferencesKey("account_id"))
+            prefs.remove(stringPreferencesKey("database_id"))
         }
     }
 
-    /** Remembers the ids D1Api resolved, without touching the token. */
-    suspend fun saveResolvedTarget(accountValue: String, databaseValue: String) {
-        ctx.ds.edit {
-            it[accountId] = accountValue
-            it[databaseId] = databaseValue
-        }
+    val sessionTokenFlow: Flow<String> = ctx.ds.data.map { prefs ->
+        if ((prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L) > System.currentTimeMillis() / 1000)
+            TokenCipher.open(prefs[sessionToken].orEmpty())
+        else ""
     }
-
-    /** Stores the GitHub OAuth token from a completed Device Flow sign-in. */
-    suspend fun saveGithubToken(value: String) {
-        ctx.ds.edit { it[githubToken] = TokenCipher.seal(value.trim()) }
-    }
-
-    val githubTokenFlow: Flow<String> = ctx.ds.data.map { TokenCipher.open(it[githubToken].orEmpty()) }
 
     suspend fun saveProvidersCache(daemonUrl: String, json: String) {
         ctx.ds.edit {
@@ -177,7 +162,7 @@ class SettingsStore(private val ctx: Context) {
      * live socket and the provider/model API the running router owns.
      */
     suspend fun saveDaemon(address: String) {
-        val clean = address.trim().trimEnd('/')
+        val clean = address.trim().trimEnd('/').ifBlank { DEFAULT_DAEMON_URL }
         ctx.ds.edit {
             if ((it[daemonUrl] ?: "").trim().trimEnd('/') != clean) {
                 // The provider list belongs to the engine at that address.
@@ -289,12 +274,8 @@ class SettingsStore(private val ctx: Context) {
         }
     }
 
-    /**
-     * True once a Cloudflare API token is set. History needs nothing else, so a
-     * phone with no daemon address still opens and edits its chats;
-     * only the live socket stays offline until an address is known.
-     */
-    suspend fun isConfigured(): Boolean = current().token.isNotBlank()
+    /** True while an Engine-issued session token is valid. */
+    suspend fun isConfigured(): Boolean = current().sessionToken.isNotBlank()
 
 
 }
@@ -325,9 +306,9 @@ data class ConnConfig(
     val endpoint: String,
     val daemonUrl: String,
     val token: String,
-    val accountId: String,
-    val databaseId: String,
+    val accountId: String = "",
+    val databaseId: String = "",
     val sessionId: String,
-    /** GitHub OAuth token from the Device Flow; blank until the user signs in. */
-    val githubToken: String = "",
+    /** Opaque Engine-issued session token; blank until the user signs in. */
+    val sessionToken: String = "",
 )

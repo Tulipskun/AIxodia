@@ -25,7 +25,8 @@ class DeviceFlowException(val code: String, message: String) : Exception(message
  * GitHub Device Flow sign-in: the app asks GitHub for a short user code, the
  * person enters it at [VERIFICATION_URI] in any browser, and GitHub hands back
  * an OAuth access token. That token is exchanged at the engine for a
- * short-lived session token — the app never stores a Cloudflare token.
+ * short-lived Engine session token. The GitHub access token is used only in
+ * memory for that exchange and is never persisted by the app.
  *
  * The whole flow is pure: the HTTP call and the clock are injectable so unit
  * tests can drive the state machine without touching the network, mirroring

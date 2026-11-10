@@ -41,11 +41,9 @@ import java.net.URLEncoder
  *    provider catalogue, provider health, per-chat model pins, session
  *    writes and the agent settings, because validating and writing those
  *    needs the running router rather than the database;
- *  - **Cloudflare D1** through `D1Api` for the history reads whenever the
- *    tunnel has nothing to dial: the chat list and the pages of a thread are
- *    read straight out of `chat_sessions`/`chat_turns` — the same tables the
- *    engine serves over the tunnel — so a stopped daemon does not hide the
- *    history. Reads only: writes still travel to the engine.
+ *  - **Room** for offline history already synchronized to this device. All
+ *    remote reads and writes go through the Engine's authenticated API; the
+ *    Android client never accesses Cloudflare D1 or Workers KV directly.
  */
 @JsonClass(generateAdapter = true)
 data class TurnRow(
@@ -595,7 +593,6 @@ internal fun pageTurns(rows: List<TurnRow>, beforeSeq: Long, limit: Int): List<T
 
 class HistoryApi(
     private val settings: SettingsStore,
-    private val d1: D1Api = D1Api(settings),
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
@@ -605,8 +602,8 @@ class HistoryApi(
     private val clientToken: ClientToken = ClientToken.passThrough,
 ) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    // History is Cloudflare D1 read directly; everything in this class that
-    // talks to the daemon calls the tunnel URL over ordinary HTTP.
+    // History, settings and provider data all go through the Engine API over
+    // the stable Named Tunnel; Android never calls Cloudflare D1 directly.
     // The settings calls are not all instant: asking the daemon to re-check its
     // providers means waiting for the gateways to answer, through a connection
     // that can take seconds per round trip. The default 10s read timeout cut
@@ -618,16 +615,14 @@ class HistoryApi(
     private val settingsAdapter = moshi.adapter(SettingsView::class.java)
 
     /**
-     * A config snapshot whose [ConnConfig.token] is the engine's short-lived
-     * token, resolved once here so every `Bearer ${c.token}` below authenticates
-     * with it. `CF_TOKEN` is used only to obtain that token (or as a fallback for
-     * an engine that has no `/v1/auth/token` route); Cloudflare D1 / KV calls
-     * still use `CF_TOKEN` directly through `D1Api`.
+     * A config snapshot whose [ConnConfig.token] is the already-issued Engine
+     * session. GitHub OAuth is used only during sign-in; no Cloudflare
+     * credential is used by this app.
      */
     private suspend fun engineConfig(): ConnConfig {
         val raw = settings.current()
         return raw.copy(
-            token = clientToken.get(raw.githubToken.ifBlank { raw.token }, raw.daemonUrl),
+            token = clientToken.get(raw.sessionToken, raw.daemonUrl),
         )
     }
 
@@ -683,10 +678,8 @@ class HistoryApi(
     }
 
     /**
-     * Every chat the engine knows, newest first. The list is read over the
-     * tunnel first and straight out of D1 when the tunnel has nothing to
-     * dial, so a stopped daemon decays into a history viewer instead of an
-     * empty drawer.
+     * Every chat the engine knows, newest first. When the Engine is offline,
+     * the repository keeps showing the already synchronized Room cache.
      */
     suspend fun sessions(): List<SessionRow> = sessionsOrNull().orEmpty()
 
@@ -698,7 +691,7 @@ class HistoryApi(
      * nothing, a truthful empty list is the authority to prune with.
      */
     suspend fun sessionsOrNull(): List<SessionRow>? = withContext(Dispatchers.IO) {
-        daemonSessions() ?: d1Sessions()
+        daemonSessions()
     }
 
     /** The tunnel read of the chat list. Null when it cannot be dialled. */
@@ -732,11 +725,6 @@ class HistoryApi(
                 out
             }
         }.getOrNull()
-    }
-
-    /** The direct D1 read of the chat list. Null when D1 cannot be read. */
-    private suspend fun d1Sessions(): List<SessionRow>? = withContext(Dispatchers.IO) {
-        runCatchingCancellable { d1.chatSessions().map(::d1SessionRow) }.getOrNull()
     }
 
     /**
@@ -804,27 +792,21 @@ class HistoryApi(
     }
 
     /**
-     * One page of history, oldest-first — the daemon over the tunnel, or
-     * straight out of D1's `chat_turns` when the tunnel cannot be dialled (a
-     * a changed Named Tunnel endpoint, an engine that is down, a fresh install before
-     * the first announcement). Both paths yield the same TurnRow shape, so
-     * the merge logic never learns which one answered.
+     * One page of history, oldest-first, read from the Engine. Offline pages
+     * remain available from the local Room cache.
      */
     suspend fun turns(sessionId: String, beforeSeq: Long, limit: Int = 50): List<TurnRow> =
         withContext(Dispatchers.IO) {
             // A failed fallback is not an authoritative empty page. Let paging
             // retain its older-history marker and offer another attempt.
-            val rows = daemonTurns(sessionId, beforeSeq, limit)
-                ?: d1.chatTurns(sessionId, beforeSeq, limit).map(::d1TurnRow)
+            val rows = daemonTurns(sessionId, beforeSeq, limit).orEmpty()
             pageTurns(rows, beforeSeq, limit)
         }
 
     /**
-     * The tunnel read of one page. Null when the daemon is not configured or
-     * the request failed for any reason — that is exactly the case that then
-     * reads D1 instead. An older engine that ignores the page parameters
-     * still sends everything; pageTurns cuts that down, so the phone keeps
-     * working against it unchanged.
+     * The Engine read of one page. Null when the daemon is not configured or
+     * the request failed. An older engine that ignores the page parameters
+     * still sends everything; pageTurns cuts that down.
      */
     private suspend fun daemonTurns(sessionId: String, beforeSeq: Long, limit: Int): List<TurnRow>? =
         withContext(Dispatchers.IO) {
@@ -1296,10 +1278,13 @@ class HistoryApi(
                 .get().build()
             client.newCall(req).execute().use { r ->
                 val text = r.body?.string().orEmpty()
-                val env = runCatching { JSONObject(text) }.getOrNull() ?: return@use 0
-                env.optJSONArray("sessions")?.length() ?: 0
+                if (!r.isSuccessful) throw IllegalStateException("Engine HTTP ${r.code}: $text")
+                val env = runCatching { JSONObject(text) }.getOrNull()
+                    ?: throw IllegalStateException("Engine returned an invalid response")
+                env.optJSONArray("sessions")?.length()
+                    ?: throw IllegalStateException("Engine response has no sessions list")
             }
-        }.getOrDefault(0)
+        }.getOrElse { throw it }
     }
 
     // Uploads can be large and slow; the shared client's 150s call timeout would
@@ -1546,14 +1531,26 @@ class HistoryApi(
      * what was found, so the settings screen can show it and remember it
      * Throws with Cloudflare's own message when it cannot.
      */
-    suspend fun discover(): D1Api.Target = withContext(Dispatchers.IO) { d1.discover() }
-
-    /**
-     * Tunnel discovery: where the ai daemon is, read from the D1 `tunnel` row
-     * A failure is reported rather than hidden, so the settings screen
-     * can tell "D1 unreachable" from "the daemon has not beaten yet".
-     */
-    suspend fun node(): NodeInfo? = withContext(Dispatchers.IO) { d1.node() }
+    /** Checks the configured Engine directly; no Cloudflare API or KV access. */
+    suspend fun node(): NodeInfo? = withContext(Dispatchers.IO) {
+        val base = absoluteUrl(settings.current().daemonUrl) ?: return@withContext null
+        runCatchingCancellable {
+            val req = Request.Builder().url("$base/healthz")
+                .header("Accept", "application/json")
+                .get().build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val body = JSONObject(response.body?.string().orEmpty())
+                NodeInfo(
+                    tunnelUrl = base,
+                    version = body.optString("version"),
+                    online = body.optBoolean("ok", true),
+                    startedAt = body.optLong("started"),
+                    bootAt = body.optLong("boot"),
+                )
+            }
+        }.getOrNull()
+    }
 
 
 }

@@ -50,7 +50,7 @@ internal const val POLL_IDLE_MS = 300L
 
 /**
  * How often a failing dial may go looking for a daemon that moved. A Named Tunnel hostname stays stable, while the endpoint and process version are
- * discovered from Workers KV. One lookup per backoff step: the step caps at 15s,
+ * announced by the Engine. One lookup per backoff step: the step caps at 15s,
  * and a read more often would spend the phone's Cloudflare quota while the daemon
  * is simply down.
  */
@@ -569,7 +569,7 @@ class RunSocket(
             return false
         }
         // No credential, so no row to read and no daemon that could be reached.
-        if (current.token.isBlank()) return false
+        if (current.sessionToken.isBlank()) return false
         val node = try {
             withTimeoutOrNull(5_000) { history.node() }
         } catch (t: Throwable) {
@@ -712,11 +712,10 @@ class RunSocket(
     private suspend fun config(): Config? {
         val current = settings.current()
         val base = current.daemonUrl.trim().trimEnd('/')
-        if (base.isEmpty() || current.token.isBlank()) return null
+        if (base.isEmpty() || current.sessionToken.isBlank()) return null
         if (!base.startsWith("http://") && !base.startsWith("https://")) return null
-        // Every run request authenticates with the engine's short-lived token.
-        // CF_TOKEN is only used to obtain it (or as a fallback for old engines).
-        return Config(base, clientToken.get(current.githubToken.ifBlank { current.token }, base))
+        // Every run request authenticates with the Engine session saved at sign-in.
+        return Config(base, clientToken.get(current.sessionToken, base))
     }
 
     private data class Config(val base: String, val token: String)

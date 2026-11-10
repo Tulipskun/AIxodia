@@ -83,11 +83,9 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
-import com.tulipskun.aixodia.data.remote.DeviceCodeInfo
 import com.tulipskun.aixodia.data.remote.DeviceFlowException
 import com.tulipskun.aixodia.data.remote.DiscoveryPhase
 import com.tulipskun.aixodia.data.remote.DiscoveryState
-import com.tulipskun.aixodia.data.remote.GitHubDeviceFlow
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.NodeInfo
 import com.tulipskun.aixodia.update.UpdateManager
@@ -100,10 +98,9 @@ import kotlinx.coroutines.withContext
 private enum class SettingsPage { Main, Connection, Agent, About }
 
 /**
- * Connection settings: the Cloudflare API token the app uses to read
- * and write D1 directly, the daemon tunnel address that carries the live socket
- * and the provider/model API, and one-tap tests so a wrong token or a missing
- * tunnel row shows up here instead of as a silent empty chat.
+ * Connection settings: GitHub account state and the Engine endpoint. The app
+ * authenticates with an Engine-issued short-lived session token; it never needs
+ * a Cloudflare API token or direct Cloudflare API access.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,16 +117,11 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val curEndpoint by settings.endpointFlow.collectAsStateWithLifecycle(initialValue = "")
     val curDaemon by settings.daemonUrlFlow.collectAsStateWithLifecycle(initialValue = "")
-    val curToken by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
-    val curAccount by settings.accountIdFlow.collectAsStateWithLifecycle(initialValue = "")
-    val curDatabase by settings.databaseIdFlow.collectAsStateWithLifecycle(initialValue = "")
     val curSession by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "default")
     val conn by socket.state.collectAsStateWithLifecycle(initialValue = ConnState.OFFLINE)
     val tokenFields by settings.tokenFieldsFlow(curEndpoint).collectAsStateWithLifecycle(initialValue = emptyList<TokenField>())
 
     var address by rememberSaveable(curEndpoint) { mutableStateOf(curEndpoint) }
-    var token by rememberSaveable(curToken) { mutableStateOf(curToken) }
-    var showToken by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
     // Set where the outcome is known, never inferred from the wording later.
     var msgIsError by remember { mutableStateOf(false) }
@@ -248,208 +240,64 @@ fun SettingsScreen(
             }
 
             if (page == SettingsPage.Connection) {
-            SectionCard(
-                "Sign in",
-                "",
-            ) {
-                val curGithub by settings.githubTokenFlow.collectAsStateWithLifecycle(initialValue = "")
-                val context = androidx.compose.ui.platform.LocalContext.current
-                var ghBusy by remember { mutableStateOf(false) }
-                var ghCode by remember { mutableStateOf<DeviceCodeInfo?>(null) }
-                if (curGithub.isNotBlank()) {
-                    Text(
-                        "ล็อกอินด้วย GitHub แล้ว — แอปแลกเป็น token ระยะสั้นที่ engine เอง ไม่มีการเก็บ Cloudflare token บนเครื่อง",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedButton(
-                        onClick = { scope.launch { settings.saveGithubToken("") } },
-                        enabled = !ghBusy,
-                    ) { Text("Sign out") }
-                } else if (com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID.isBlank()) {
-                    Text(
-                        "Device Flow sign-in needs the GitHub OAuth App client id. Build with -PGithubClientId=<client id>.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    val code = ghCode
-                    if (code == null) {
-                        Button(
+                val sessionToken by settings.sessionTokenFlow.collectAsStateWithLifecycle(initialValue = "")
+                SectionCard("GitHub account", "") {
+                    if (sessionToken.isNotBlank()) {
+                        Text("Signed in with GitHub", style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(
                             onClick = {
-                                ghBusy = true; msg = ""; msgIsError = false
                                 scope.launch {
-                                    val outcome = withContext(Dispatchers.IO) {
-                                        runCatching {
-                                            val flow = GitHubDeviceFlow()
-                                            val info = flow.requestDeviceCode(
-                                                com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID,
-                                            )
-                                            ghCode = info
-                                            flow.pollForToken(
-                                                com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID,
-                                                info,
-                                            )
-                                        }
-                                    }
-                                    outcome.fold(
-                                        onSuccess = { token ->
-                                            settings.saveGithubToken(token)
-                                            msg = "ล็อกอิน GitHub สำเร็จ — แอปจะแลกเป็น token ระยะสั้นที่ engine"
-                                            msgIsError = false
-                                            ghCode = null
-                                        },
-                                        onFailure = { e ->
-                                            msg = (e as? DeviceFlowException)?.message
-                                                ?: (e.message ?: "ล็อกอินไม่สำเร็จ")
-                                            msgIsError = true
-                                            ghCode = null
-                                        },
-                                    )
-                                    ghBusy = false
+                                    settings.saveSessionToken("", 0L)
+                                    com.tulipskun.aixodia.data.remote.ClientToken.shared.reset()
+                                    onBack()
                                 }
                             },
-                            enabled = !ghBusy,
-                        ) { Text("Sign in with GitHub") }
+                            enabled = !busy,
+                        ) { Text("Sign out") }
                     } else {
-                        Text(
-                            "ป้อนรหัสนี้ที่ GitHub:",
+                        Text("Sign in with GitHub from the app sign-in screen.",
                             style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            code.userCode,
-                            style = MaterialTheme.typography.headlineSmall,
-                            modifier = Modifier.padding(vertical = 4.dp),
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse(code.verificationUri)),
-                                    )
-                                },
-                            ) { Text("เปิดหน้ายืนยัน") }
-                            OutlinedButton(onClick = { ghCode = null }) { Text("ยกเลิก") }
-                        }
-                        Text(
-                            "รอการยืนยันในเบราว์เซอร์…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-            }
-            SectionCard(
-                "Connection",
-                "",
-            ) {
-                val clip = LocalClipboardManager.current
-                LabelledField(
-                    value = token, onValueChange = { token = it },
-                    label = "Cloudflare API token",
-                    visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailing = {
-                        IconButton(
-                            onClick = { clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() } },
-                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "Paste from clipboard") }
-                        IconButton(onClick = { showToken = !showToken }) {
-                            Icon(
-                                if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (showToken) "Hide token" else "Show token",
-                            )
-                        }
-                    },
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            busy = true; msg = ""
-                            scope.launch {
-                                settings.saveD1(token)
-                                val found = runCatching { history.discover() }
-                                val target = found.getOrNull()
-                                if (target == null) {
-                                    msg = "D1 lookup failed: " +
-                                        (found.exceptionOrNull()?.message ?: "unknown")
-                                    msgIsError = true
-                                } else {
-                                    val chats = runCatching { history.ping() }.getOrDefault(0)
-                                    msg = "OK — ${target.accountName}/${target.databaseName} · $chats sessions"
-                                    msgIsError = false
-                                    load(false)
+                SectionCard("Engine connection", "") {
+                    LabelledField(
+                        value = address,
+                        onValueChange = { address = it },
+                        label = "Engine address",
+                        placeholder = "https://aixodia.dpdns.org",
+                        hint = "The app connects directly to the AIxodia Engine. No Cloudflare token or Worker is used.",
+                        singleLine = false,
+                        minLines = 2,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                busy = true; msg = ""
+                                scope.launch {
+                                    settings.saveDaemon(address)
+                                    val result = runCatching { history.ping() }
+                                    msg = result.fold({ "Connected — ${it} sessions" }, { "Connection failed: ${it.message}" })
+                                    msgIsError = result.isFailure
+                                    busy = false
                                 }
-                                busy = false
-                            }
-                        },
-                        enabled = !busy && token.isNotBlank(),
-                    ) { Text("Save and find D1") }
-                    OutlinedButton(
-                        onClick = {
-                            busy = true; msg = ""
+                            },
+                            enabled = !busy && address.isNotBlank(),
+                        ) { Text("Save and test") }
+                    }
+                    NodeCard(
+                        history = history,
+                        discovery = discovery,
+                        onUse = { engine ->
                             scope.launch {
-                                val tested = runCatching { "OK — ${history.ping()} sessions" }
-                                    .getOrElse { "Failed: ${it.message}" }
-                                msg = tested
-                                msgIsError = tested.startsWith("Failed")
-                                busy = false
-                            }
-                        },
-                        enabled = !busy && token.isNotBlank(),
-                    ) { Text("Test") }
-                }
-                Text(
-                    if (curAccount.isBlank() || curDatabase.isBlank()) {
-                        "D1: account/database unknown — press Save and find D1"
-                    } else {
-                        "D1: account ${curAccount.take(8)}… · database ${curDatabase.take(8)}…"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HorizontalDivider()
-                LabelledField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = "Daemon address (tunnel)",
-                    placeholder = "https://aixodia.dpdns.org",
-                    hint = if (address.isBlank()) {
-                        "Leave blank — history still reads/writes D1 directly · live chat connects to wss://<host>/ws"
-                    } else {
-                        "Live chat connects to wss://<host>/ws · provider/model is asked of the daemon here"
-                    },
-                    // A tunnel URL is long and has nowhere to break, so it wraps
-                    // rather than ending mid-word at the field's edge.
-                    singleLine = false,
-                    minLines = 2,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            busy = true; msg = ""
-                            scope.launch {
-                                settings.saveDaemon(address)
-                                msg = "Daemon address saved"
+                                settings.saveDaemon(engine)
+                                address = engine
+                                msg = "Using Engine URL"
                                 msgIsError = false
-                                busy = false
                             }
                         },
-                        enabled = !busy,
-                    ) { Text("Save address") }
+                    )
                 }
-                HorizontalDivider()
-                NodeCard(
-                    history = history,
-                    discovery = discovery,
-                    onUse = { tunnel ->
-                        scope.launch {
-                            settings.saveDaemon(tunnel)
-                            address = tunnel
-                            msg = "Using daemon URL"
-                            msgIsError = false
-                        }
-                    },
-                )
-            }
-
             }
 
             if (page == SettingsPage.Agent) {
@@ -804,38 +652,37 @@ private fun NodeCard(
     var checking by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
 
-    // Discovery polls Workers KV automatically; this button performs an
-    // immediate lookup. Both sides of the elvis are StateFlow so the delegate
-    // below retains a concrete state type.
+    // The background health check and this button query the Engine directly.
+    // Both sides of the elvis are StateFlow so the delegate retains a concrete type.
     val fallback = remember { MutableStateFlow(DiscoveryState()) }
     val auto by (discovery?.state ?: fallback).collectAsStateWithLifecycle()
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
         Text(
-            "ai daemon — endpoint discovered automatically from Workers KV",
+            "AIxodia Engine — direct connection",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (discovery != null) {
             val (label, colour) = when (auto.phase) {
                 DiscoveryPhase.NO_TOKEN ->
-                    "○ Cloudflare token not set — set it to discover automatically" to
+                    "○ Sign in with GitHub to connect" to
                         MaterialTheme.colorScheme.onSurfaceVariant
                 DiscoveryPhase.ANNOUNCED ->
                     // The row is a fact about the engine; this line is a fact
                     // about this phone. Saying "found" here is what made a dead
                     // chat look like a working one.
-                    "● Engine online at ${auto.tunnelUrl}${if (auto.version.isNotBlank()) " (${auto.version})" else ""} — this phone cannot connect" to
+                    "● Engine is online at ${auto.tunnelUrl}${if (auto.version.isNotBlank()) " (${auto.version})" else ""} — this phone cannot connect" to
                         MaterialTheme.colorScheme.error
                 DiscoveryPhase.CONNECTED ->
                     "● Endpoint found at ${auto.tunnelUrl}${if (auto.version.isNotBlank()) " (${auto.version})" else ""}" to
                         MaterialTheme.colorScheme.primary
                 DiscoveryPhase.IDLE ->
-                    "○ No daemon endpoint in KV — will check again" to
+                    "○ Engine is not reachable yet — retrying" to
                         MaterialTheme.colorScheme.onSurfaceVariant
                 DiscoveryPhase.UNREACHABLE ->
-                    "○ Cannot read Workers KV${if (auto.error.isNotBlank()) ": ${auto.error}" else ""} — keep using the existing URL" to
+                    "○ Cannot reach Engine${if (auto.error.isNotBlank()) ": ${auto.error}" else ""}" to
                         MaterialTheme.colorScheme.error
             }
             Text(
@@ -852,7 +699,7 @@ private fun NodeCard(
                         runCatching { history.node() }
                             .onSuccess { found ->
                                 node = found
-                                if (found == null) err = "No daemon endpoint in Workers KV yet — start the engine first"
+                                if (found == null) err = "Engine is not reachable — start the engine first"
                             }
                             .onFailure { err = it.message ?: "error" }
                         checking = false

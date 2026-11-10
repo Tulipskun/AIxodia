@@ -18,10 +18,9 @@ import java.io.File
  * higher versionCode), so Room history and settings survive —
  * never uninstalls, never clears data.
  *
- * The repo is public, so no Authorization header is sent at all. The only
- * token the app stores is the Cloudflare API token, which must never leave
- * the Cloudflare/D1/daemon path — sending it to api.github.com answers 401
- * and the button wrongly reports "already latest".
+ * The repo is public, so no Authorization header is sent at all. The
+ * GitHub OAuth credential is used only for the Engine sign-in exchange and
+ * is never attached to public GitHub release requests.
  */
 object UpdateManager {
     const val REPO = "Tulipskun/AIxodia"

@@ -22,7 +22,7 @@ class ScreenSnapshots {
 
     @Test
     fun setupNeeded() = paparazzi.snapshot {
-        AIxodiaTheme { SetupNeeded(onSubmit = {}, onOpenSettings = {}) }
+        AIxodiaTheme { SetupNeeded(onSignedIn = { _, _ -> }) }
     }
 
     @Test

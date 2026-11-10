@@ -2,23 +2,23 @@
 > talk to the engine directly. The engine now issues short-lived opaque session
 > tokens via `POST /v1/auth/token` in exchange for a GitHub token checked against
 > `ALLOWED_GITHUB_USERS`. This is an operator-approved exception to any
-> "no second token" wording below: `CF_TOKEN` never reaches a browser. Android
-> may keep using `CF_TOKEN` until its own migration (see `task.md`).
+> "no second token" wording below: `CF_TOKEN` never reaches a client. Android
+> now uses the same GitHub Device Flow and Engine-issued session token as the dashboard.
 
 # AIxodia
 
 Android chat client (Kotlin + Compose) for the `Tulipskun/aixodia-engine` daemon. History
-lives in **Cloudflare D1** (`chat_sessions`/`chat_turns` — the engine keeps no local
-database) and the phone reads it through the daemon's `/v1/...` HTTP API over the Cloudflare Named Tunnel; Room keeps the copy the screens draw. When the engine
-cannot be reached, the phone reads chat lists and turn pages straight out of D1 with the
-same API token. The stable daemon endpoint and Named Tunnel credentials live in Workers
-KV (`AIXODIA_CONFIG`); D1 is not used for daemon discovery. There is no Cloudflare Worker
+lives in **Cloudflare D1** (`chat_sessions`/`chat_turns`, owned by the Engine) and the
+phone reads it through the daemon's `/v1/...` HTTP API over the Cloudflare Named Tunnel;
+Room keeps the synchronized copy the screens draw and serves it offline. The Android
+app does not access D1 or Workers KV directly. The stable daemon endpoint and Named
+Tunnel credentials live in Workers KV (`AIXODIA_CONFIG`). There is no Cloudflare Worker
 in this project (D-011).
 
 - **Chat is a run**: `POST /v1/runs` starts a turn and returns immediately; its events arrive over SSE (`/v1/runs/{id}/events?after=seq`), numbered and replayable. Closing the app does not stop the agent, and reopening resumes from the last applied seq. `RunSocket` is the transport.
 - **Terminal is native and its own WebSocket**: the app's own `TerminalEmulator` draws every cell in `TerminalView`, and every open tab keeps its own `/terminal` socket with a single-use 90-second ticket. There is no JavaScript terminal or external terminal library. Chat uses its own transport, so terminal bytes and HTTP rpc calls never share its socket. tmux keeps shells alive across engine restarts.
-- **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL, so the chat list, old turns and the session cost strip are the engine's own numbers. When the tunnel cannot be dialled, the same reads fall back to D1 directly (`D1Api.chatSessions()` / `D1Api.chatTurns()`), so the drawer and the thread stay filled with the history D1 already holds.
-- **Daemon discovery from Workers KV**: `data/remote/D1Api.kt` reads `daemon/url` and `daemon/version` from `AIXODIA_CONFIG`. The URL is stable across engine restarts; the live socket determines reachability. No heartbeat is stored.
+- **History from the engine, paged**: `data/remote/HistoryApi.kt` calls the daemon's `/v1/sessions` and `/v1/sessions/{id}/turns` over the tunnel URL. Room keeps synchronized history available offline; the Android client does not call D1 directly.
+- **Daemon discovery**: the app defaults to the stable Named Tunnel URL and checks the Engine's `/healthz` endpoint directly. A changed URL can still be adopted from a daemon announcement on the live socket. No heartbeat is stored.
 - **Cached**: Room (`AppDatabase`) — offline-first, `(session_id, seq)` unique; the drawer and the open chat are drawn from Room before any network call. Open = cached newest page → background refresh → WS live tail.
 - **Chunked history**: the thread holds one page of messages (60 rows), not the whole
   transcript; scrolling to the top asks for the next page and keeps the reader's
@@ -32,7 +32,7 @@ in this project (D-011).
 ## Layout
 
 ```text
-app/            Android client (.kt, Compose Material3, Room, OkHttp WS, D1 + Workers KV REST)
+app/            Android client (.kt, Compose Material3, Room, OkHttp WS, Engine API only)
 db/             Cloudflare D1 schema + migrations (applied with wrangler, no Worker)
 ```
 
@@ -48,22 +48,22 @@ db/             Cloudflare D1 schema + migrations (applied with wrangler, no Wor
 3. **Daemon**: run `Tulipskun/aixodia-engine` — it serves the run API, the terminal
    WebSocket and `/v1/...`, starts the Named Tunnel from Workers KV, publishes its stable endpoint to KV after
    edge registration, and keeps chat history in D1.
-4. **App**: open in Android Studio, run `app`. Settings (gear icon): paste the
-   **Cloudflare API token** — the account and database ids are resolved from it
-   and cached, so no id is ever typed. Discovery then finds the daemon's tunnel
-   URL by itself (one Workers KV read every 30s, `DaemonDiscovery`), so
-   there is no address to paste. Providers, their write-only key pools and the
-   per-agent model routes live on the same screen.
+4. **App**: open in Android Studio and run `app`. Sign in with GitHub using the
+   Device Flow (the same OAuth App client id as the dashboard). The app exchanges
+   the OAuth token at `POST /v1/auth/token`; it does not ask for a Cloudflare
+   token or access D1/KV directly. The Engine URL defaults to
+   `https://aixodia.dpdns.org`. Providers, write-only key pools and per-agent
+   model routes remain in Settings.
 
 ## Architecture
 
 `ai` serves the mobile WS on localhost only and opens a Cloudflare **Named Tunnel**.
 The daemon reads its connector token and stable hostname from Workers KV, then writes
-`daemon/url` and `daemon/version` to KV after edge registration. The app reads those
-values directly — no Worker and no `/api/node` round trip. Its status dot reflects the
-actual socket connection, not a stored heartbeat. `ai` keeps no local state: config and sessions live in D1, and
-the Cloudflare API token (sent in the WS hello, memory-only) is the daemon's
-credential too.
+`daemon/url` and `daemon/version` to KV after edge registration. The app uses the
+stable hostname and checks `/healthz` directly — no Worker, KV read or `/api/node`
+round trip. Its status dot reflects the actual socket connection, not a stored
+heartbeat. `ai` keeps no local state: config and sessions live in D1, and `CF_TOKEN`
+remains an Engine-side credential that is never sent to the Android app.
 
 One credential, three paths:
 
@@ -75,22 +75,26 @@ One credential, three paths:
 - **Terminal WebSocket** — one dedicated `/terminal` socket per open tab,
   opened by the native terminal and authenticated with a short-lived ticket
   rather than the long-lived API token.
-- **D1 REST** — the history fallback: `D1Api.chatSessions()` / `D1Api.chatTurns()` read `chat_sessions`/`chat_turns` when the tunnel is down. **Workers KV REST** — discovery (`D1Api.node()`: stable daemon URL and process version). Nothing the phone edits lives in D1; the app's chat writes always go to the engine.
+- **Offline history** — Room retains the pages already synchronized from the Engine. The Android client makes no direct D1 or Workers KV REST calls. Nothing the phone edits lives in D1; chat writes always go to the Engine.
 
-## Authentication — one token, two steps
+## Authentication — GitHub Device Flow
 
-1. The daemon is reachable through its configured Cloudflare Named Tunnel hostname (no direct port forwarding).
-2. The app sends the **Cloudflare API token** as `Authorization: Bearer …` on
-   every run/terminal-ticket `/v1/...` call. The terminal WebSocket carries only
-   a single-use ticket in its URL, so the long-lived token never appears in a
-   socket URL or proxy log. The daemon keeps the token in memory only.
+1. The app requests a device code from GitHub using the same public OAuth App
+   client id as `aixodia-dashboard` (`Ov23lieKSrKCRs5YKwdO`). It opens
+   `https://github.com/login/device` and displays the user code while polling.
+2. After approval, the app sends the GitHub OAuth access token once to
+   `POST /v1/auth/token`. The Engine verifies `GET https://api.github.com/user`,
+   checks `ALLOWED_GITHUB_USERS`, and returns a short-lived opaque session token
+   (default TTL 900 seconds).
+3. All API and terminal-ticket requests use only the Engine-issued session token.
+   Android Keystore protects that session token and its expiry. The GitHub OAuth
+   access token exists only in memory during the exchange; it is not written to
+   DataStore, Room or disk. When the Engine session expires, the user signs in
+   again. Sign out clears the stored Engine session.
 
-An engine that cannot verify its `CF_TOKEN` against Cloudflare D1 at startup
-exits instead of serving (`db.Verify`). After that, every `/v1/...` call and
-the terminal upgrade compare the bearer (or a consumed ticket) to that token
-and answer `401` when it is missing or wrong, so a tunnel with a rotated token
-does not let a stranger in. There is **no second token** and none may be added
-without approval; the daemon owns no credential of its own.
+The app uses `https://aixodia.dpdns.org` by default. The Engine must have
+`ALLOWED_GITHUB_USERS` configured and expose `/v1/auth/token`. No PAT or
+Cloudflare API token is entered in the Android app.
 
 ## Reconnecting
 
@@ -122,21 +126,18 @@ without approval; the daemon owns no credential of its own.
 ## Production DB (runtime config, nothing hardcoded)
 
 - Cloudflare D1 `aixodia` holds chat history (`chat_sessions`/`chat_turns`), runs and
-  runtime state. The engine keeps no local database, so the phone reading D1 directly
-  reads the same history the engine serves on `/v1/...`.
-- One credential does the work: the Cloudflare API token typed in Settings reads daemon discovery values from Workers
-  KV and chat history from D1, and the same token authenticates `/v1/...`
-  calls (the terminal WebSocket uses a short-lived ticket derived from it).
-  At rest the token is sealed with AES-GCM under a key that lives in the Android
-  keystore (`TokenCipher`) and is excluded from auto-backup
-  (`res/xml/backup_rules.xml`), so a preference-file backup is ciphertext that
-  is useless on another phone. Values stored before sealing existed are read
-  as-is and re-sealed on the next save.
+  runtime state. The engine is the only client of D1; the Android app reads history
+  through the Engine API and keeps its offline copy in Room.
+- Only the Engine-issued app session is sealed with AES-GCM under a key in Android
+  Keystore (`TokenCipher`) and excluded from auto-backup
+  (`res/xml/backup_rules.xml`). The temporary GitHub OAuth token is never written
+  to disk; the Android app has no Cloudflare API credential and makes no direct
+  D1/KV calls.
 - The token used for `wrangler` stays in the shell (`CLOUDFLARE_API_TOKEN`); the
-  repo contains config (`config/aixodia.example.json`) and no secrets. It needs
-  Account → **D1: Edit** and Workers KV **Read** (app) / **Read + Write** (engine).
+  repo contains config (`config/aixodia.example.json`) and no secrets. Only the
+  Engine needs Cloudflare D1 and Workers KV permissions; the Android app needs none.
 - A fresh app install has empty settings and opens a sign-in screen that asks
-  for the Cloudflare API token instead of silently pointing somewhere.
+  for GitHub sign-in instead of silently pointing somewhere.
 
 ## Releasing
 
@@ -167,9 +168,9 @@ The key is not in this repository: it lives in the private
 
 ## Test it right now
 
-Start the daemon (`Tulipskun/aixodia-engine`), paste the Cloudflare API token in
-the app's settings, and send a message: discovery finds the tunnel URL, the app
-POSTs a run and follows its SSE events. The terminal button opens the native
+Start the daemon (`Tulipskun/aixodia-engine`), sign in with GitHub, and send a
+message: the app exchanges the GitHub credential for an Engine session token,
+then POSTs a run and follows its SSE events. The terminal button opens the native
 ticket-backed terminal. The provider, key and per-agent model are set from the
 phone (AX-083..094).
 

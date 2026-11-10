@@ -78,13 +78,8 @@ class MainActivity : ComponentActivity() {
      * without hand-typing on a phone:
      *
      *   adb shell am start -n com.tulipskun.aixodia/.MainActivity \
-     *     --es aixodia.token <Cloudflare API token> \
-     *     --es aixodia.address https://example.trycloudflare.com \
+     *     --es aixodia.address https://aixodia.dpdns.org \
      *     --es aixodia.session work-1
-     *
-     * `aixodia.account` and `aixodia.database` override the ids that are
-     * otherwise discovered from the token, and the run stream follows from the
-     * daemon address.
      *
      * It is compiled out of release builds: BuildConfig.DEBUG is false there,
      * so a shipped APK has no way to receive connection values this way, and
@@ -93,23 +88,14 @@ class MainActivity : ComponentActivity() {
     private fun applyDebugSeed(intent: Intent?) {
         if (!BuildConfig.DEBUG || intent == null) return
         val address = intent.getStringExtra("aixodia.address").orEmpty()
-        val token = intent.getStringExtra("aixodia.token").orEmpty()
-        val account = intent.getStringExtra("aixodia.account").orEmpty()
-        val database = intent.getStringExtra("aixodia.database").orEmpty()
         val session = intent.getStringExtra("aixodia.session").orEmpty()
-        if (address.isBlank() && token.isBlank()) return
+        if (address.isBlank()) return
         val settings = (application as AixodiaApp).container.settings
         lifecycleScope.launch {
-            // One credential the app reads D1 with; the daemon address is only
-            // needed for the live socket and the provider/model API.
-            if (token.isNotBlank()) settings.saveD1(token, account, database)
             if (address.isNotBlank()) settings.saveDaemon(address)
             if (session.isNotBlank()) settings.saveSession(session)
             // Clear the extras so a configuration change does not re-apply them.
             intent.removeExtra("aixodia.address")
-            intent.removeExtra("aixodia.token")
-            intent.removeExtra("aixodia.account")
-            intent.removeExtra("aixodia.database")
             intent.removeExtra("aixodia.session")
         }
     }

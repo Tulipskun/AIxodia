@@ -84,6 +84,7 @@ import com.tulipskun.aixodia.data.model.AttachmentRef
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.ui.settings.LabelledField
 import com.tulipskun.aixodia.ui.theme.aixodia
+import kotlinx.coroutines.launch
 
 /**
  * The connection state: a coloured dot with the state's own word beside it.
@@ -135,113 +136,102 @@ fun ConnDot(c: ConnState) {
  * the network — a bad token or an offline phone still lands in the chat, where
  * the connection card explains itself, rather than locking the form.
  *
- * The token is the only credential: account, database and daemon URL are the
- * token's own answer and are discovered for it. The Advanced link stays for the
- * one thing discovery cannot fill in — a hand-typed daemon address.
+ * GitHub Device Flow is the only sign-in path. The stable Engine URL is already
+ * configured, so a fresh install does not need a Cloudflare token or address.
  */
 @Composable
 fun SetupNeeded(
-    onSubmit: (String) -> Unit,
-    onOpenSettings: () -> Unit,
+    onSignedIn: (String, Long) -> Unit,
 ) {
-    var token by rememberSaveable { mutableStateOf("") }
-    var showToken by remember { mutableStateOf(false) }
-    val clip = LocalClipboardManager.current
-    // Edge-to-edge: the screen owns the whole window, so it has to keep its own
-    // content clear of the system bars. The inset is a union rather than two
-    // paddings added together: when the keyboard is up the IME already covers
-    // the gesture bar, so stacking them floated the form a bar's height above
-    // the keys. The column scrolls because at 200% font, or on a short screen
-    // with the keyboard open, the fields and the Continue button no longer fit
-    // and used to be clipped with no way to reach them.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf<com.tulipskun.aixodia.data.remote.DeviceCodeInfo?>(null) }
+    var error by remember { mutableStateOf("") }
+    var flowJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val clientId = BuildConfig.GITHUB_CLIENT_ID
+
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(28.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(
-                Icons.Default.AutoAwesome,
-                contentDescription = null,
-                modifier = Modifier.size(48.dp).padding(bottom = 12.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                stringResource(R.string.login_title),
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center,
-            )
+            Icon(Icons.Default.AutoAwesome, contentDescription = null,
+                modifier = Modifier.size(48.dp).padding(bottom = 12.dp), tint = MaterialTheme.colorScheme.primary)
+            Text("Sign in to AIxodia", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Spacer(Modifier.size(8.dp))
             Text(
-                stringResource(R.string.login_subtitle),
+                "Continue with your GitHub account. Cloudflare credentials are not required.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.widthIn(max = 420.dp),
             )
             Spacer(Modifier.size(20.dp))
-            LabelledField(
-                label = stringResource(R.string.login_token_label),
-                value = token,
-                onValueChange = { token = it },
-                placeholder = stringResource(R.string.login_token_placeholder),
-                visualTransformation = if (showToken) {
-                    VisualTransformation.None
-                } else {
-                    PasswordVisualTransformation()
-                },
-                modifier = Modifier.widthIn(max = 420.dp),
-                trailing = {
-                    IconButton(
-                        onClick = {
-                            clip.getText()?.text?.let { if (it.isNotBlank()) token = it.trim() }
-                        },
-                    ) {
-                        Icon(
-                            Icons.Default.ContentCopy,
-                            contentDescription = stringResource(R.string.login_paste),
-                        )
-                    }
-                    IconButton(onClick = { showToken = !showToken }) {
-                        Icon(
-                            if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = stringResource(
-                                if (showToken) R.string.login_hide else R.string.login_show,
-                            ),
-                        )
-                    }
-                },
-            )
-            Button(
-                onClick = { onSubmit(token.trim()) },
-                enabled = token.isNotBlank(),
-                modifier = Modifier
-                    .padding(top = 16.dp)
-                    .widthIn(max = 420.dp)
-                    .fillMaxWidth(),
-            ) { Text(stringResource(R.string.login_continue)) }
-            OutlinedButton(
-                onClick = onOpenSettings,
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .widthIn(max = 420.dp)
-                    .fillMaxWidth(),
-            ) { Text(stringResource(R.string.login_advanced)) }
+            if (code == null) {
+                Button(
+                    onClick = {
+                        busy = true
+                        error = ""
+                        flowJob = scope.launch {
+                            try {
+                                val flow = com.tulipskun.aixodia.data.remote.GitHubDeviceFlow()
+                                val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    flow.requestDeviceCode(clientId)
+                                }
+                                code = info
+                                context.startActivity(android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(info.verificationUri),
+                                ))
+                                val token = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    flow.pollForToken(clientId, info)
+                                }
+                                val engineSession = com.tulipskun.aixodia.data.remote.ClientToken.shared.exchange(
+                                    token,
+                                    com.tulipskun.aixodia.DEFAULT_DAEMON_URL,
+                                )
+                                onSignedIn(engineSession.token, engineSession.expiresAt)
+                            } catch (t: Throwable) {
+                                if (t !is kotlinx.coroutines.CancellationException) {
+                                    error = (t as? com.tulipskun.aixodia.data.remote.DeviceFlowException)?.message
+                                        ?: (t.message ?: "GitHub sign-in failed")
+                                }
+                            } finally {
+                                busy = false
+                                code = null
+                                flowJob = null
+                            }
+                        }
+                    },
+                    enabled = !busy && clientId.isNotBlank(),
+                    modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+                ) { Text(if (busy) "Connecting to GitHub…" else "Sign in with GitHub") }
+                if (clientId.isBlank()) {
+                    Text("GitHub Device Flow is not configured in this build.", color = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                Text("Enter this code on GitHub", style = MaterialTheme.typography.bodyMedium)
+                Text(code!!.userCode, style = MaterialTheme.typography.headlineLarge,
+                    modifier = Modifier.padding(vertical = 12.dp))
+                OutlinedButton(onClick = {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(code!!.verificationUri)))
+                }) { Text("Open GitHub verification") }
+                Text("Waiting for approval…", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { flowJob?.cancel(); busy = false; code = null }) { Text("Cancel") }
+            }
+            if (error.isNotBlank()) {
+                Spacer(Modifier.size(12.dp))
+                Text(error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                TextButton(onClick = { error = "" }) { Text("Dismiss") }
+            }
         }
-        // The build's own version, bottom-right, the corner a sign-in screen
-        // puts it in — one more thing the reader never has to think about until
-        // they need to say which build they are on.
-        Text(
-            "v${BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.labelSmall,
+        Text("v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-        )
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp))
     }
 }
 

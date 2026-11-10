@@ -19,14 +19,11 @@ import org.junit.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.mock
-import org.mockito.kotlin.never
-import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 
-/** A real history reader, with only the transport and D1 boundary mocked. */
+/** A real history reader, with only the Engine transport mocked. */
 class HistoryReadFailureTest {
     private val settings: SettingsStore = mock()
-    private val d1: D1Api = mock()
     private val client: OkHttpClient = mock()
     private val call: Call = mock()
 
@@ -38,22 +35,20 @@ class HistoryReadFailureTest {
     }
 
     private suspend fun api(code: Int = 200, body: String = "{}", url: String = "https://daemon.test"): HistoryApi {
-        whenever(settings.current()).thenReturn(ConnConfig("", url, "test-token", "", "", "A"))
+        whenever(settings.current()).thenReturn(ConnConfig("", url, "", "", "", "A", sessionToken = "test-token"))
         whenever(client.newCall(any())).thenReturn(call)
         whenever(call.execute()).thenAnswer {
             Response.Builder().request(Request.Builder().url("https://daemon.test").build())
                 .protocol(Protocol.HTTP_1_1).code(code).message("test response")
                 .body(body.toResponseBody("application/json".toMediaType())).build()
         }
-        return HistoryApi(settings, d1, client)
+        return HistoryApi(settings, client = client)
     }
 
     @Test
-    fun `a failed D1 fallback is not an empty history page`() = runTest {
+    fun `an unreachable Engine returns no remote history page`() = runTest {
         val api = api(url = "")
-        val failure = IOException("D1 unavailable")
-        whenever(d1.chatTurns("A", 100, 60)).doSuspendableAnswer { throw failure }
-        assertOriginalFailure(failure, runCatching { api.turns("A", 100, 60) }.exceptionOrNull())
+        assertEquals(emptyList<TurnRow>(), api.turns("A", 100, 60))
     }
 
     @Test
@@ -62,20 +57,17 @@ class HistoryReadFailureTest {
         val cancelled = CancellationException("left the chat")
         whenever(call.execute()).thenThrow(cancelled)
         assertOriginalFailure(cancelled, runCatching { api.turns("A", 100, 60) }.exceptionOrNull())
-        verify(d1, never()).chatTurns(any(), any(), any())
     }
 
     @Test
-    fun `an unsuccessful response with an empty turns field still falls back`() = runTest {
+    fun `an unsuccessful Engine response is not treated as a successful empty page`() = runTest {
         val api = api(code = 503, body = "{\"turns\":[]}")
-        whenever(d1.chatTurns("A", 100, 60)).thenReturn(listOf(JSONObject("{\"seq\":99,\"text\":\"older\"}")))
-        assertEquals(listOf(99L), api.turns("A", 100, 60).map { it.seq })
+        assertEquals(emptyList<TurnRow>(), api.turns("A", 100, 60))
     }
 
     @Test
     fun `a successful empty page is authoritative`() = runTest {
         val api = api(body = "{\"turns\":[]}")
         assertEquals(emptyList<TurnRow>(), api.turns("A", 100, 60))
-        verify(d1, never()).chatTurns(any(), any(), any())
     }
 }

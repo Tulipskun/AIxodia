@@ -26,7 +26,7 @@ class RunSocketAuthTest {
     /** A socket dialing [daemon]; [remembered] is the run id its cursor holds for chat "s". */
     private fun socket(daemon: FakeDaemon, remembered: String? = null): RunSocket = runBlocking {
         val settings: SettingsStore = mock()
-        whenever(settings.current()).thenReturn(ConnConfig("", daemon.base, "A", "", "", "s"))
+        whenever(settings.current()).thenReturn(ConnConfig("", daemon.base, "", "", "", "s", sessionToken = "A"))
         val context: Context = mock()
         val preferences: SharedPreferences = mock()
         val editor: SharedPreferences.Editor = mock()

@@ -15,15 +15,15 @@ private const val TAG = "DaemonDiscovery"
 /**
  * What discovery decided to do about the address it just read.
  *
- * The Named Tunnel hostname is stable across engine restarts. Discovery reads
- * its configured endpoint from KV; the live socket, not a heartbeat, determines
- * whether the engine is currently reachable.
+ * The Named Tunnel hostname is stable across engine restarts. The app checks
+ * the Engine health endpoint directly; the live socket, not a heartbeat,
+ * determines whether the engine is currently reachable.
  */
 sealed interface Discovery {
-    /** The row says nothing usable. Keep whatever address we have. */
+    /** The Engine has not announced a different usable address. */
     data object Wait : Discovery
 
-    /** The row names the address already in use. Nothing to write. */
+    /** The Engine announced the address already in use. Nothing to write. */
     data object Keep : Discovery
 
     /** A different configured daemon endpoint was found. Use its URL. */
@@ -33,9 +33,8 @@ sealed interface Discovery {
 /**
  * Keeps the daemon address pointing at whatever kernel is currently serving.
  *
- * The daemon keeps a stable Named Tunnel URL in Workers KV. Discovery polls
- * that value so cold app starts work even when the engine's one-time push was
- * sent before the phone connected; live daemon frames still update it promptly.
+ * The app starts with the stable Named Tunnel URL. Discovery checks the Engine
+ * health endpoint and also adopts an updated URL announced on the live socket.
  *
  * Deliberately not a background service: it runs for as long as the app does,
  * which is the only time a phone can be talked to anyway.
@@ -52,10 +51,9 @@ class DaemonDiscovery(
     val state: StateFlow<DiscoveryState> = _state
 
     /**
-     * The engine instance whose address was last read. A different started
+     * The engine instance whose start time was last seen. A different started
      * time means the daemon was replaced: every terminal stream the phone had
-     * died with the old process, even though the address did not change and
-     * discovery may not have noticed the absence.
+     * died with the old process, even though the address did not change.
      */
     private var lastStartedAt = 0L
 
@@ -78,7 +76,7 @@ class DaemonDiscovery(
                 try {
                     handleNode(history.node())
                 } catch (e: Exception) {
-                    Log.w(TAG, "Workers KV discovery failed: ${e.message}")
+                    Log.w(TAG, "Engine health check failed: ${e.message}")
                     report(DiscoveryPhase.UNREACHABLE, error = e.message?.take(120).orEmpty())
                 }
                 delay(30_000)
@@ -106,7 +104,7 @@ class DaemonDiscovery(
             report(DiscoveryPhase.UNREACHABLE, error = e.message?.take(120).orEmpty())
             return
         }
-        if (current.token.isBlank()) {
+        if (current.sessionToken.isBlank()) {
             report(DiscoveryPhase.NO_TOKEN)
             return
         }
@@ -141,7 +139,7 @@ class DaemonDiscovery(
     /**
      * Records what the row said and publishes it through the socket's answer.
      * The row is only remembered so a later socket transition can be reported
-     * without reading Workers KV again.
+     * without another health request.
      */
     private fun report(
         phase: DiscoveryPhase,
@@ -165,7 +163,7 @@ class DaemonDiscovery(
         )
     }
 
-    /** The last thing Workers KV said, kept for the socket's side of the label. */
+    /** The last Engine health result, kept for the socket's side of the label. */
     private data class Row(
         val phase: DiscoveryPhase,
         val tunnelUrl: String,
@@ -205,23 +203,21 @@ class DaemonDiscovery(
 }
 
 enum class DiscoveryPhase {
-    /** No token yet, so the row cannot be read. */
+    /** No GitHub session yet. */
     NO_TOKEN,
 
-    /** No endpoint is configured in KV. The stored address is left as it is. */
+    /** Engine is not reachable at the configured address. */
     IDLE,
 
     /**
-     * Workers KV names a live engine at this address and the phone is not
-     * talking to it: the address is right, the connection is not. The engine is
-     * up — someone else is using it — and this device cannot reach it.
+     * The Engine announced its URL, but the transport is not connected.
      */
     ANNOUNCED,
 
-    /** The row names this address *and* the transport is on it. */
+    /** The Engine is reachable and the transport is connected. */
     CONNECTED,
 
-    /** The Workers KV namespace could not be read. */
+    /** The Engine health endpoint could not be reached. */
     UNREACHABLE,
 }
 

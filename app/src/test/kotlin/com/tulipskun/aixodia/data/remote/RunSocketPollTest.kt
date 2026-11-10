@@ -93,7 +93,7 @@ class RunSocketPollTest {
             val context: Context = mock()
             val preferences: SharedPreferences = mock()
             val editor: SharedPreferences.Editor = mock()
-            whenever(settings.current()).thenReturn(ConnConfig("", base, "tok", "", "", "P"))
+            whenever(settings.current()).thenReturn(ConnConfig("", base, "", "", "", "P", sessionToken = "tok"))
             whenever(context.applicationContext).thenReturn(context)
             whenever(context.getSharedPreferences(any<String>(), eq(Context.MODE_PRIVATE))).thenReturn(preferences)
             whenever(preferences.edit()).thenReturn(editor)

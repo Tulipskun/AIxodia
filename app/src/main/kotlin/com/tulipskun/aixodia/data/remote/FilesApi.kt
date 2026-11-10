@@ -51,12 +51,12 @@ class FilesApi(
         val config = settings.current()
         val base = config.daemonUrl.trim().trimEnd('/')
         if (base.isBlank()) throw IllegalStateException("Daemon URL is not configured")
-        if (config.token.isBlank()) throw IllegalStateException("Cloudflare API token is not configured")
+        if (config.sessionToken.isBlank()) throw IllegalStateException("Sign in with GitHub first")
         return Request.Builder()
             .url(base + path)
             .header(
                 "Authorization",
-                "Bearer " + clientToken.get(config.githubToken.ifBlank { config.token }, base),
+                "Bearer " + clientToken.get(config.sessionToken, base),
             )
     }
 

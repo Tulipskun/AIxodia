@@ -177,22 +177,15 @@ fun ChatScreen(
     discovery: DaemonDiscovery? = null,
     clientToken: ClientToken = ClientToken.shared,
 ) {
-    val token by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
+    val sessionToken by settings.sessionTokenFlow.collectAsStateWithLifecycle(initialValue = "")
     val discoveryState by if (discovery != null) discovery.state.collectAsStateWithLifecycle(initialValue = com.tulipskun.aixodia.data.remote.DiscoveryState()) else remember { mutableStateOf(com.tulipskun.aixodia.data.remote.DiscoveryState()) }
 
-    // The token alone is enough to be configured: the daemon address now arrives
-    // by discovery, so demanding it here would lock a fresh install on the setup
-    // screen waiting for a value the app is about to fetch for itself. History
-    // reads D1 directly and works with no address at all; only the live socket
-    // waits, and it waits quietly.
-    // Resolve the stored token before deciding the first screen. Reading it as
-    // "empty" for one frame used to flash SetupNeeded even on a configured
-    // device and then jump into the chat, which looks like a crash.
+    // Resolve the stored Engine session before choosing the first screen.
     val configuredScope = rememberCoroutineScope()
     var hasResolvedToken by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         configuredScope.launch {
-            runCatching { settings.tokenFlow.first() }.getOrNull()?.isNotBlank()
+            runCatching { settings.sessionTokenFlow.first() }.getOrNull()?.isNotBlank()
             hasResolvedToken = true
         }
     }
@@ -200,7 +193,7 @@ fun ChatScreen(
         Box(Modifier.fillMaxSize()) {}
         return
     }
-    val configured = token.isNotBlank()
+    val configured = sessionToken.isNotBlank()
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     // Saveable: a rotation in the terminal or in settings used to drop the
     // reader back into the thread, losing the tab they were on.
@@ -280,8 +273,7 @@ fun ChatScreen(
             return
         }
         SetupNeeded(
-            onSubmit = { value -> configuredScope.launch { settings.saveD1(value) } },
-            onOpenSettings = { showSettings = true },
+            onSignedIn = { value, expiresAt -> configuredScope.launch { settings.saveSessionToken(value, expiresAt) } },
         )
         return
     }
