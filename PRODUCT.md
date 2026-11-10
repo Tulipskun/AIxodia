@@ -61,7 +61,7 @@ The second distinguishing mechanism is the credential model: one Cloudflare API 
 
 ## Evidence on Hand
 
-- `README.md` (mechanisms, authentication, reconnecting, releasing), `MAIN.md` (decision log with per-defect operator reports in Thai), `db/README.md` (D1 schema).
+- `README.md` (mechanisms, authentication, reconnecting, releasing), the private `Tulipskun/Agents` repository (cross-agent handoff and coordination state), `db/README.md` (D1 schema).
 - Working implementation: 44 Kotlin files under `app/src/main/kotlin`, including the native terminal, run socket, Room cache, D1 fallback and settings screens; 25 unit and snapshot test files under `app/src/test`.
 - Rendered evidence: Paparazzi snapshot tests (`ui/snapshots/ScreenSnapshots.kt`, `term/TerminalViewSnapshots.kt`) with committed goldens; no device screenshots.
 - Absent, and not to be fabricated: testimonials, customers, benchmarks, pricing, store-listing copy, user counts, accessibility audit results. This is a private single-operator tool.
