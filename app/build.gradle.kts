@@ -22,12 +22,14 @@ android {
         versionCode = (findProperty("aixodiaVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (findProperty("aixodiaVersionName") as String?) ?: "0.1.0"
         // The GitHub OAuth App client id that enables Device Flow sign-in. It is
-        // not a secret (device-flow apps are public clients); set it with
-        // -PGithubClientId=… locally or the GithubClientId Gradle property in CI.
+        // not a secret (device-flow apps are public clients; it ships in every
+        // authorize URL). Default is the AIxodia Dashboard app
+        // (Ov23lieKSrKCRs5YKwdO, device flow enabled 2026-11-10); override with
+        // -PGithubClientId=… for a different app.
         buildConfigField(
             "String",
             "GITHUB_CLIENT_ID",
-            "\"${findProperty("GithubClientId") ?: ""}\"",
+            "\"${findProperty("GithubClientId") ?: "Ov23lieKSrKCRs5YKwdO"}\"",
         )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

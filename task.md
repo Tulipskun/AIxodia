@@ -111,3 +111,11 @@ git add -A && git commit -m "task: <step>" && git push origin main
 - สรุป: ไม่มี uncommitted work, ไม่มี unpushed commit; ทุก change ถูก push ครบแล้ว
 - **ไม่มีส่วนใด push ไม่ได้** — repo นี้ sync กับ origin/main เรียบร้อย
 
+
+## GitHub-only sign-in session (operator: client ล็อกอินผ่าน gh ไม่เก็บ CF_TOKEN)
+- วันที่: 2026-11-10
+- Engine: v1.177 deployed live (CI/release แก้ toolchain 1.99.1+rustfmt แล้ว); `POST /v1/auth/token` รับ `github_token` ยืนยันด้วย gh token จริง; KV `AIXODIA_CONFIG/client/allowed_users=Tulipskun`
+- OAuth App: `Ov23lieKSrKCRs5YKwdO` (AIxodia Dashboard) — เปิด Device Flow ผ่าน headless chromium บน GitHub settings แล้ว (ยืนยันด้วย device-code request HTTP 200)
+- Android commits: GitHubDeviceFlow state machine + tests; ClientToken ส่ง github_token; SettingsStore เก็บ github_token (เข้ารหัส); transports ใช้ githubToken ก่อน legacy token; หน้า Sign in with GitHub ใน Settings→Connection; client_id default = Ov23lieKSrKCRs5YKwdO (BuildConfig.GITHUB_CLIENT_ID, override ด้วย -PGithubClientId)
+- ทดสอบ: testDebugUnitTest ผ่านทั้งชุด, Release APK CI ผ่าน
+- ค้าง: ผู้ใช้ต้อง sign in ครั้งแรกบนหน้าจอจริง; dashboard deploy ยังไม่มี workflow (production ยังเป็น build เก่า); legacy CF_TOKEN paths ใน D1Api ยังอยู่เพื่อ install เก่า
