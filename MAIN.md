@@ -3,7 +3,7 @@ GOAL:
 
 PLAN:
 [COMPLETED] Operator: both clients direct; engine issues short-lived token instead of exposing CF_TOKEN (see task.md).
-[IN_PROCESS] Direct engine path shipped in engine + dashboard; Android code still on CF_TOKEN (docs updated); commit + push after EVERY change.
+[IN_PROCESS] Remaining: Android code migration to short-lived token, device/MCP gateway, deploy env; commit + push after EVERY change.
 
 ARCHIVE:
 v1.175 0237ea3 connection-state/reconnect fixes shipped via #24-#26 (auth-failed state, discovery gating, backoff wake, ±20% jitter).
