@@ -31,6 +31,50 @@ class ClientToken(
     suspend fun exchange(githubToken: String, daemonUrl: String): EngineSession =
         requestSession(daemonUrl, "/v1/auth/token", "github_token", githubToken)
 
+    /** Exchange the short-lived GitHub authorization code through the Engine.
+     * The GitHub OAuth client secret never enters the Android application. */
+    suspend fun exchangeAuthorizationCode(
+        code: String,
+        codeVerifier: String,
+        redirectUri: String,
+        clientId: String,
+        daemonUrl: String,
+    ): EngineSession = withContext(Dispatchers.IO) {
+        val base = daemonUrl.trim().trimEnd('/')
+        require(base.startsWith("https://") || base.startsWith("http://")) {
+            "Engine address is invalid"
+        }
+        val body = JSONObject()
+            .put("code", code)
+            .put("code_verifier", codeVerifier)
+            .put("redirect_uri", redirectUri)
+            .put("client_id", clientId)
+            .toString()
+        val request = Request.Builder()
+            .url("$base/v1/auth/github/exchange")
+            .header("Accept", "application/json")
+            .post(body.toRequestBody(JSON))
+            .build()
+        client.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            val json = runCatching { JSONObject(raw) }.getOrNull()
+            if (!response.isSuccessful) {
+                val message = json?.optString("error")?.takeIf { it.isNotBlank() }
+                    ?: "Engine authentication failed (HTTP ${response.code})"
+                throw IllegalStateException(message)
+            }
+            val token = json?.optString("token").orEmpty()
+            val expiresAt = json?.optLong("expires_at") ?: 0L
+            val nextRefresh = json?.optString("refresh_token").orEmpty()
+            val refreshExpiresAt = json?.optLong("refresh_expires_at") ?: 0L
+            val now = System.currentTimeMillis() / 1000
+            if (token.isBlank() || expiresAt <= now || nextRefresh.isBlank() || refreshExpiresAt <= now) {
+                throw IllegalStateException("Engine returned incomplete or expired session credentials")
+            }
+            EngineSession(token, expiresAt, nextRefresh, refreshExpiresAt, json?.optString("user").orEmpty())
+        }
+    }
+
     suspend fun refresh(refreshToken: String, daemonUrl: String): EngineSession =
         requestSession(daemonUrl, "/v1/auth/refresh", "refresh_token", refreshToken)
 
