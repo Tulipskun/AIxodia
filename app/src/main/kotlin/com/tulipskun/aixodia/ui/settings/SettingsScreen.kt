@@ -83,7 +83,6 @@ import com.tulipskun.aixodia.data.model.ProviderView
 import com.tulipskun.aixodia.data.remote.ChatTransport
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
-import com.tulipskun.aixodia.data.remote.DeviceFlowException
 import com.tulipskun.aixodia.data.remote.DiscoveryPhase
 import com.tulipskun.aixodia.data.remote.DiscoveryState
 import com.tulipskun.aixodia.data.remote.HistoryApi
