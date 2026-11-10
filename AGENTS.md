@@ -17,4 +17,4 @@ This file contains only project-specific rules. The central repository governs s
 - Explore repository structure with `find .` or a targeted path; never use `find /`.
 - Prefer targeted code reads using the central code map and checkpoint locations. Read only the relevant regions; expand the search only when coordinates are stale or evidence requires it.
 - Once an exact function or symbol is identified, use it for subsequent searches and references.
-- Keep all project task plans, task-specific handoffs, state, code maps, and checkpoints in `Tulipskun/Agents/projects/AIxodia/`. Do not recreate local coordination files; this repository retains only this `AGENTS.md` and genuinely project-specific technical constraints.
+- Keep all project documentation and coordination records—including product specification, task plans, state, handoffs, code maps, and checkpoints—in `Tulipskun/Agents/projects/AIxodia/`. Do not recreate local copies; this repository retains only this `AGENTS.md` and genuinely project-specific technical constraints.
