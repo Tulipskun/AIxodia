@@ -1,6 +1,7 @@
 package com.tulipskun.aixodia.data.remote
 
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,7 +18,7 @@ class GitHubDeviceFlowTest {
     /** Scripted transport: a queue of (status, body) answers per URL. */
     private class FakePost {
         val calls = mutableListOf<Pair<String, String>>()
-        val answers = ArrayDeque<Pair<String, String>>()
+        val answers = ArrayDeque<Pair<Int, String>>()
         suspend fun post(url: String, body: String): Pair<Int, String> {
             calls.add(url to body)
             return answers.removeFirst()
