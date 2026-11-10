@@ -240,14 +240,14 @@ fun SettingsScreen(
             }
 
             if (page == SettingsPage.Connection) {
-                val sessionToken by settings.sessionTokenFlow.collectAsStateWithLifecycle(initialValue = "")
+                val isSignedIn by settings.isSignedInFlow.collectAsStateWithLifecycle(initialValue = false)
                 SectionCard("GitHub account", "") {
-                    if (sessionToken.isNotBlank()) {
+                    if (isSignedIn) {
                         Text("Signed in with GitHub", style = MaterialTheme.typography.bodyMedium)
                         OutlinedButton(
                             onClick = {
                                 scope.launch {
-                                    settings.saveSessionToken("", 0L)
+                                    settings.saveSessionCredentials("", 0L, "", 0L)
                                     com.tulipskun.aixodia.data.remote.ClientToken.shared.reset()
                                     onBack()
                                 }

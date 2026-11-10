@@ -177,7 +177,7 @@ fun ChatScreen(
     discovery: DaemonDiscovery? = null,
     clientToken: ClientToken = ClientToken.shared,
 ) {
-    val sessionToken by settings.sessionTokenFlow.collectAsStateWithLifecycle(initialValue = "")
+    val isSignedIn by settings.isSignedInFlow.collectAsStateWithLifecycle(initialValue = false)
     val discoveryState by if (discovery != null) discovery.state.collectAsStateWithLifecycle(initialValue = com.tulipskun.aixodia.data.remote.DiscoveryState()) else remember { mutableStateOf(com.tulipskun.aixodia.data.remote.DiscoveryState()) }
 
     // Resolve the stored Engine session before choosing the first screen.
@@ -185,7 +185,7 @@ fun ChatScreen(
     var hasResolvedToken by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         configuredScope.launch {
-            runCatching { settings.sessionTokenFlow.first() }.getOrNull()?.isNotBlank()
+            runCatching { settings.isSignedInFlow.first() }.getOrNull()
             hasResolvedToken = true
         }
     }
@@ -193,7 +193,7 @@ fun ChatScreen(
         Box(Modifier.fillMaxSize()) {}
         return
     }
-    val configured = sessionToken.isNotBlank()
+    val configured = isSignedIn
     val sessId by settings.sessionFlow.collectAsStateWithLifecycle(initialValue = "")
     // Saveable: a rotation in the terminal or in settings used to drop the
     // reader back into the thread, losing the tab they were on.
@@ -273,7 +273,16 @@ fun ChatScreen(
             return
         }
         SetupNeeded(
-            onSignedIn = { value, expiresAt -> configuredScope.launch { settings.saveSessionToken(value, expiresAt) } },
+            onSignedIn = { session ->
+                configuredScope.launch {
+                    settings.saveSessionCredentials(
+                        session.token,
+                        session.expiresAt,
+                        session.refreshToken,
+                        session.refreshExpiresAt,
+                    )
+                }
+            },
         )
         return
     }

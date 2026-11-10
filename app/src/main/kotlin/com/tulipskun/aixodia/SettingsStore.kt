@@ -15,8 +15,8 @@ const val DEFAULT_DAEMON_URL = "https://aixodia.dpdns.org"
 /**
  * The Engine URL defaults to the stable Named Tunnel hostname. GitHub Device
  * Flow provides the account credential; its OAuth token is sealed with Android
- * Keystore and exchanged for a short-lived Engine session token. No Cloudflare
- * API token, account id, or database id is needed by the Android app.
+ * Keystore. The short-lived access token is renewed silently with a separate
+ * long-lived Engine refresh credential. No Cloudflare token is stored here.
  */
 class SettingsStore(private val ctx: Context) {
     private val endpoint = stringPreferencesKey("endpoint")
@@ -24,6 +24,8 @@ class SettingsStore(private val ctx: Context) {
     // Opaque Engine-issued session token, protected by Android Keystore.
     private val sessionToken = stringPreferencesKey("session_token")
     private val sessionExpiresAt = stringPreferencesKey("session_expires_at")
+    private val refreshToken = stringPreferencesKey("refresh_token")
+    private val refreshExpiresAt = stringPreferencesKey("refresh_expires_at")
     private val legacyGithubToken = stringPreferencesKey("github_token")
     private val sessionId = stringPreferencesKey("session_id")
     private val terminalSessionId = stringPreferencesKey("terminal_session_id")
@@ -98,22 +100,36 @@ class SettingsStore(private val ctx: Context) {
         ctx.ds.data.map { it[daemonBootAt]?.toLongOrNull() ?: 0L }
 
     suspend fun current(): ConnConfig {
-        // One snapshot, not seven independent first() reads: saveDaemon() writes
-        // endpoint and daemonUrl in one edit, and reading them across edits
-        // could pair a new address with the old socket or session.
         val prefs = ctx.ds.data.first()
-        val expiresAt = prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L
-        val validSession = expiresAt > System.currentTimeMillis() / 1000
-        val clearExpiredSession = !validSession && !prefs[sessionToken].isNullOrBlank()
+        val now = System.currentTimeMillis() / 1000
+        val accessExpires = prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L
+        val refreshExpires = prefs[refreshExpiresAt]?.toLongOrNull() ?: 0L
+        val rawAccess = prefs[sessionToken].orEmpty()
+        val rawRefresh = prefs[refreshToken].orEmpty()
+        val accessInDate = accessExpires > now
+        val refreshInDate = refreshExpires > now
+        val accessToken = if (accessInDate) TokenCipher.open(rawAccess) else ""
+        val storedRefresh = if (refreshInDate) TokenCipher.open(rawRefresh) else ""
+        val unreadableAccess = accessInDate && rawAccess.isNotBlank() && accessToken.isBlank()
+        val unreadableRefresh = refreshInDate && rawRefresh.isNotBlank() && storedRefresh.isBlank()
+        val clearExpiredRefresh = !refreshInDate && rawRefresh.isNotBlank()
         val clearLegacyGithubCredential = !prefs[legacyGithubToken].isNullOrBlank()
-        if (clearExpiredSession || clearLegacyGithubCredential) {
+        if (unreadableAccess || unreadableRefresh || clearExpiredRefresh || clearLegacyGithubCredential) {
             ctx.ds.edit {
-                if (clearExpiredSession) {
+                if (unreadableAccess || unreadableRefresh) {
                     it.remove(sessionToken)
                     it.remove(sessionExpiresAt)
+                    it.remove(refreshToken)
+                    it.remove(refreshExpiresAt)
+                } else if (clearExpiredRefresh) {
+                    it.remove(refreshToken)
+                    it.remove(refreshExpiresAt)
+                    // Keep a still-valid access token until its own expiry.
+                    if (accessExpires <= now) {
+                        it.remove(sessionToken)
+                        it.remove(sessionExpiresAt)
+                    }
                 }
-                // Remove the credential saved by older builds; it is no longer
-                // needed after the one-time exchange and is never read again.
                 it.remove(legacyGithubToken)
             }
         }
@@ -121,22 +137,36 @@ class SettingsStore(private val ctx: Context) {
             endpoint = prefs[endpoint]?.takeIf(String::isNotBlank) ?: DEFAULT_DAEMON_URL,
             daemonUrl = prefs[daemonUrl]?.takeIf(String::isNotBlank) ?: DEFAULT_DAEMON_URL,
             token = "",
-            sessionToken = if (validSession) TokenCipher.open(prefs[sessionToken].orEmpty()) else "",
+            sessionToken = accessToken,
             sessionId = prefs[sessionId].orEmpty(),
+            sessionExpiresAt = accessExpires,
+            refreshToken = storedRefresh,
+            refreshExpiresAt = if (refreshInDate) refreshExpires else 0L,
         )
     }
 
-    /** Stores only the opaque Engine session; the temporary GitHub token is discarded. */
-    suspend fun saveSessionToken(value: String, expiresAt: Long) {
+    /** Persist Engine credentials only; both secrets are encrypted by Android Keystore. */
+    suspend fun saveSessionCredentials(
+        accessToken: String,
+        accessExpiresAt: Long,
+        refreshCredential: String,
+        refreshCredentialExpiresAt: Long,
+    ) {
         ctx.ds.edit { prefs ->
             prefs.remove(legacyGithubToken)
-            val clean = value.trim()
-            if (clean.isBlank() || expiresAt <= System.currentTimeMillis() / 1000) {
+            if (accessToken.isBlank() || accessExpiresAt <= System.currentTimeMillis() / 1000) {
                 prefs.remove(sessionToken)
                 prefs.remove(sessionExpiresAt)
             } else {
-                prefs[sessionToken] = TokenCipher.seal(clean)
-                prefs[sessionExpiresAt] = expiresAt.toString()
+                prefs[sessionToken] = TokenCipher.seal(accessToken.trim())
+                prefs[sessionExpiresAt] = accessExpiresAt.toString()
+            }
+            if (refreshCredential.isBlank() || refreshCredentialExpiresAt <= System.currentTimeMillis() / 1000) {
+                prefs.remove(refreshToken)
+                prefs.remove(refreshExpiresAt)
+            } else {
+                prefs[refreshToken] = TokenCipher.seal(refreshCredential.trim())
+                prefs[refreshExpiresAt] = refreshCredentialExpiresAt.toString()
             }
             prefs.remove(stringPreferencesKey("token"))
             prefs.remove(stringPreferencesKey("account_id"))
@@ -144,10 +174,17 @@ class SettingsStore(private val ctx: Context) {
         }
     }
 
-    val sessionTokenFlow: Flow<String> = ctx.ds.data.map { prefs ->
-        if ((prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L) > System.currentTimeMillis() / 1000)
-            TokenCipher.open(prefs[sessionToken].orEmpty())
-        else ""
+    /** Compatibility wrapper for sign-out and older callers. */
+    suspend fun saveSessionToken(value: String, expiresAt: Long) =
+        saveSessionCredentials(value, expiresAt, "", 0L)
+
+    val isSignedInFlow: Flow<Boolean> = ctx.ds.data.map { prefs ->
+        val now = System.currentTimeMillis() / 1000
+        val accessValid = (prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L) > now
+            && TokenCipher.open(prefs[sessionToken].orEmpty()).isNotBlank()
+        val refreshValid = (prefs[refreshExpiresAt]?.toLongOrNull() ?: 0L) > now
+            && TokenCipher.open(prefs[refreshToken].orEmpty()).isNotBlank()
+        accessValid || refreshValid
     }
 
     suspend fun saveProvidersCache(daemonUrl: String, json: String) {
@@ -280,8 +317,8 @@ class SettingsStore(private val ctx: Context) {
         }
     }
 
-    /** True while an Engine-issued session token is valid. */
-    suspend fun isConfigured(): Boolean = current().sessionToken.isNotBlank()
+    /** True while either the access token or its refresh credential is valid. */
+    suspend fun isConfigured(): Boolean = isSignedInFlow.first()
 
 
 }
@@ -317,4 +354,7 @@ data class ConnConfig(
     val sessionId: String,
     /** Opaque Engine-issued session token; blank until the user signs in. */
     val sessionToken: String = "",
+    val sessionExpiresAt: Long = 0L,
+    val refreshToken: String = "",
+    val refreshExpiresAt: Long = 0L,
 )

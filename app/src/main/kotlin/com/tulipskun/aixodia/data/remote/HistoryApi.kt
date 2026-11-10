@@ -622,7 +622,7 @@ class HistoryApi(
     private suspend fun engineConfig(): ConnConfig {
         val raw = settings.current()
         return raw.copy(
-            token = clientToken.get(raw.sessionToken, raw.daemonUrl),
+            token = clientToken.get(raw, settings),
         )
     }
 

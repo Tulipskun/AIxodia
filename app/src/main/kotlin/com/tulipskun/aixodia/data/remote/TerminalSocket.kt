@@ -886,7 +886,7 @@ class TerminalSocket(
                 delay(RETRY_MS)
                 continue
             }
-            if (c.token.isBlank()) {
+            if (c.sessionToken.isBlank() && c.refreshToken.isBlank()) {
                 // Nothing to connect with: the sign-in gate has not been passed.
                 link.updateError(com.tulipskun.aixodia.R.string.terminal_no_address)
                 link.setState(TermState.CLOSED)
@@ -910,7 +910,7 @@ class TerminalSocket(
             val ticket = try {
                 // The ticket request authenticates with the Engine session, like
                 // every other transport.
-                val auth = clientToken.get(c.sessionToken, c.daemonUrl)
+                val auth = clientToken.get(c, settings)
                 withTimeoutOrNull(8_000) { history.terminalTicket(auth) }
             } catch (t: Throwable) {
                 Log.w(TAG, "terminal ticket failed", t)
@@ -1141,7 +1141,7 @@ class TerminalSocket(
         } catch (t: Throwable) {
             return false
         }
-        if (current.sessionToken.isBlank()) return false
+        if (current.sessionToken.isBlank() && current.refreshToken.isBlank()) return false
         val node = try {
             withTimeoutOrNull(5_000) { history.node() }
         } catch (t: Throwable) {

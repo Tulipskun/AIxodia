@@ -569,7 +569,7 @@ class RunSocket(
             return false
         }
         // No credential, so no row to read and no daemon that could be reached.
-        if (current.sessionToken.isBlank()) return false
+        if (current.sessionToken.isBlank() && current.refreshToken.isBlank()) return false
         val node = try {
             withTimeoutOrNull(5_000) { history.node() }
         } catch (t: Throwable) {
@@ -712,10 +712,10 @@ class RunSocket(
     private suspend fun config(): Config? {
         val current = settings.current()
         val base = current.daemonUrl.trim().trimEnd('/')
-        if (base.isEmpty() || current.sessionToken.isBlank()) return null
+        if (base.isEmpty() || (current.sessionToken.isBlank() && current.refreshToken.isBlank())) return null
         if (!base.startsWith("http://") && !base.startsWith("https://")) return null
         // Every run request authenticates with the Engine session saved at sign-in.
-        return Config(base, clientToken.get(current.sessionToken, base))
+        return Config(base, clientToken.get(current, settings))
     }
 
     private data class Config(val base: String, val token: String)

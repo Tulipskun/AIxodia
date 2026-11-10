@@ -141,7 +141,7 @@ fun ConnDot(c: ConnState) {
  */
 @Composable
 fun SetupNeeded(
-    onSignedIn: (String, Long) -> Unit,
+    onSignedIn: (com.tulipskun.aixodia.data.remote.EngineSession) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -192,7 +192,7 @@ fun SetupNeeded(
                                     token,
                                     com.tulipskun.aixodia.DEFAULT_DAEMON_URL,
                                 )
-                                onSignedIn(engineSession.token, engineSession.expiresAt)
+                                onSignedIn(engineSession)
                             } catch (t: Throwable) {
                                 if (t !is kotlinx.coroutines.CancellationException) {
                                     error = (t as? com.tulipskun.aixodia.data.remote.DeviceFlowException)?.message
