@@ -112,6 +112,7 @@ data class TabEvent(val sessionId: String, val event: TermEvent)
 class TerminalSocket(
     private val settings: SettingsStore,
     private val history: HistoryApi,
+    private val clientToken: ClientToken = ClientToken.passThrough,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
@@ -907,7 +908,11 @@ class TerminalSocket(
             val (cols, rows) = pendingSize ?: (80 to 24)
             link.updateDetail("opening terminal stream")
             val ticket = try {
-                withTimeoutOrNull(8_000) { history.terminalTicket() }
+                // The ticket request authenticates with the engine's short-lived
+                // token, resolved here so TerminalSocket owns its own credential
+                // just like every other transport.
+                val auth = clientToken.get(c.token, c.daemonUrl)
+                withTimeoutOrNull(8_000) { history.terminalTicket(auth) }
             } catch (t: Throwable) {
                 Log.w(TAG, "terminal ticket failed", t)
                 null

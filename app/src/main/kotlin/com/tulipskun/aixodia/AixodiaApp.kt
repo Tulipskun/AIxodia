@@ -3,6 +3,7 @@ package com.tulipskun.aixodia
 import android.app.Application
 import com.tulipskun.aixodia.data.local.AppDatabase
 import com.tulipskun.aixodia.data.remote.ChatTransport
+import com.tulipskun.aixodia.data.remote.ClientToken
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
 import com.tulipskun.aixodia.data.remote.RunSocket
@@ -31,12 +32,15 @@ class AppContainer(app: Application) {
 
     val db: AppDatabase = AppDatabase.get(app)
     val settings = SettingsStore(app)
-    val historyApi = HistoryApi(settings)
+    // One app-wide provider: every engine call shares the same short-lived token,
+    // exchanged from CF_TOKEN once and refreshed just before it expires.
+    val clientToken: ClientToken = ClientToken.shared
+    val historyApi = HistoryApi(settings, clientToken = clientToken)
     // No shared socket: chat is POST + SSE and the terminal is its own
     // WebSocket. Discovery only has to nudge the run stream when the engine
     // address changes — and the run stream reads the announced address itself
     // when a dial fails, since the announcements travel on that dead socket.
-    val chat: ChatTransport = RunSocket(settings, historyApi, app)
+    val chat: ChatTransport = RunSocket(settings, historyApi, app, clientToken)
     val repo = ChatRepository(db, historyApi, chat)
     val discovery = DaemonDiscovery(settings, historyApi, chat, scope)
 

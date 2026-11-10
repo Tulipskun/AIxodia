@@ -89,6 +89,7 @@ class RunSocket(
     private val settings: SettingsStore,
     private val history: HistoryApi,
     context: Context,
+    private val clientToken: ClientToken = ClientToken.passThrough,
 ) : ChatTransport {
     private val app = context.applicationContext
     private val cursor: SharedPreferences =
@@ -713,7 +714,9 @@ class RunSocket(
         val base = current.daemonUrl.trim().trimEnd('/')
         if (base.isEmpty() || current.token.isBlank()) return null
         if (!base.startsWith("http://") && !base.startsWith("https://")) return null
-        return Config(base, current.token)
+        // Every run request authenticates with the engine's short-lived token.
+        // CF_TOKEN is only used to obtain it (or as a fallback for old engines).
+        return Config(base, clientToken.get(current.token, base))
     }
 
     private data class Config(val base: String, val token: String)

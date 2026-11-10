@@ -38,6 +38,7 @@ data class RemoteDirectory(
 class FilesApi(
     private val settings: SettingsStore,
     private val resolver: ContentResolver,
+    private val clientToken: ClientToken = ClientToken.passThrough,
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -53,7 +54,7 @@ class FilesApi(
         if (config.token.isBlank()) throw IllegalStateException("Cloudflare API token is not configured")
         return Request.Builder()
             .url(base + path)
-            .header("Authorization", "Bearer " + config.token)
+            .header("Authorization", "Bearer " + clientToken.get(config.token, base))
     }
 
     private fun failure(code: Int, body: String): Nothing {

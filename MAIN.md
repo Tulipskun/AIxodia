@@ -1,9 +1,9 @@
 GOAL:
-[IN_PROCESS] Remove the worker middleman so engine and client talk directly; track every step in task.md (v1.176)
+[COMPLETED] Remove the worker middleman so engine and client talk directly; the Android client now exchanges CF_TOKEN for the engine's short-lived token (v1.176)
 
 PLAN:
 [COMPLETED] Operator: both clients direct; engine issues short-lived token instead of exposing CF_TOKEN (see task.md).
-[IN_PROCESS] Remaining: Android code migration to short-lived token, device/MCP gateway, deploy env; commit + push after EVERY change.
+[COMPLETED] Android code migrated to the engine short-lived token (ClientToken.kt + wiring in RunSocket/TerminalSocket/HistoryApi/FilesApi/FilesScreen); device/MCP gateway and deploy env live in the engine/dashboard repos. Commit + push after EVERY change.
 
 ARCHIVE:
 v1.175 0237ea3 connection-state/reconnect fixes shipped via #24-#26 (auth-failed state, discovery gating, backoff wake, ±20% jitter).
@@ -34,7 +34,7 @@ d84406f backup: one backup, one restore, no version list
 
 NOTE:
 - task.md is the cross-repo handoff tracker: update it and push in the SAME commit as any edit; operator requires zero unpushed work (another AI may take over mid-task).
-- Pending operator decision (see task.md): which "worker" to remove. This app already talks to the engine directly through the Named Tunnel (D-011) — no Cloudflare Worker in its path.
+- This app talks to the engine directly through the Named Tunnel (D-011) — no Cloudflare Worker in its path. The only change for the worker removal was migrating the bearer credential from CF_TOKEN to the engine-issued short-lived token (see task.md).
 - The SFTP file-manager goal from a previous session was left mid-flight in MAIN.md (API client + Files nav); its code state was not verified — check git log/diff before resuming it.
 - Scope rule form: the engine stores `/`-relative paths (absolute ones fail `validate_scope`), `BackupScreen.load` unwraps old-root-prefixed rules to that form, and the browser matches ancestors at any depth. Keep all three in that form or checkboxes desync again.
 - Engine contract facts (verified against aixodia-io/src/backup.rs @ HEAD): `restorable` answers token+bucket only, never whether the bucket holds a manifest — gate a restore offer on `last_backup.ok`; an omitted field on `PUT /api/backup/config` keeps its stored value; a successful restore requires a clean `failed` list before auto-backup unlocks (`mark_restore_complete`).

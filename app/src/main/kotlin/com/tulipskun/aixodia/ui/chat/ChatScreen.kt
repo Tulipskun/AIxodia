@@ -118,6 +118,7 @@ import com.tulipskun.aixodia.data.model.ChatMessage
 import com.tulipskun.aixodia.data.model.ChatSession
 import com.tulipskun.aixodia.data.model.StoredTotals
 import com.tulipskun.aixodia.data.remote.ChatTransport
+import com.tulipskun.aixodia.data.remote.ClientToken
 import com.tulipskun.aixodia.data.remote.ConnState
 import com.tulipskun.aixodia.data.remote.DaemonDiscovery
 import com.tulipskun.aixodia.data.remote.HistoryApi
@@ -174,6 +175,7 @@ fun ChatScreen(
     history: HistoryApi,
     socket: ChatTransport,
     discovery: DaemonDiscovery? = null,
+    clientToken: ClientToken = ClientToken.shared,
 ) {
     val token by settings.tokenFlow.collectAsStateWithLifecycle(initialValue = "")
     val discoveryState by if (discovery != null) discovery.state.collectAsStateWithLifecycle(initialValue = com.tulipskun.aixodia.data.remote.DiscoveryState()) else remember { mutableStateOf(com.tulipskun.aixodia.data.remote.DiscoveryState()) }
@@ -217,7 +219,7 @@ fun ChatScreen(
     // terminal lands on the same tab with the same scrollback instead of
     // redialing or starting a new shell. Only the terminal's own Close action
     // ends the tabs (see TerminalWindow.closeWindow).
-    val terminalSocket = remember(settings, history) { TerminalSocket(settings, history) }
+    val terminalSocket = remember(settings, history, clientToken) { TerminalSocket(settings, history, clientToken) }
     val terminalUi = remember(terminalSocket) { TerminalUiState(terminalSocket) }
     val terminalSessions by terminalSocket.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
     val terminalContext = LocalContext.current
@@ -254,7 +256,7 @@ fun ChatScreen(
     // worth looking at even from an install whose own settings are not set up,
     // and this page only ever asks the daemon what it is doing.
     if (showFiles) {
-        FilesScreen(settings = settings, onBack = { showFiles = false })
+        FilesScreen(settings = settings, clientToken = clientToken, onBack = { showFiles = false })
         return
     }
 

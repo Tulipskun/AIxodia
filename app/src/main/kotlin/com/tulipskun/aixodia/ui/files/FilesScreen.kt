@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tulipskun.aixodia.SettingsStore
+import com.tulipskun.aixodia.data.remote.ClientToken
 import com.tulipskun.aixodia.data.remote.FilesApi
 import com.tulipskun.aixodia.data.remote.RemoteDirectory
 import com.tulipskun.aixodia.data.remote.RemoteFile
@@ -65,9 +66,13 @@ private enum class FileAction { Rename, Permissions, Delete }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FilesScreen(settings: SettingsStore, onBack: () -> Unit) {
+fun FilesScreen(
+    settings: SettingsStore,
+    clientToken: ClientToken = ClientToken.shared,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
-    val api = remember(settings, context) { FilesApi(settings, context.contentResolver) }
+    val api = remember(settings, context) { FilesApi(settings, context.contentResolver, clientToken) }
     val scope = rememberCoroutineScope()
     var path by rememberSaveable { mutableStateOf("/") }
     var pathInput by rememberSaveable { mutableStateOf("/") }

@@ -7,6 +7,7 @@ import org.json.JSONObject
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.tulipskun.aixodia.ConnConfig
 import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.data.runCatchingCancellable
 import com.tulipskun.aixodia.data.model.AgentSettings
@@ -601,6 +602,7 @@ class HistoryApi(
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(150, TimeUnit.SECONDS)
         .build(),
+    private val clientToken: ClientToken = ClientToken.passThrough,
 ) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     // History is Cloudflare D1 read directly; everything in this class that
@@ -616,6 +618,18 @@ class HistoryApi(
     private val settingsAdapter = moshi.adapter(SettingsView::class.java)
 
     /**
+     * A config snapshot whose [ConnConfig.token] is the engine's short-lived
+     * token, resolved once here so every `Bearer ${c.token}` below authenticates
+     * with it. `CF_TOKEN` is used only to obtain that token (or as a fallback for
+     * an engine that has no `/v1/auth/token` route); Cloudflare D1 / KV calls
+     * still use `CF_TOKEN` directly through `D1Api`.
+     */
+    private suspend fun engineConfig(): ConnConfig {
+        val raw = settings.current()
+        return raw.copy(token = clientToken.get(raw.token, raw.daemonUrl))
+    }
+
+    /**
      * Builds an absolute URL, or null when the app has no endpoint configured
      * yet. A fresh install has empty settings by design, and that must look
      * like "not configured", never like a crash: okhttp throws on a relative
@@ -623,7 +637,7 @@ class HistoryApi(
      */
     /** Asks the running daemon to end this session and start the next one. */
     suspend fun triggerPushNow(): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val req = Request.Builder().url("$base/restart")
@@ -640,7 +654,7 @@ class HistoryApi(
 
     /** Recent engine log entries (newest first), for debugging. */
     suspend fun fetchLogs(limit: Int = 200): List<JSONObject> = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/logs?limit=$limit")
@@ -687,7 +701,7 @@ class HistoryApi(
 
     /** The tunnel read of the chat list. Null when it cannot be dialled. */
     private suspend fun daemonSessions(): List<SessionRow>? = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
             val req = Request.Builder().url("$base/v1/sessions")
@@ -730,7 +744,7 @@ class HistoryApi(
      * to move. Blank asks the daemon to generate one.
      */
     suspend fun createSession(id: String, title: String): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext ""
         runCatchingCancellable {
             val body = JSONObject().put("title", title)
@@ -751,7 +765,7 @@ class HistoryApi(
 
     /** Renames a chat on the daemon. */
     suspend fun renameSession(sessionId: String, title: String): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val body = JSONObject().put("title", title).toString()
@@ -766,7 +780,7 @@ class HistoryApi(
 
     /** Deletes a chat with its history, on the daemon. */
     suspend fun deleteSession(sessionId: String): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val req = Request.Builder().url("$base/v1/sessions/$sessionId")
@@ -812,7 +826,7 @@ class HistoryApi(
      */
     private suspend fun daemonTurns(sessionId: String, beforeSeq: Long, limit: Int): List<TurnRow>? =
         withContext(Dispatchers.IO) {
-            val c = settings.current()
+            val c = engineConfig()
             val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
             val query = buildString {
                 if (limit > 0) append("limit=").append(limit)
@@ -866,7 +880,7 @@ class HistoryApi(
      * never has to hardcode a model list or a provider name.
      */
     suspend fun models(): List<ProviderView> = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/models")
@@ -880,7 +894,7 @@ class HistoryApi(
 
     /** Pins the provider and model for one chat; the daemon keeps it for good. */
     suspend fun setSessionModel(sessionId: String, provider: String, model: String): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         val body = JSONObject().put("provider", provider).put("model", model).toString()
         runCatchingCancellable {
@@ -899,7 +913,7 @@ class HistoryApi(
      * means "only rename this chat", never "unpin it".
      */
     suspend fun clearSessionModel(sessionId: String): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         val body = JSONObject().put("clear_model", true).toString()
         runCatchingCancellable {
@@ -922,7 +936,7 @@ class HistoryApi(
         clear: Boolean = false,
         clearKnobs: List<String> = emptyList(),
     ): Boolean = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         val g = JSONObject()
         if (clear) {
@@ -961,7 +975,7 @@ class HistoryApi(
 
     /** Every configured provider with its reachability and last error. */
     suspend fun providers(): List<ProviderStatus> = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext cachedProviders()
         val list = runCatching {
             val req = Request.Builder().url("$base/api/providers")
@@ -992,7 +1006,7 @@ class HistoryApi(
 
     /** Asks the daemon to re-run model discovery and report what is reachable. */
     suspend fun refreshProviders(): List<ProviderStatus> = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/providers/refresh")
@@ -1009,7 +1023,7 @@ class HistoryApi(
 
     /** Tests one provider only, so a dead key does not wait behind five others. */
     suspend fun refreshProvider(providerId: String): ProviderStatus? = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId/refresh")
@@ -1041,7 +1055,7 @@ class HistoryApi(
     suspend fun addProvider(
         id: String, adapter: String, endpoint: String, keys: List<String>,
     ): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         val body = JSONObject()
             .put("id", id)
@@ -1065,7 +1079,7 @@ class HistoryApi(
     suspend fun changeKeys(
         providerId: String, add: List<String> = emptyList(), remove: List<Int> = emptyList(), replace: List<String> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         // Written by a JSON writer, never by string interpolation: a key with a
         // quote, a backslash or a newline must not corrupt the request.
@@ -1087,7 +1101,7 @@ class HistoryApi(
     }
 
     suspend fun removeProvider(providerId: String): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId")
@@ -1107,7 +1121,7 @@ class HistoryApi(
         settingsBody: SettingsView,
         clearMain: List<String> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         val body = JSONObject()
             .put("main", agentBody(settingsBody.main, clearMain))
@@ -1152,7 +1166,7 @@ class HistoryApi(
     }
 
     suspend fun agentSettings(): SettingsView? = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/api/settings")
@@ -1164,13 +1178,15 @@ class HistoryApi(
     }
 
     /** A single-use ticket for the dedicated terminal WebSocket. It keeps the
-     * long-lived API token out of a URL that a proxy or log may keep. */
-    suspend fun terminalTicket(): String? = withContext(Dispatchers.IO) {
-        val c = settings.current()
+     * long-lived API token out of a URL that a proxy or log may keep.
+     * [authToken] is the short-lived token TerminalSocket resolves; when a caller
+     * leaves it null the engine config resolves it internally. */
+    suspend fun terminalTicket(authToken: String? = null): String? = withContext(Dispatchers.IO) {
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals/ticket")
-                .header("Authorization", "Bearer ${c.token}")
+                .header("Authorization", "Bearer ${authToken ?: c.token}")
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
@@ -1183,7 +1199,7 @@ class HistoryApi(
     /** Ends a shell the phone closed, even when another tab is attached. */
     suspend fun closeTerminal(id: String): Boolean = withContext(Dispatchers.IO) {
         if (id.isBlank()) return@withContext false
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals/${URLEncoder.encode(id, "UTF-8")}")
@@ -1203,7 +1219,7 @@ class HistoryApi(
      * ids of shells that are gone.
      */
     suspend fun terminalShells(): TerminalShells = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext TerminalShells.Unreachable
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals")
@@ -1233,7 +1249,7 @@ class HistoryApi(
      * Null when the engine cannot be reached or predates the endpoint.
      */
     suspend fun objectives(sessionId: String): ObjectivesPage? = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
             val req = Request.Builder().url("$base/v1/sessions/$sessionId/objectives")
@@ -1269,7 +1285,7 @@ class HistoryApi(
 
     /** Connectivity check for the Settings screen: session count, or throw. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext 0
         runCatching {
             val req = Request.Builder().url("$base/v1/sessions")
@@ -1304,7 +1320,7 @@ class HistoryApi(
         mime: String,
         open: () -> InputStream?,
     ): com.tulipskun.aixodia.data.model.AttachmentRef? = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val query = "session_id=" + URLEncoder.encode(sessionId, "UTF-8") +
@@ -1342,7 +1358,7 @@ class HistoryApi(
      * at most, and the phone never sees it whole.
      */
     suspend fun backupStatus(): BackupStatus? = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup")
@@ -1362,7 +1378,7 @@ class HistoryApi(
      * A busy engine answers 409 with its own reason, which is what shows here.
      */
     suspend fun backupStart(): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup")
@@ -1383,7 +1399,7 @@ class HistoryApi(
      * already asked the reader, so this always says yes.
      */
     suspend fun backupRestore(): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         val body = JSONObject().put("confirm", true).toString()
         runCatchingCancellable {
@@ -1413,7 +1429,7 @@ class HistoryApi(
         includes: List<String>? = null,
         root: String? = null,
     ): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         val body = JSONObject().apply {
             if (token.isNotBlank()) put("token", token.trim())
@@ -1447,7 +1463,7 @@ class HistoryApi(
         cpuThreshold: Double,
         cooldownSecs: Long,
     ): String = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         val body = JSONObject()
             .put("auto_enabled", enabled)
@@ -1473,7 +1489,7 @@ class HistoryApi(
      * configured but idle and while one is in flight.
      */
     suspend fun backupBrowse(path: String): ScopeRead<BackupBrowse> = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext ScopeRead(error = "Daemon URL not configured")
         val url = "$base/api/backup/browse?path=" + URLEncoder.encode(path, "UTF-8")
         runCatchingCancellable {
@@ -1501,7 +1517,7 @@ class HistoryApi(
         includes: List<String>? = null,
         excludes: List<String>? = null,
     ): ScopeRead<BackupPreview> = withContext(Dispatchers.IO) {
-        val c = settings.current()
+        val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext ScopeRead(error = "Daemon URL not configured")
         val body = JSONObject().apply {
             root?.takeIf { it.isNotBlank() }?.let { put("root", it.trim()) }
