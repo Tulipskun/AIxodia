@@ -1,27 +1,36 @@
 package com.tulipskun.aixodia.data.remote
 
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * The short-lived token the engine mints from CF_TOKEN is the only credential
- * the app sends to the engine now. These cases pin the contract: it exchanges
- * once, reuses the cached value, refreshes before it lapses, and — crucially —
- * falls back to the master token when the engine predates the endpoint, so an
- * old engine keeps working instead of leaving the app stranded.
+ * The short-lived token the engine mints from the GitHub OAuth token is the
+ * only credential the app sends to the engine now. These cases pin the
+ * contract: it exchanges once, reuses the cached value, refreshes before it
+ * lapses, sends the credential as `github_token` (never `master_token`), and
+ * falls back to the raw credential when the engine predates the endpoint, so
+ * an old engine keeps working instead of leaving the app stranded.
  */
 class ClientTokenTest {
     private fun daemon(body: String): FakeDaemon =
         FakeDaemon().also { it.respond("/v1/auth/token", 200, body) }
 
     @Test
-    fun `exchanges the master token for a short-lived token`() {
+    fun `exchanges the GitHub token for a short-lived token`() {
         val d = daemon("""{"token":"SHORT","expires_at":1000000000}""")
         try {
             val ct = ClientToken()
-            assertEquals("SHORT", runBlocking { ct.get("MASTER", d.base) })
+            assertEquals("SHORT", runBlocking { ct.get("GH_TOKEN", d.base) })
             assertEquals(1, d.hits("/v1/auth/token"))
+            val sent = JSONObject(d.lastBody("/v1/auth/token"))
+            assertEquals("GH_TOKEN", sent.getString("github_token"))
+            assertEquals(
+                "the Cloudflare token must never be sent",
+                false,
+                sent.has("master_token"),
+            )
         } finally {
             d.close()
         }
@@ -58,7 +67,7 @@ class ClientTokenTest {
     }
 
     @Test
-    fun `falls back to the master token when the endpoint is absent`() {
+    fun `falls back to the raw credential when the endpoint is absent`() {
         val d = FakeDaemon().apply { respond("/v1/auth/token", 404) }
         try {
             val ct = ClientToken()
@@ -69,7 +78,7 @@ class ClientTokenTest {
     }
 
     @Test
-    fun `falls back to the master token when the exchange is refused`() {
+    fun `falls back to the raw credential when the exchange is refused`() {
         val d = FakeDaemon().apply { respond("/v1/auth/token", 401) }
         try {
             val ct = ClientToken()

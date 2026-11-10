@@ -42,6 +42,10 @@ internal class FakeDaemon : AutoCloseable {
         rules.add(Rule(prefix, status, body))
     }
 
+    /** The last request body seen per path, for tests that assert the payload. */
+    val lastBodies = HashMap<String, String>()
+    fun lastBody(path: String): String = lastBodies[path].orEmpty()
+
     /** How many times a path starting with [prefix] was dialed. */
     fun hits(prefix: String): Int =
         counted.entries.filter { it.key.startsWith(prefix) }.sumOf { it.value.get() }
@@ -64,7 +68,9 @@ internal class FakeDaemon : AutoCloseable {
             // Drained before answering: a POST whose body is never read leaves
             // the client blocked on a write it cannot finish.
             var drained = 0
-            while (drained < length && in_.read() >= 0) drained++
+            val bodyChars = StringBuilder()
+            while (drained < length && in_.read().also { if (it >= 0) bodyChars.append(it.toChar()) } >= 0) drained++
+            lastBodies[path] = bodyChars.toString()
 
             counted.computeIfAbsent(path) { AtomicInteger() }.incrementAndGet()
             // Longest prefix wins: an events poll under /v1/runs/{id} must not

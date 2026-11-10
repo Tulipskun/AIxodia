@@ -13,8 +13,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 /**
- * Exchanges the long-lived Cloudflare token (the "master token") for the
- * short-lived opaque token the engine mints at `POST /v1/auth/token`.
+ * Exchanges the GitHub OAuth access token (from the Device Flow sign-in) for
+ * the short-lived opaque token the engine mints at `POST /v1/auth/token`.
  *
  * The exchange happens once, at startup, and again only when the cached token
  * is within [refreshSkewSec] of its `expires_at`. Everything is kept in memory
@@ -23,11 +23,11 @@ import kotlin.random.Random
  * engine. A [ClientToken] is meant to be a single app-wide instance
  * ([ClientToken.shared]) so every transport reuses the same cached token.
  *
- * Older engines have no `/v1/auth/token` route (404) or refuse the exchange
- * (401). In that case every call falls back to the master token for a cooldown,
- * so the app keeps talking to the engine exactly as before instead of hanging.
- * The Cloudflare API token is still used directly for the D1 / Workers KV REST
- * calls (those go to Cloudflare, not the engine) and for the exchange body.
+ * Engines without `/v1/auth/token` (404) or refusing the exchange (401) leave
+ * every call falling back to the raw credential for a cooldown, so the app
+ * keeps talking to the engine exactly as before instead of hanging. The GitHub
+ * token is only ever sent to the engine's exchange endpoint — never to
+ * Cloudflare, and never persisted.
  */
 class ClientToken(
     private val client: OkHttpClient = defaultClient(),
@@ -55,27 +55,27 @@ class ClientToken(
      * The bearer value for an engine request. Returns the short-lived token
      * when the engine supports the exchange, otherwise the master token.
      */
-    suspend fun get(masterToken: String, daemonUrl: String): String = mutex.withLock {
+    suspend fun get(githubToken: String, daemonUrl: String): String = mutex.withLock {
         // A fixed value (deterministic wiring tests) or a disabled exchange
         // (direct construction in unit tests) never touches the network.
         if (forced != null) return@withLock forced
         val base = daemonUrl.trim().trimEnd('/')
-        if (!exchangeEnabled || masterToken.isBlank() || base.isEmpty()) {
-            return@withLock masterToken
+        if (!exchangeEnabled || githubToken.isBlank() || base.isEmpty()) {
+            return@withLock githubToken
         }
         if (!base.startsWith("http://") && !base.startsWith("https://")) {
-            return@withLock masterToken
+            return@withLock githubToken
         }
-        val key = "$base|$masterToken"
+        val key = "$base|$githubToken"
         val now = clock()
         // A valid cached token that is not yet near expiry is reused.
         if (cachedKey == key && cachedToken.isNotEmpty() && now < expiresAt - refreshSkewSec) {
             return@withLock cachedToken
         }
         // Honour a previous "this engine cannot exchange" decision for a while.
-        if (now < (fallbackUntil[key] ?: 0L)) return@withLock masterToken
+        if (now < (fallbackUntil[key] ?: 0L)) return@withLock githubToken
 
-        when (val outcome = exchange(base, masterToken, now)) {
+        when (val outcome = exchange(base, githubToken, now)) {
             is Outcome.Token -> {
                 cachedKey = key
                 cachedToken = outcome.value
@@ -86,19 +86,19 @@ class ClientToken(
             is Outcome.NoEndpoint -> {
                 fallbackUntil[key] = now + noEndpointCooldownSec
                 clearCache()
-                return@withLock masterToken
+                return@withLock githubToken
             }
             is Outcome.Unavailable -> {
                 fallbackUntil[key] = now + unavailableCooldownSec
                 clearCache()
-                return@withLock masterToken
+                return@withLock githubToken
             }
         }
     }
 
     /** One exchange, with bounded retries on transient (5xx) answers. */
-    private suspend fun exchange(base: String, masterToken: String, now: Long): Outcome {
-        val body = JSONObject().put("master_token", masterToken).toString()
+    private suspend fun exchange(base: String, githubToken: String, now: Long): Outcome {
+        val body = JSONObject().put("github_token", githubToken).toString()
         var wait = retryBaseMs
         repeat(maxAttempts) { attempt ->
             val req = Request.Builder()
