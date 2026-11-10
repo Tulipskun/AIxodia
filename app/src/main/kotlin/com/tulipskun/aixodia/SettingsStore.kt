@@ -104,10 +104,16 @@ class SettingsStore(private val ctx: Context) {
         val prefs = ctx.ds.data.first()
         val expiresAt = prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L
         val validSession = expiresAt > System.currentTimeMillis() / 1000
-        if (!validSession && !prefs[sessionToken].isNullOrBlank()) {
+        val clearExpiredSession = !validSession && !prefs[sessionToken].isNullOrBlank()
+        val clearLegacyGithubCredential = !prefs[legacyGithubToken].isNullOrBlank()
+        if (clearExpiredSession || clearLegacyGithubCredential) {
             ctx.ds.edit {
-                it.remove(sessionToken)
-                it.remove(sessionExpiresAt)
+                if (clearExpiredSession) {
+                    it.remove(sessionToken)
+                    it.remove(sessionExpiresAt)
+                }
+                // Remove the credential saved by older builds; it is no longer
+                // needed after the one-time exchange and is never read again.
                 it.remove(legacyGithubToken)
             }
         }
