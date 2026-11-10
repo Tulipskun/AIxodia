@@ -21,11 +21,9 @@ android {
         // build — one that is never published — carries.
         versionCode = (findProperty("aixodiaVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (findProperty("aixodiaVersionName") as String?) ?: "0.1.0"
-        // The GitHub OAuth App client id that enables Device Flow sign-in. It is
-        // not a secret (device-flow apps are public clients; it ships in every
-        // authorize URL). Default is the AIxodia Dashboard app
-        // (Ov23lieKSrKCRs5YKwdO, device flow enabled 2026-11-10); override with
-        // -PGithubClientId=… for a different app.
+        // Public GitHub OAuth App client id used by Authorization Code + PKCE.
+        // The client secret stays on the Engine and is never shipped in this APK.
+        // Override with -PGithubClientId=… for a different OAuth App.
         buildConfigField(
             "String",
             "GITHUB_CLIENT_ID",
