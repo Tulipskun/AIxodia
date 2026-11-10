@@ -126,30 +126,15 @@ fun ConnDot(c: ConnState) {
 }
 
 /**
- * First-launch sign-in gate — before any network call.
- *
- * A fresh install used to stop at a page whose only action was "Open Settings",
- * which read as a roadblock: the one value the app needs (the Cloudflare token)
- * sat one screen away behind a button. This asks for it directly, the way a
- * login form does, and hands whatever was typed back to the caller. Saving that
- * token is what flips the app into the chat, so nothing here has to know about
- * the network — a bad token or an offline phone still lands in the chat, where
- * the connection card explains itself, rather than locking the form.
- *
- * GitHub Device Flow is the only sign-in path. The stable Engine URL is already
- * configured, so a fresh install does not need a Cloudflare token or address.
+ * First-launch sign-in gate. GitHub authorization runs in the system browser
+ * using Authorization Code + PKCE; the callback is completed by MainActivity.
  */
 @Composable
 fun SetupNeeded(
     onSignedIn: (com.tulipskun.aixodia.data.remote.EngineSession) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
-    var code by remember { mutableStateOf<com.tulipskun.aixodia.data.remote.DeviceCodeInfo?>(null) }
     var error by remember { mutableStateOf("") }
-    var flowJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    val clientId = BuildConfig.GITHUB_CLIENT_ID
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
@@ -157,81 +142,44 @@ fun SetupNeeded(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(Icons.Default.AutoAwesome, contentDescription = null,
-                modifier = Modifier.size(48.dp).padding(bottom = 12.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(
+                Icons.Default.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp).padding(bottom = 12.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
             Text("Sign in to AIxodia", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Spacer(Modifier.size(8.dp))
             Text(
-                "Continue with your GitHub account. Cloudflare credentials are not required.",
+                "Continue securely with your GitHub account.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.widthIn(max = 420.dp),
             )
             Spacer(Modifier.size(20.dp))
-            if (code == null) {
-                Button(
-                    onClick = {
-                        busy = true
-                        error = ""
-                        flowJob = scope.launch {
-                            try {
-                                val flow = com.tulipskun.aixodia.data.remote.GitHubDeviceFlow()
-                                val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    flow.requestDeviceCode(clientId)
-                                }
-                                code = info
-                                context.startActivity(android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(info.verificationUri),
-                                ))
-                                val token = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    flow.pollForToken(clientId, info)
-                                }
-                                val engineSession = com.tulipskun.aixodia.data.remote.ClientToken.shared.exchange(
-                                    token,
-                                    com.tulipskun.aixodia.DEFAULT_DAEMON_URL,
-                                )
-                                onSignedIn(engineSession)
-                            } catch (t: Throwable) {
-                                if (t !is kotlinx.coroutines.CancellationException) {
-                                    error = (t as? com.tulipskun.aixodia.data.remote.DeviceFlowException)?.message
-                                        ?: (t.message ?: "GitHub sign-in failed")
-                                }
-                            } finally {
-                                busy = false
-                                code = null
-                                flowJob = null
-                            }
-                        }
-                    },
-                    enabled = !busy && clientId.isNotBlank(),
-                    modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
-                ) { Text(if (busy) "Connecting to GitHub…" else "Sign in with GitHub") }
-                if (clientId.isBlank()) {
-                    Text("GitHub Device Flow is not configured in this build.", color = MaterialTheme.colorScheme.error)
-                }
-            } else {
-                Text("Enter this code on GitHub", style = MaterialTheme.typography.bodyMedium)
-                Text(code!!.userCode, style = MaterialTheme.typography.headlineLarge,
-                    modifier = Modifier.padding(vertical = 12.dp))
-                OutlinedButton(onClick = {
-                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(code!!.verificationUri)))
-                }) { Text("Open GitHub verification") }
-                Text("Waiting for approval…", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { flowJob?.cancel(); busy = false; code = null }) { Text("Cancel") }
+            Button(
+                onClick = {
+                    error = ""
+                    runCatching {
+                        com.tulipskun.aixodia.data.remote.GitHubOAuthFlow.start(context)
+                    }.onFailure { error = it.message ?: "Unable to open GitHub sign-in" }
+                },
+                modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+            ) {
+                Text("Continue with GitHub")
             }
             if (error.isNotBlank()) {
                 Spacer(Modifier.size(12.dp))
                 Text(error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
-                TextButton(onClick = { error = "" }) { Text("Dismiss") }
             }
         }
-        Text("v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall,
+        Text(
+            "v${BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp))
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+        )
     }
 }
 
