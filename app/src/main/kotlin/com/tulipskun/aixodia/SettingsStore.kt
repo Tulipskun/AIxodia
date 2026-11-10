@@ -13,10 +13,10 @@ private val Context.ds by preferencesDataStore("aixodia")
 const val DEFAULT_DAEMON_URL = "https://aixodia.dpdns.org"
 
 /**
- * The Engine URL defaults to the stable Named Tunnel hostname. GitHub Device
- * Flow provides the account credential; its OAuth token is sealed with Android
- * Keystore. The short-lived access token is renewed silently with a separate
- * long-lived Engine refresh credential. No Cloudflare token is stored here.
+ * The Engine URL defaults to the stable Named Tunnel hostname. GitHub
+ * Authorization Code + PKCE verifies the account in the system browser; only
+ * Engine-issued access/refresh credentials are sealed with Android Keystore.
+ * No GitHub OAuth token or Cloudflare token is stored here.
  */
 class SettingsStore(private val ctx: Context) {
     private val endpoint = stringPreferencesKey("endpoint")
