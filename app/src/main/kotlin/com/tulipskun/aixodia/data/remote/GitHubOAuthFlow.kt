@@ -68,16 +68,14 @@ object GitHubOAuthFlow {
         require(!verifier.isNullOrBlank() && !code.isNullOrBlank()) {
             "GitHub did not return a complete authorization response."
         }
-        return try {
-            ClientToken.shared.exchangeAuthorizationCode(
-                code = code,
-                codeVerifier = verifier,
-                redirectUri = REDIRECT_URI,
-                clientId = CLIENT_ID,
-                daemonUrl = daemonUrl,
-            )
-        } finally {
-            store.edit().remove(KEY_STATE).remove(KEY_VERIFIER).apply()
-        }
+        val session = ClientToken.shared.exchangeAuthorizationCode(
+            code = code,
+            codeVerifier = verifier,
+            redirectUri = REDIRECT_URI,
+            clientId = CLIENT_ID,
+            daemonUrl = daemonUrl,
+        )
+        store.edit().remove(KEY_STATE).remove(KEY_VERIFIER).apply()
+        return session
     }
 }
