@@ -16,7 +16,7 @@ import java.util.Base64
  * encrypted app storage and is sent to the Engine for server-side exchange.
  */
 object GitHubOAuthFlow {
-    const val CLIENT_ID = "Ov23lieKSrKCRs5YKwdO"
+    val CLIENT_ID: String get() = com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID
     const val REDIRECT_URI = "https://dashboard.aixodia.dpdns.org"
     const val CALLBACK_URI = "aixodia://oauth/callback"
     private const val PREFS = "aixodia_oauth_pending"
