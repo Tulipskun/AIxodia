@@ -3,6 +3,7 @@ package com.tulipskun.aixodia
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.SystemBarStyle
@@ -10,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.lifecycle.lifecycleScope
+import com.tulipskun.aixodia.data.remote.GitHubOAuthFlow
 import com.tulipskun.aixodia.ui.chat.ChatScreen
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import kotlinx.coroutines.launch
@@ -39,6 +41,41 @@ class MainActivity : ComponentActivity() {
                         repo = c.repo, settings = c.settings, history = c.historyApi,
                         socket = c.chat, discovery = c.discovery,
                     )
+                }
+            }
+        }
+        handleOAuthCallback(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOAuthCallback(intent)
+    }
+
+    private fun handleOAuthCallback(callbackIntent: Intent?) {
+        val uri = callbackIntent?.data ?: return
+        if (uri.scheme != "aixodia" || uri.host != "oauth" || uri.path != "/callback") return
+        callbackIntent.data = null
+        val c = (application as AixodiaApp).container
+        lifecycleScope.launch {
+            try {
+                val config = c.settings.current()
+                val session = GitHubOAuthFlow.complete(this@MainActivity, uri, config.daemonUrl)
+                c.settings.saveSessionCredentials(
+                    session.token,
+                    session.expiresAt,
+                    session.refreshToken,
+                    session.refreshExpiresAt,
+                )
+                c.chat.reconnect()
+            } catch (error: Throwable) {
+                if (error !is kotlinx.coroutines.CancellationException) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        error.message ?: "GitHub sign-in failed",
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
             }
         }
