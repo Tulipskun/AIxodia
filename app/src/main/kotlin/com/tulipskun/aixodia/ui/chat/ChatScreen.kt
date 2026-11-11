@@ -1235,6 +1235,10 @@ private fun ChatModelSheet(
 private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Same gate as the settings screen: updating swaps the installed APK, so it
+    // requires the GitHub sign-in. A signed-out build cannot self-update.
+    val isSignedIn by settings.isSignedInFlow.collectAsStateWithLifecycle(initialValue = false)
+    val canUpdate = UpdateManager.canUpdate(isSignedIn)
     var msg by remember { mutableStateOf("App v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -1242,6 +1246,7 @@ private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         FilledTonalButton(
             onClick = {
+                if (!canUpdate) return@FilledTonalButton
                 busy = true; msg = "Checking…"
                 scope.launch {
                     try {
@@ -1259,11 +1264,18 @@ private fun UpdateRow(settings: SettingsStore, onSettings: () -> Unit) {
                     } finally { busy = false }
                 }
             },
-            enabled = !busy,
+            enabled = !busy && canUpdate,
         ) { Text(stringResource(R.string.check_updates)) }
         IconButton(onClick = onSettings) {
             Icon(Icons.Default.Settings, contentDescription = "Settings")
         }
+    }
+    if (!canUpdate) {
+        Text(
+            stringResource(R.string.update_needs_sign_in),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
     }
 }

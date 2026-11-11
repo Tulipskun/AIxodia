@@ -136,4 +136,11 @@ object UpdateManager {
     /** A rolling release is newer only when its metadata versionCode is higher. */
     internal fun rollingNeedsUpdate(remoteCode: Long, currentCode: Int): Boolean =
         remoteCode > 0 && remoteCode > currentCode.toLong()
+
+    /**
+     * Updating replaces the installed APK, so it is only offered to a signed-in
+     * user. Both updater rows ask this before touching GitHub, so a signed-out
+     * build cannot check for, download or install a newer release.
+     */
+    internal fun canUpdate(signedIn: Boolean): Boolean = signedIn
 }

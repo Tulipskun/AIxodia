@@ -730,12 +730,18 @@ private fun NodeCard(
 private fun UpdateRow(settings: SettingsStore) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    // Updating replaces the installed APK, so it is gated behind the same
+    // GitHub sign-in the rest of the app uses. A signed-out build cannot
+    // fetch or install a newer one.
+    val isSignedIn by settings.isSignedInFlow.collectAsStateWithLifecycle(initialValue = false)
+    val canUpdate = UpdateManager.canUpdate(isSignedIn)
     var msg by rememberSaveable { mutableStateOf("App v" + BuildConfig.VERSION_NAME) }
     var busy by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("App • $msg", style = MaterialTheme.typography.labelMedium)
         FilledTonalButton(
             onClick = {
+                if (!canUpdate) return@FilledTonalButton
                 busy = true; msg = "Checking…"
                 scope.launch {
                     try {
@@ -753,8 +759,15 @@ private fun UpdateRow(settings: SettingsStore) {
                     } finally { busy = false }
                 }
             },
-            enabled = !busy,
+            enabled = !busy && canUpdate,
         ) { Text("Check for updates") }
+        if (!canUpdate) {
+            Text(
+                stringResource(R.string.update_needs_sign_in),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

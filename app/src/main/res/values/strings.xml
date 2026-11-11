@@ -127,6 +127,9 @@
     <string name="use_agent_default">Use agent default (clear this chat lock)</string>
     <string name="check_updates">Check for updates</string>
     <string name="app_version">App • %1$s</string>
+    <!-- The updater is gated behind the GitHub sign-in: a signed-out install
+         cannot check for, download or replace itself. -->
+    <string name="update_needs_sign_in">Sign in with GitHub to update the app</string>
 
     <!-- Drawer. -->
     <string name="drawer_chats">Chats</string>

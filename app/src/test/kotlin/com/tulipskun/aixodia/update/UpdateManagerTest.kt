@@ -21,4 +21,14 @@ class UpdateManagerTest {
         assertFalse(UpdateManager.rollingNeedsUpdate(-1L, 1))
         assertFalse(UpdateManager.rollingNeedsUpdate(0L, 1))
     }
+
+    @Test
+    fun aSignedOutInstallCannotUpdate() {
+        assertFalse(UpdateManager.canUpdate(signedIn = false))
+    }
+
+    @Test
+    fun aSignedInInstallKeepsTheUpdater() {
+        assertTrue(UpdateManager.canUpdate(signedIn = true))
+    }
 }
