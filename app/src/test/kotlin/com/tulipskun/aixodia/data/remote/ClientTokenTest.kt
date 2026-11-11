@@ -40,7 +40,7 @@ class ClientTokenTest {
                 ClientToken().exchangeAuthorizationCode(
                     code = "temporary-code",
                     codeVerifier = "pkce-verifier",
-                    redirectUri = "https://dashboard.aixodia.dpdns.org",
+                    redirectUri = "https://dashboard.aixodia.dpdns.org/sso/github/callback",
                     clientId = GitHubOAuthFlow.CLIENT_ID,
                     daemonUrl = d.base,
                 )
@@ -49,7 +49,7 @@ class ClientTokenTest {
             val sent = JSONObject(d.lastBody("/v1/auth/github/exchange"))
             assertEquals("temporary-code", sent.getString("code"))
             assertEquals("pkce-verifier", sent.getString("code_verifier"))
-            assertEquals("https://dashboard.aixodia.dpdns.org", sent.getString("redirect_uri"))
+            assertEquals("https://dashboard.aixodia.dpdns.org/sso/github/callback", sent.getString("redirect_uri"))
             assertEquals(GitHubOAuthFlow.CLIENT_ID, sent.getString("client_id"))
             assertFalse("The native app must never send a client secret", sent.has("client_secret"))
         } finally {
