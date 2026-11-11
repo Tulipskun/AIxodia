@@ -36,6 +36,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -146,6 +147,7 @@ fun SetupNeeded(
     var busy by remember { mutableStateOf(false) }
     var webView by remember { mutableStateOf<android.webkit.WebView?>(null) }
     var cancel by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var loading by remember { mutableStateOf(false) }
 
     // Cloudflare's page has to be visible: the user picks GitHub or a PIN and
     // types the code there. A headless WebView would leave the button looking
@@ -158,7 +160,22 @@ fun SetupNeeded(
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
         ) {
             Surface(Modifier.fillMaxSize()) {
-                androidx.compose.ui.viewinterop.AndroidView(factory = { webView!! })
+                Box(Modifier.fillMaxSize()) {
+                    // AndroidView does not fill its parent on its own: it measured
+                    // to its intrinsic height and left Cloudflare's page as a thin
+                    // strip at the top that could not be scrolled or tapped.
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { webView!! },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    // The first load is a redirect to another origin; show
+                    // something during it instead of a blank black screen.
+                    if (loading) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
             }
         }
     }
@@ -212,9 +229,11 @@ fun SetupNeeded(
                             cancel = null
                         } finally {
                             busy = false
+                            loading = false
                         }
                     }
                     cancel = { job.cancel() }
+                    loading = true
                 },
                 enabled = !busy,
                 modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),

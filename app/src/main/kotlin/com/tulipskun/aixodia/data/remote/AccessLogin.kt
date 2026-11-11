@@ -2,15 +2,20 @@ package com.tulipskun.aixodia.data.remote
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.net.http.SslError
 import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.tulipskun.aixodia.ConnConfig
 import com.tulipskun.aixodia.SettingsStore
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -36,9 +41,6 @@ import kotlin.coroutines.resumeWithException
 object AccessLogin {
     /** Access sets this cookie for the engine's origin once the login succeeds. */
     private const val SESSION_COOKIE = "CF_Authorization"
-    private const val PREFS = "aixodia_access_session"
-    private const val KEY_COOKIE = "cookie"
-    private const val KEY_ORIGIN = "origin"
 
     /**
      * The URL the WebView starts on.
@@ -50,30 +52,29 @@ object AccessLogin {
     internal fun loginEntryUrl(origin: String): String =
         "${origin.trim().trimEnd('/')}/healthz"
 
-    private fun prefs(context: Context) = EncryptedSharedPreferences.create(
-        context,
-        PREFS,
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    /**
+     * The cookie lives in [SettingsStore], not in a store of this object's own.
+     *
+     * It briefly used EncryptedSharedPreferences here while the sign-in gate read
+     * `SettingsStore.isSignedInFlow` from DataStore. Nothing ever wrote the value
+     * the gate was watching, so a successful login left the user on the sign-in
+     * screen. One owner, one key, or the two disagree.
+     */
+    private fun store(context: Context) = SettingsStore(context)
 
     /** The cookie header value remembered for [origin], or empty when signed out. */
-    fun cookie(context: Context, origin: String): String {
-        val store = prefs(context)
-        if (store.getString(KEY_ORIGIN, null) != origin.trimEnd('/')) return ""
-        return store.getString(KEY_COOKIE, "").orEmpty()
+    suspend fun cookie(context: Context, origin: String): String = withContext(Dispatchers.IO) {
+        val stored = store(context).current()
+        if (stored.daemonUrl.trimEnd('/') != origin.trimEnd('/')) return@withContext ""
+        stored.accessCookie
     }
 
-    fun save(context: Context, origin: String, cookie: String) {
-        prefs(context).edit()
-            .putString(KEY_ORIGIN, origin.trimEnd('/'))
-            .putString(KEY_COOKIE, cookie)
-            .apply()
+    suspend fun save(context: Context, origin: String, cookie: String) = withContext(Dispatchers.IO) {
+        store(context).saveAccessCookie(cookie)
     }
 
-    fun clear(context: Context) {
-        prefs(context).edit().remove(KEY_COOKIE).remove(KEY_ORIGIN).apply()
+    suspend fun clear(context: Context) = withContext(Dispatchers.IO) {
+        store(context).saveAccessCookie("")
     }
 
     /**
@@ -96,6 +97,7 @@ object AccessLogin {
         CookieManager.getInstance().setAcceptCookie(true)
 
         return withContext(Dispatchers.Main) {
+            val scope = CoroutineScope(Dispatchers.IO)
             suspendCancellableCoroutine { continuation ->
                 var settled = false
                 val view = WebView(context)
@@ -115,9 +117,32 @@ object AccessLogin {
                     override fun onPageFinished(view: WebView, url: String?) {
                         val cookie = CookieManager.getInstance().getCookie(base).orEmpty()
                         if (cookie.contains(SESSION_COOKIE)) {
-                            save(context, base, cookie)
-                            finish(Result.success(cookie))
+                            // Persist off the main thread; the flow the gate reads
+                            // only updates once this write lands.
+                            scope.launch {
+                                runCatching { save(context, base, cookie) }
+                                finish(Result.success(cookie))
+                            }
                         }
+                    }
+
+                    // Without this a failed load left the user staring at a
+                    // blank page with the button spinning and no way to tell
+                    // what went wrong.
+                    override fun onReceivedError(
+                        view: WebView,
+                        request: WebResourceRequest,
+                        error: WebResourceError,
+                    ) {
+                        if (!request.isForMainFrame) return
+                        finish(Result.failure(IOException("Could not reach the sign-in page: ${error.description}")))
+                    }
+
+                    override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                        // Cancelling leaves the page blank, so end the flow with
+                        // a reason instead.
+                        handler.cancel()
+                        finish(Result.failure(IOException("The sign-in page's certificate was not trusted (${error.primaryError})")))
                     }
                 }
                 continuation.invokeOnCancellation { finish(Result.failure(CancellationException())) }

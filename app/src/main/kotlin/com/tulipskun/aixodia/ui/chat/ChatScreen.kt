@@ -276,10 +276,12 @@ fun ChatScreen(
         SetupNeeded(
             daemonUrl = daemonUrl,
             onSignedIn = {
-                // AccessLogin already persisted the cookie; the flag re-reads it
-                // so the gate opens without waiting for a config change event.
+                // AccessLogin already wrote the cookie to SettingsStore, which
+                // isSignedInFlow watches, so the gate reopens on its own. This
+                // flag only forces an immediate re-read for the case where the
+                // DataStore emission is not picked up while the dialog closes.
                 configuredScope.launch {
-                    runCatching { settings.isSignedInFlow.first() }
+                    hasResolvedToken = true
                 }
             },
         )
