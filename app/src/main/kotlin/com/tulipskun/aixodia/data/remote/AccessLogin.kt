@@ -40,6 +40,16 @@ object AccessLogin {
     private const val KEY_COOKIE = "cookie"
     private const val KEY_ORIGIN = "origin"
 
+    /**
+     * The URL the WebView starts on.
+     *
+     * Not `/cdn-cgi/access/login`: that route answers 404 unless it is handed a
+     * kid and redirect_url, which stranded the sign-in on an error page. Any
+     * protected path works because Access redirects it to the real login page.
+     */
+    internal fun loginEntryUrl(origin: String): String =
+        "${origin.trim().trimEnd('/')}/healthz"
+
     private fun prefs(context: Context) = EncryptedSharedPreferences.create(
         context,
         PREFS,
@@ -69,45 +79,54 @@ object AccessLogin {
     /**
      * Run the Access login for [origin] and return the resulting cookie header.
      *
-     * The WebView is created with a short-lived Activity context and is expected
-     * to be attached to a dialog or used headless by the caller. It is destroyed
-     * before returning so no authenticated page is left in memory.
+     * The WebView is shown in a dialog the caller owns ([attach]), because the
+     * user has to see and dismiss Cloudflare's page. It is destroyed before
+     * returning so no authenticated page is left in memory.
      */
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun signIn(context: Context, origin: String): String {
+    suspend fun signIn(
+        context: Context,
+        origin: String,
+        attach: (WebView) -> Unit = {},
+    ): String {
         val base = origin.trim().trimEnd('/')
         require(base.startsWith("https://") || base.startsWith("http://")) {
             "Engine address is invalid"
         }
         CookieManager.getInstance().setAcceptCookie(true)
 
-        return suspendCancellableCoroutine { continuation ->
-            var settled = false
-            val view = WebView(context)
-            fun finish(result: Result<String>) {
-                if (settled) return
-                settled = true
-                view.stopLoading()
-                view.destroy()
-                result.fold(continuation::resume, continuation::resumeWithException)
-            }
+        return withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { continuation ->
+                var settled = false
+                val view = WebView(context)
+                fun finish(result: Result<String>) {
+                    if (settled) return
+                    settled = true
+                    view.stopLoading()
+                    view.destroy()
+                    result.fold(continuation::resume, continuation::resumeWithException)
+                }
 
-            view.settings.javaScriptEnabled = true
-            view.settings.domStorageEnabled = true
-            view.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView, url: String?) {
-                    val cookie = CookieManager.getInstance().getCookie(base).orEmpty()
-                    if (cookie.contains(SESSION_COOKIE)) {
-                        save(this@AccessLogin.run { context }, base, cookie)
-                        finish(Result.success(cookie))
+                view.settings.javaScriptEnabled = true
+                view.settings.domStorageEnabled = true
+                view.webViewClient = object : WebViewClient() {
+                    // The cookie is set on the cross-origin redirect chain, so it
+                    // is read on every finished page, not only the last one.
+                    override fun onPageFinished(view: WebView, url: String?) {
+                        val cookie = CookieManager.getInstance().getCookie(base).orEmpty()
+                        if (cookie.contains(SESSION_COOKIE)) {
+                            save(context, base, cookie)
+                            finish(Result.success(cookie))
+                        }
                     }
                 }
-            }
-            continuation.invokeOnCancellation { finish(Result.failure(CancellationException())) }
-            try {
-                view.loadUrl("$base/cdn-cgi/access/login")
-            } catch (error: Throwable) {
-                finish(Result.failure(error))
+                continuation.invokeOnCancellation { finish(Result.failure(CancellationException())) }
+                try {
+                    attach(view)
+                    view.loadUrl(loginEntryUrl(base))
+                } catch (error: Throwable) {
+                    finish(Result.failure(error))
+                }
             }
         }
     }

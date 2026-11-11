@@ -144,6 +144,24 @@ fun SetupNeeded(
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var webView by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    var cancel by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    // Cloudflare's page has to be visible: the user picks GitHub or a PIN and
+    // types the code there. A headless WebView would leave the button looking
+    // like it did nothing.
+    if (webView != null) {
+        androidx.compose.ui.window.Dialog(
+            // Dismissing has to end the sign-in, or the coroutine waits forever
+            // and the button stays disabled with no way back.
+            onDismissRequest = { cancel?.invoke() },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(Modifier.fillMaxSize()) {
+                androidx.compose.ui.viewinterop.AndroidView(factory = { webView!! })
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
@@ -171,23 +189,32 @@ fun SetupNeeded(
                 onClick = {
                     error = ""
                     busy = true
-                    scope.launch {
+                    val job = scope.launch {
                         try {
                             val origin = if (daemonUrl.isBlank()) {
                                 com.tulipskun.aixodia.DEFAULT_DAEMON_URL
                             } else {
                                 daemonUrl
                             }
-                            com.tulipskun.aixodia.data.remote.AccessLogin.signIn(context, origin)
+                            com.tulipskun.aixodia.data.remote.AccessLogin.signIn(
+                                context,
+                                origin,
+                                attach = { webView = it },
+                            )
+                            webView = null
+                            cancel = null
                             onSignedIn()
                         } catch (failure: Throwable) {
                             if (failure !is kotlinx.coroutines.CancellationException) {
                                 error = failure.message ?: "Unable to finish sign-in"
                             }
+                            webView = null
+                            cancel = null
                         } finally {
                             busy = false
                         }
                     }
+                    cancel = { job.cancel() }
                 },
                 enabled = !busy,
                 modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
