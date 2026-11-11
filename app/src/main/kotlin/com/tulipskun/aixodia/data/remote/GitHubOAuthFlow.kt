@@ -11,15 +11,17 @@ import java.util.Base64
 
 /**
  * Native GitHub Authorization Code + PKCE flow.
- * The browser returns to the dashboard callback, which forwards only the
- * temporary code/state to this app's registered URI. The verifier stays in
- * encrypted app storage and is sent to the Engine for server-side exchange.
+ *
+ * GitHub redirects straight back to this app's registered custom scheme
+ * (`aixodia://oauth/callback`), so Android sign-in never depends on the
+ * dashboard being deployed or reachable. Only the short-lived code travels
+ * through the browser; the PKCE verifier stays in encrypted app storage and is
+ * sent to the Engine for the server-side exchange.
  */
 object GitHubOAuthFlow {
     val CLIENT_ID: String get() = com.tulipskun.aixodia.BuildConfig.GITHUB_CLIENT_ID
-    const val REDIRECT_URI =
-        "https://dashboard.aixodia.dpdns.org/sso/github/callback"
     const val CALLBACK_URI = "aixodia://oauth/callback"
+    const val REDIRECT_URI = CALLBACK_URI
     private const val PREFS = "aixodia_oauth_pending"
     private const val KEY_STATE = "state"
     private const val KEY_VERIFIER = "verifier"
