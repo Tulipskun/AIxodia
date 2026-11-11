@@ -23,7 +23,7 @@ import java.io.File
  * is never attached to public GitHub release requests.
  */
 object UpdateManager {
-    const val REPO = "Tulipskun/AIxodia"
+    const val REPO = "Tulipskun/aixodia-app"
     private const val VERSION_ASSET = "AIxodia-version.json"
     private val client = OkHttpClient()
 
