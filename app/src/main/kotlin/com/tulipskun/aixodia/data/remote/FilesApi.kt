@@ -51,12 +51,12 @@ class FilesApi(
         val config = settings.current()
         val base = config.daemonUrl.trim().trimEnd('/')
         if (base.isBlank()) throw IllegalStateException("Daemon URL is not configured")
-        if (config.sessionToken.isBlank() && config.refreshToken.isBlank()) throw IllegalStateException("Sign in with GitHub first")
+        if (config.accessCookie.isBlank()) throw IllegalStateException("Sign in to AIxodia first")
         return Request.Builder()
             .url(base + path)
             .header(
-                "Authorization",
-                "Bearer " + clientToken.get(config, settings),
+                "Cookie",
+                clientToken.get(config, settings),
             )
     }
 

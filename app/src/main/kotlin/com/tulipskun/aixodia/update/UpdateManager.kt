@@ -138,9 +138,13 @@ object UpdateManager {
         remoteCode > 0 && remoteCode > currentCode.toLong()
 
     /**
-     * Updating replaces the installed APK, so it is only offered to a signed-in
-     * user. Both updater rows ask this before touching GitHub, so a signed-out
-     * build cannot check for, download or install a newer release.
+     * An update is offered whenever the app is running.
+     *
+     * This used to require a signed-in user, on the reasoning that replacing the
+     * APK is a privileged action. Sign-in now happens in Cloudflare Access in
+     * front of the engine, not inside the app, so gating the updater on it would
+     * block updates for an app that is working perfectly well. The update itself
+     * is a signed release fetched from the public repository.
      */
-    internal fun canUpdate(signedIn: Boolean): Boolean = signedIn
+    internal fun canUpdate(signedIn: Boolean): Boolean = true
 }

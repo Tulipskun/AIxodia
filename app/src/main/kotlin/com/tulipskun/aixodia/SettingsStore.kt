@@ -26,6 +26,7 @@ class SettingsStore(private val ctx: Context) {
     private val sessionExpiresAt = stringPreferencesKey("session_expires_at")
     private val refreshToken = stringPreferencesKey("refresh_token")
     private val refreshExpiresAt = stringPreferencesKey("refresh_expires_at")
+    private val accessCookie = stringPreferencesKey("access_cookie")
     private val legacyGithubToken = stringPreferencesKey("github_token")
     private val sessionId = stringPreferencesKey("session_id")
     private val terminalSessionId = stringPreferencesKey("terminal_session_id")
@@ -142,7 +143,16 @@ class SettingsStore(private val ctx: Context) {
             sessionExpiresAt = accessExpires,
             refreshToken = storedRefresh,
             refreshExpiresAt = if (refreshInDate) refreshExpires else 0L,
+            accessCookie = TokenCipher.open(prefs[accessCookie].orEmpty()),
         )
+    }
+
+    /** Store the Cloudflare Access cookie; encrypted by the Android Keystore. */
+    suspend fun saveAccessCookie(cookie: String) {
+        val trimmed = cookie.trim()
+        ctx.ds.edit {
+            if (trimmed.isBlank()) it.remove(accessCookie) else it[accessCookie] = TokenCipher.seal(trimmed)
+        }
     }
 
     /** Persist Engine credentials only; both secrets are encrypted by Android Keystore. */
@@ -178,13 +188,13 @@ class SettingsStore(private val ctx: Context) {
     suspend fun saveSessionToken(value: String, expiresAt: Long) =
         saveSessionCredentials(value, expiresAt, "", 0L)
 
+    /**
+     * Signed in means "holds a Cloudflare Access cookie". The engine no longer
+     * issues its own tokens, so there is nothing else to check here; whether
+     * the cookie is still accepted is answered by the engine, not locally.
+     */
     val isSignedInFlow: Flow<Boolean> = ctx.ds.data.map { prefs ->
-        val now = System.currentTimeMillis() / 1000
-        val accessValid = (prefs[sessionExpiresAt]?.toLongOrNull() ?: 0L) > now
-            && TokenCipher.open(prefs[sessionToken].orEmpty()).isNotBlank()
-        val refreshValid = (prefs[refreshExpiresAt]?.toLongOrNull() ?: 0L) > now
-            && TokenCipher.open(prefs[refreshToken].orEmpty()).isNotBlank()
-        accessValid || refreshValid
+        TokenCipher.open(prefs[accessCookie].orEmpty()).isNotBlank()
     }
 
     suspend fun saveProvidersCache(daemonUrl: String, json: String) {
@@ -357,4 +367,9 @@ data class ConnConfig(
     val sessionExpiresAt: Long = 0L,
     val refreshToken: String = "",
     val refreshExpiresAt: Long = 0L,
+    /**
+     * The Cloudflare Access `Cookie:` header for [daemonUrl]. Sign-in is
+     * completed in Cloudflare, so this is the only credential the app carries.
+     */
+    val accessCookie: String = "",
 )

@@ -203,7 +203,7 @@ class RunSocket(
             runCatching {
                 val req = Request.Builder()
                     .url("${cfg.base}/v1/runs/$id/cancel")
-                    .header("Authorization", "Bearer ${cfg.token}")
+                    .header("Cookie", cfg.token)
                     .header("Content-Type", "application/json")
                     .post("{}".toRequestBody(JSON))
                     .build()
@@ -350,7 +350,7 @@ class RunSocket(
 
         val request = Request.Builder()
             .url("${cfg.base}/v1/runs")
-            .header("Authorization", "Bearer ${cfg.token}")
+            .header("Cookie", cfg.token)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .post(body.toString().toRequestBody(JSON))
@@ -441,7 +441,7 @@ class RunSocket(
             val before = lastSeq
             val request = Request.Builder()
                 .url("${cfg.base}/v1/runs/$id/events?after=$lastSeq&poll=1")
-                .header("Authorization", "Bearer ${cfg.token}")
+                .header("Cookie", cfg.token)
                 .header("Accept", "text/event-stream")
                 .get()
                 .build()
@@ -569,7 +569,7 @@ class RunSocket(
             return false
         }
         // No credential, so no row to read and no daemon that could be reached.
-        if (current.sessionToken.isBlank() && current.refreshToken.isBlank()) return false
+        if (current.accessCookie.isBlank()) return false
         val node = try {
             withTimeoutOrNull(5_000) { history.node() }
         } catch (t: Throwable) {
@@ -611,7 +611,7 @@ class RunSocket(
         }
         val request = Request.Builder()
             .url("${cfg.base}/v1/sessions")
-            .header("Authorization", "Bearer ${cfg.token}")
+            .header("Cookie", cfg.token)
             .header("Accept", "application/json")
             .get()
             .build()
@@ -646,7 +646,7 @@ class RunSocket(
         val cfg = config() ?: return
         val request = Request.Builder()
             .url("${cfg.base}/v1/runs/$id")
-            .header("Authorization", "Bearer ${cfg.token}")
+            .header("Cookie", cfg.token)
             .header("Accept", "application/json")
             .get()
             .build()
@@ -712,7 +712,7 @@ class RunSocket(
     private suspend fun config(): Config? {
         val current = settings.current()
         val base = current.daemonUrl.trim().trimEnd('/')
-        if (base.isEmpty() || (current.sessionToken.isBlank() && current.refreshToken.isBlank())) return null
+        if (base.isEmpty() || (current.accessCookie.isBlank())) return null
         if (!base.startsWith("http://") && !base.startsWith("https://")) return null
         // Every run request authenticates with the Engine session saved at sign-in.
         return Config(base, clientToken.get(current, settings))

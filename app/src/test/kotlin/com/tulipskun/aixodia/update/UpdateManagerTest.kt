@@ -23,12 +23,10 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun aSignedOutInstallCannotUpdate() {
-        assertFalse(UpdateManager.canUpdate(signedIn = false))
-    }
-
-    @Test
-    fun aSignedInInstallKeepsTheUpdater() {
+    fun theUpdaterIsNotGatedOnSignInState() {
+        // Sign-in lives in Cloudflare Access, in front of the engine. Replacing
+        // the APK does not depend on it, so both states must offer the update.
+        assertTrue(UpdateManager.canUpdate(signedIn = false))
         assertTrue(UpdateManager.canUpdate(signedIn = true))
     }
 }

@@ -240,21 +240,22 @@ fun SettingsScreen(
 
             if (page == SettingsPage.Connection) {
                 val isSignedIn by settings.isSignedInFlow.collectAsStateWithLifecycle(initialValue = false)
-                SectionCard("GitHub account", "") {
+                SectionCard("Account", "") {
                     if (isSignedIn) {
-                        Text("Signed in with GitHub", style = MaterialTheme.typography.bodyMedium)
+                        Text("Signed in through Cloudflare Access", style = MaterialTheme.typography.bodyMedium)
                         OutlinedButton(
                             onClick = {
                                 scope.launch {
-                                    settings.saveSessionCredentials("", 0L, "", 0L)
-                                    com.tulipskun.aixodia.data.remote.ClientToken.shared.reset()
+                                    // Cloudflare owns the session; dropping the local
+                                    // cookie is what ends this device's access.
+                                    settings.saveAccessCookie("")
                                     onBack()
                                 }
                             },
                             enabled = !busy,
                         ) { Text("Sign out") }
                     } else {
-                        Text("Sign in with GitHub from the app sign-in screen.",
+                        Text("Sign in from the app's sign-in screen.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -126,15 +127,23 @@ fun ConnDot(c: ConnState) {
 }
 
 /**
- * First-launch sign-in gate. GitHub authorization runs in the system browser
- * using Authorization Code + PKCE; the callback is completed by MainActivity.
+ * First-launch sign-in gate.
+ *
+ * Sign-in is Cloudflare Access: the engine hostname sits behind it, and the
+ * identity provider choice (GitHub or a one-time email PIN) is made on
+ * Cloudflare's own page. The app runs that page in a WebView here and keeps the
+ * resulting `CF_Authorization` cookie — it never holds a client secret or a
+ * GitHub token.
  */
 @Composable
 fun SetupNeeded(
-    onSignedIn: (com.tulipskun.aixodia.data.remote.EngineSession) -> Unit,
+    daemonUrl: String,
+    onSignedIn: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
@@ -151,7 +160,7 @@ fun SetupNeeded(
             Text("Sign in to AIxodia", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Spacer(Modifier.size(8.dp))
             Text(
-                "Continue securely with your GitHub account.",
+                "Sign in with GitHub or a one-time email PIN. Cloudflare handles the sign-in.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -161,13 +170,29 @@ fun SetupNeeded(
             Button(
                 onClick = {
                     error = ""
-                    runCatching {
-                        com.tulipskun.aixodia.data.remote.GitHubOAuthFlow.start(context)
-                    }.onFailure { error = it.message ?: "Unable to open GitHub sign-in" }
+                    busy = true
+                    scope.launch {
+                        try {
+                            val origin = if (daemonUrl.isBlank()) {
+                                com.tulipskun.aixodia.DEFAULT_DAEMON_URL
+                            } else {
+                                daemonUrl
+                            }
+                            com.tulipskun.aixodia.data.remote.AccessLogin.signIn(context, origin)
+                            onSignedIn()
+                        } catch (failure: Throwable) {
+                            if (failure !is kotlinx.coroutines.CancellationException) {
+                                error = failure.message ?: "Unable to finish sign-in"
+                            }
+                        } finally {
+                            busy = false
+                        }
+                    }
                 },
+                enabled = !busy,
                 modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
             ) {
-                Text("Continue with GitHub")
+                Text(if (busy) "Signing in…" else "Continue to sign in")
             }
             if (error.isNotBlank()) {
                 Spacer(Modifier.size(12.dp))

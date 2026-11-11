@@ -886,7 +886,7 @@ class TerminalSocket(
                 delay(RETRY_MS)
                 continue
             }
-            if (c.sessionToken.isBlank() && c.refreshToken.isBlank()) {
+            if (c.accessCookie.isBlank()) {
                 // Nothing to connect with: the sign-in gate has not been passed.
                 link.updateError(com.tulipskun.aixodia.R.string.terminal_no_address)
                 link.setState(TermState.CLOSED)
@@ -1141,7 +1141,7 @@ class TerminalSocket(
         } catch (t: Throwable) {
             return false
         }
-        if (current.sessionToken.isBlank() && current.refreshToken.isBlank()) return false
+        if (current.accessCookie.isBlank()) return false
         val node = try {
             withTimeoutOrNull(5_000) { history.node() }
         } catch (t: Throwable) {

@@ -178,6 +178,7 @@ fun ChatScreen(
     clientToken: ClientToken = ClientToken.shared,
 ) {
     val isSignedIn by settings.isSignedInFlow.collectAsStateWithLifecycle(initialValue = false)
+    val daemonUrl by settings.daemonUrlFlow.collectAsStateWithLifecycle(initialValue = "")
     val discoveryState by if (discovery != null) discovery.state.collectAsStateWithLifecycle(initialValue = com.tulipskun.aixodia.data.remote.DiscoveryState()) else remember { mutableStateOf(com.tulipskun.aixodia.data.remote.DiscoveryState()) }
 
     // Resolve the stored Engine session before choosing the first screen.
@@ -273,14 +274,12 @@ fun ChatScreen(
             return
         }
         SetupNeeded(
-            onSignedIn = { session ->
+            daemonUrl = daemonUrl,
+            onSignedIn = {
+                // AccessLogin already persisted the cookie; the flag re-reads it
+                // so the gate opens without waiting for a config change event.
                 configuredScope.launch {
-                    settings.saveSessionCredentials(
-                        session.token,
-                        session.expiresAt,
-                        session.refreshToken,
-                        session.refreshExpiresAt,
-                    )
+                    runCatching { settings.isSignedInFlow.first() }
                 }
             },
         )

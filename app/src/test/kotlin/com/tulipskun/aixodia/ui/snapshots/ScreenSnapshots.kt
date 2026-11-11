@@ -22,7 +22,7 @@ class ScreenSnapshots {
 
     @Test
     fun setupNeeded() = paparazzi.snapshot {
-        AIxodiaTheme { SetupNeeded(onSignedIn = { }) }
+        AIxodiaTheme { SetupNeeded(daemonUrl = "https://aixodia.dpdns.org", onSignedIn = { }) }
     }
 
     @Test
