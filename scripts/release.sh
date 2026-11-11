@@ -139,10 +139,14 @@ cat > "$VERSION_ASSET" <<EOF
 EOF
 
 echo "building $tag (versionCode=$VERSION_CODE)"
-"$GRADLE" assembleDebug --console=plain \
+# The release variant, not debug: it is minified by R8, carries no debug
+# instrumentation, and is several megabytes smaller for people to download.
+# It is signed with the same stable key, so an upgrade installs over the
+# previous release with data preserved.
+"$GRADLE" assembleRelease --console=plain \
   -PaixodiaVersionCode="$VERSION_CODE" -PaixodiaVersionName="$VERSION_NAME"
 
-APK=app/build/outputs/apk/debug/app-debug.apk
+APK=app/build/outputs/apk/release/app-release.apk
 [ -f "$APK" ] || { echo "error: $APK was not produced" >&2; exit 1; }
 
 # The signature is the whole point: a different key cannot install over the
