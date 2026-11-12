@@ -29,6 +29,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# A release writes several gigabytes (compile, minify, sign). On a full disk the
+# failure surfaces as a Gradle error inside some task, which reads like a code
+# problem; checking here names the real cause. If space is short the caches are
+# dropped first, since they cost only the time to rebuild them.
+if [ -x "$HOME/bin/disk-guard.sh" ]; then
+  "$HOME/bin/disk-guard.sh" check >/dev/null 2>&1 || "$HOME/bin/disk-guard.sh" clean >&2
+  "$HOME/bin/disk-guard.sh" check >/dev/null || {
+    echo "error: not enough free disk space to build a release" >&2
+    "$HOME/bin/disk-guard.sh" report >&2
+    exit 1
+  }
+fi
+
 # A toolchain that is already configured wins; otherwise fall back to the local
 # unpacked copies this repo is developed against.
 export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
