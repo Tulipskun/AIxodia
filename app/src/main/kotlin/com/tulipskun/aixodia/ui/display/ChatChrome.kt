@@ -132,19 +132,18 @@ fun ConnDot(c: ConnState) {
 /**
  * First-launch sign-in gate.
  *
- * Two ways in, both ending at Cloudflare Access:
+ * One way in, following `auth_system.md`: type the address, get a token at once
+ * in state `pending`, confirm it in a browser behind Cloudflare Access, and the
+ * app polls until the engine reports it active.
  *
- * * **Email gate** (`auth_system.md`): type the address, get a token at once in
- *   state `pending`, open the confirmation page in a browser and press Confirm.
- *   The app polls until the engine reports the token active. This is the path
- *   that works when the user has no Access session yet and wants the app to
- *   hold a credential the moment they start.
- * * **Browser sign-in**: the PKCE hand-off that needs no typing at all when a
- *   browser session already exists.
+ * There used to be a second button here running the PKCE hand-off from
+ * `AccessLogin`. It was dropped because it added nothing: both paths end at the
+ * same Access login, and only this one checks the address against the engine's
+ * allowlist. Two buttons for one outcome is a choice the user should not have to
+ * make.
  *
- * Both are offered rather than replacing one with the other: the email path
- * fails closed on an allowlist, so an engine without one configured still lets
- * people in through the browser.
+ * `AccessLogin` itself stays because the `aixodia://auth/callback` deep link is
+ * still handled in `MainActivity`; removing it is a separate change.
  */
 @Composable
 fun SetupNeeded(
@@ -174,7 +173,7 @@ fun SetupNeeded(
             Text("Sign in to AIxodia", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Spacer(Modifier.size(8.dp))
             Text(
-                "Enter your email to get started, or continue in the browser if you already have a session.",
+                "Enter the email address this engine allows, then confirm in the browser.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -272,44 +271,6 @@ fun SetupNeeded(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
-            }
-            Spacer(Modifier.size(16.dp))
-            Text(
-                "or",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.size(16.dp))
-            Button(
-                onClick = {
-                    error = ""
-                    busy = true
-                    scope.launch {
-                        try {
-                            val origin = if (daemonUrl.isBlank()) {
-                                com.tulipskun.aixodia.DEFAULT_DAEMON_URL
-                            } else {
-                                daemonUrl
-                            }
-                            // The browser does the login (RFC 8252), so an
-                            // existing session there means no typing at all.
-                            // The engine hands a code back on the aixodia://
-                            // deep link, and MainActivity completes the exchange.
-                            val url = com.tulipskun.aixodia.data.remote.AccessLogin.begin(
-                                origin,
-                                com.tulipskun.aixodia.data.remote.AccessLogin.startAttempt(),
-                            )
-                            com.tulipskun.aixodia.data.remote.AccessLogin.openBrowser(context, url)
-                        } catch (failure: Throwable) {
-                            error = failure.message ?: "Unable to open sign-in"
-                            busy = false
-                        }
-                    }
-                },
-                enabled = !busy,
-                modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
-            ) {
-                Text(if (busy) "Waiting for the browser…" else "Continue to sign in")
             }
             Spacer(Modifier.size(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
