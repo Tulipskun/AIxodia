@@ -38,18 +38,26 @@ if [ -z "$ANDROID_HOME" ]; then
     if [ -x "$a/platform-tools/adb" ]; then export ANDROID_HOME="$a"; break; fi
   done
 fi
-if ! command -v gradle >/dev/null 2>&1; then
-  for g in /opt/gradle-*/bin; do
-    if [ -x "$g/gradle" ]; then export PATH="$g:$PATH"; break; fi
-  done
+# The project pins its Gradle version in gradle/wrapper/gradle-wrapper.properties,
+# and the Android plugin refuses to load on anything older. The wrapper is
+# therefore preferred over whatever `gradle` happens to be installed: a release
+# machine with an older system Gradle used to pick that one and fail inside the
+# Android plugin, which reads as a project problem rather than a toolchain one.
+# An explicit GRADLE override still wins for a machine that has a reason to.
+if [ -z "${GRADLE:-}" ]; then
+  if [ -x ./gradlew ]; then
+    GRADLE=./gradlew
+  elif command -v gradle >/dev/null 2>&1; then
+    GRADLE=gradle
+    echo "warning: no ./gradlew here; using system gradle, which may not match the pinned version" >&2
+  else
+    # Last resort: an unpacked SDK-style Gradle next to the JDK.
+    for g in /opt/gradle-*/bin /opt/gradle/bin; do
+      if [ -x "$g/gradle" ]; then export PATH="$g:$PATH"; GRADLE=gradle; break; fi
+    done
+  fi
 fi
-if [ -n "${GITHUB_ACTIONS:-}" ] && [ -x ./gradlew ]; then
-  GRADLE=./gradlew
-elif command -v gradle >/dev/null 2>&1; then
-  GRADLE=gradle
-elif [ -x ./gradlew ]; then
-  GRADLE=./gradlew
-else
+if [ -z "${GRADLE:-}" ]; then
   echo "error: gradle is not on PATH and no ./gradlew wrapper was found" >&2
   exit 1
 fi
@@ -139,6 +147,16 @@ cat > "$VERSION_ASSET" <<EOF
 EOF
 
 echo "building $tag (versionCode=$VERSION_CODE)"
+# Fail here, with a readable message, if the Gradle that was picked cannot run
+# this project — rather than letting the Android plugin throw a stack trace that
+# looks like a broken build.
+PinnedGradle=$(sed -n 's/.*gradle-\([0-9][0-9.]*\)-.*/\1/p' gradle/wrapper/gradle-wrapper.properties 2>/dev/null | head -1)
+ActualGradle=$("$GRADLE" --version 2>/dev/null | sed -n 's/^Gradle \([0-9][0-9.]*\).*/\1/p' | head -1)
+if [ -n "$PinnedGradle" ] && [ -n "$ActualGradle" ] && [ "$ActualGradle" != "$PinnedGradle" ]; then
+  echo "error: this project needs Gradle $PinnedGradle but '$GRADLE' is $ActualGradle" >&2
+  echo "       run the wrapper instead: ./scripts/release.sh (it prefers ./gradlew)" >&2
+  exit 1
+fi
 # The release variant, not debug: it is minified by R8, carries no debug
 # instrumentation, and is several megabytes smaller for people to download.
 # It is signed with the same stable key, so an upgrade installs over the
