@@ -45,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -65,6 +66,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
+import com.tulipskun.aixodia.SettingsStore
 import com.tulipskun.aixodia.BuildConfig
 import com.tulipskun.aixodia.R
 import androidx.compose.ui.semantics.contentDescription
@@ -130,11 +132,19 @@ fun ConnDot(c: ConnState) {
 /**
  * First-launch sign-in gate.
  *
- * Sign-in is Cloudflare Access: the engine hostname sits behind it, and the
- * identity provider choice (GitHub or a one-time email PIN) is made on
- * Cloudflare's own page. The app runs that page in a WebView here and keeps the
- * resulting `CF_Authorization` cookie — it never holds a client secret or a
- * GitHub token.
+ * Two ways in, both ending at Cloudflare Access:
+ *
+ * * **Email gate** (`auth_system.md`): type the address, get a token at once in
+ *   state `pending`, open the confirmation page in a browser and press Confirm.
+ *   The app polls until the engine reports the token active. This is the path
+ *   that works when the user has no Access session yet and wants the app to
+ *   hold a credential the moment they start.
+ * * **Browser sign-in**: the PKCE hand-off that needs no typing at all when a
+ *   browser session already exists.
+ *
+ * Both are offered rather than replacing one with the other: the email path
+ * fails closed on an allowlist, so an engine without one configured still lets
+ * people in through the browser.
  */
 @Composable
 fun SetupNeeded(
@@ -146,6 +156,9 @@ fun SetupNeeded(
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var email by remember { mutableStateOf("") }
+    var awaitingConfirm by remember { mutableStateOf(false) }
+    val store = remember { SettingsStore(context) }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
@@ -161,13 +174,112 @@ fun SetupNeeded(
             Text("Sign in to AIxodia", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Spacer(Modifier.size(8.dp))
             Text(
-                "Sign in with GitHub or a one-time email PIN in your browser. Cloudflare handles the sign-in.",
+                "Enter your email to get started, or continue in the browser if you already have a session.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.widthIn(max = 420.dp),
             )
             Spacer(Modifier.size(20.dp))
+            // The email gate. Disabled while a request is in flight so a
+            // double tap cannot mint two tokens.
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it; error = "" },
+                label = { Text("Email") },
+                singleLine = true,
+                enabled = !busy && !awaitingConfirm,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Email,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Go,
+                ),
+                modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+            )
+            Spacer(Modifier.size(10.dp))
+            Button(
+                enabled = !busy && !awaitingConfirm && email.isNotBlank(),
+                onClick = {
+                    error = ""
+                    busy = true
+                    scope.launch {
+                        try {
+                            val origin = daemonUrl.ifBlank { com.tulipskun.aixodia.DEFAULT_DAEMON_URL }
+                            val issued = com.tulipskun.aixodia.data.remote.EmailGate
+                                .request(origin, email)
+                            // Store the token now: it is inert until confirmed, and
+                            // holding it means the app can poll for the change
+                            // without keeping it only in memory.
+                            store.saveAccessCookie(issued.token)
+                            awaitingConfirm = true
+                            busy = false
+                            // Open the confirmation page. It sits behind Access,
+                            // so the user logs in there; the page then offers the
+                            // Confirm button.
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(issued.confirmUrl),
+                                ),
+                            )
+                            // Poll until the engine says active. The window is
+                            // short (the confirm TTL), and giving up quietly is
+                            // right: the user can press the button again.
+                            repeat(150) { attempt ->
+                                kotlinx.coroutines.delay(2_000)
+                                val state = com.tulipskun.aixodia.data.remote.EmailGate
+                                    .status(origin, issued.token)
+                                when (state) {
+                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Active -> {
+                                        awaitingConfirm = false
+                                        onSignedIn()
+                                        return@launch
+                                    }
+                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Expired,
+                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Revoked,
+                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Unknown -> {
+                                        // The engine no longer has this token
+                                        // (restarted, or it timed out). Start
+                                        // over rather than polling a dead one.
+                                        awaitingConfirm = false
+                                        store.saveAccessCookie("")
+                                        error = "That link expired. Send a new one."
+                                        return@launch
+                                    }
+                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Pending -> {
+                                        if (attempt == 149) {
+                                            awaitingConfirm = false
+                                            error = "Still waiting for the browser. Tap Send again."
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (failure: Throwable) {
+                            busy = false
+                            awaitingConfirm = false
+                            error = failure.message ?: "Unable to request a sign-in"
+                        }
+                    }
+                },
+                modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+            ) {
+                Text(if (awaitingConfirm) "Waiting for Confirm…" else "Send sign-in link")
+            }
+            if (awaitingConfirm) {
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Press Confirm in the browser, then come back here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Spacer(Modifier.size(16.dp))
+            Text(
+                "or",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.size(16.dp))
             Button(
                 onClick = {
                     error = ""
