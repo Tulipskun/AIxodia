@@ -140,6 +140,7 @@ fun ConnDot(c: ConnState) {
 fun SetupNeeded(
     daemonUrl: String,
     onSignedIn: () -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -199,7 +200,13 @@ fun SetupNeeded(
                 Text(if (busy) "Waiting for the browser…" else "Continue to sign in")
             }
             Spacer(Modifier.size(12.dp))
-            TextButton(onClick = { error = ""; busy = false }) { Text("Cancel") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { error = ""; busy = false }) { Text("Cancel") }
+                // Reachable before sign-in on purpose: updating and setting the
+                // engine address do not need a session, and a broken sign-in
+                // must not trap the user in a screen with no way out.
+                TextButton(onClick = onOpenSettings) { Text("Settings") }
+            }
             if (error.isNotBlank()) {
                 Spacer(Modifier.size(12.dp))
                 Text(error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)

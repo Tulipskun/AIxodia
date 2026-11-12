@@ -275,6 +275,7 @@ fun ChatScreen(
         }
         SetupNeeded(
             daemonUrl = daemonUrl,
+            onOpenSettings = { showSettings = true },
             onSignedIn = {
                 // AccessLogin already wrote the cookie to SettingsStore, which
                 // isSignedInFlow watches, so the gate reopens on its own. This

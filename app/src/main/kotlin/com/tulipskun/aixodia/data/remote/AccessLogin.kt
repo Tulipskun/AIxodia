@@ -39,6 +39,17 @@ object AccessLogin {
     /** Deep link Access returns to; must match the manifest's intent-filter. */
     const val REDIRECT_URI = "aixodia://auth/callback"
 
+    /**
+     * The Cloudflare Access audience tag for the engine hostname.
+     *
+     * Published metadata, not a secret: it names which Access application the
+     * login belongs to and is visible in the login URL of any browser that
+     * reaches the engine. The engine verifies the same value server-side, so a
+     * wrong or forged copy here buys nothing.
+     */
+    private const val DEFAULT_ACCESS_AUD =
+        "1e2270863178234a46c4f3e1c91a4dc2558d6b428258e4b63ff365fea607cbbd"
+
     private const val AUTHORIZE_PATH = "/v1/auth/authorize"
     private const val EXCHANGE_PATH = "/v1/auth/exchange"
 
@@ -109,11 +120,31 @@ object AccessLogin {
             ?: throw IOException("Could not start sign-in: no code returned")
 
         // The browser lands on the engine's own hostname first, because that is
-        // the only redirect Access accepts; that page forwards to the deep link.
-        // Asking Access to redirect straight to aixodia:// is rejected with 400.
-        "$base/cdn-cgi/access/login?redirect_url=" +
-            java.net.URLEncoder.encode("$base/v1/auth/callback?code=$code", "UTF-8")
+        // the only redirect Access accepts. Three details are load-bearing, all
+        // found by testing against the live hostname:
+        //   - the hostname must appear in the path, or Access answers 404;
+        //   - `kid` is required, and is the app's audience tag;
+        //   - redirect_url must be a *relative* path. A full URL answers 400.
+        loginUrlFor(base, code)
     }
+
+    /** The Access login URL; see the notes above for why each part is required. */
+    internal fun loginUrlFor(origin: String, code: String): String {
+        val base = origin.trim().trimEnd('/')
+        val callbackPath = "/v1/auth/callback?code=$code"
+        return "$base/cdn-cgi/access/login/${hostOf(base)}?kid=${appAudience()}" +
+            "&redirect_url=" + java.net.URLEncoder.encode(callbackPath, "UTF-8")
+    }
+
+    private fun hostOf(origin: String): String =
+        origin.trim().trimEnd('/').removePrefix("https://").removePrefix("http://").substringBefore('/')
+
+    /**
+     * The Access application audience tag, which Access calls `kid` on its login
+     * URL. It is published, not secret: it identifies which application the
+     * login is for. Both builders that point at this hostname use this value.
+     */
+    private fun appAudience(): String = DEFAULT_ACCESS_AUD
 
     /** Trades the deep-link code for a session token. */
     suspend fun exchange(origin: String, code: String, verifier: String): Session =

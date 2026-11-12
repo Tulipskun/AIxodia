@@ -71,6 +71,20 @@ class AccessLoginTest {
     }
 
     @Test
+    fun theLoginUrlCarriesHostnameKidAndARelativeRedirect() {
+        // All three are required by Access and each was missing at some point:
+        // without the hostname in the path it answers 404, without kid it answers
+        // 404, and a full-URL redirect_url answers 400.
+        val url = AccessLogin.loginUrlFor("https://aixodia.dpdns.org", "code-1")
+        assertTrue(url, url.startsWith("https://aixodia.dpdns.org/cdn-cgi/access/login/aixodia.dpdns.org?"))
+        assertTrue(url, url.contains("kid="))
+        val redirect = Uri.parse(url).getQueryParameter("redirect_url") ?: ""
+        assertEquals("/v1/auth/callback?code=code-1", redirect)
+        assertFalse("redirect_url must be relative: $redirect", redirect.startsWith("http"))
+        assertFalse("The 404 shape must not come back: $url", url.contains("/cdn-cgi/access/login?"))
+    }
+
+    @Test
     fun rememberinGAndClearingThePendingVerifier() {
         val verifier = AccessLogin.startAttempt()
         assertEquals(verifier, AccessLogin.pendingVerifier)
