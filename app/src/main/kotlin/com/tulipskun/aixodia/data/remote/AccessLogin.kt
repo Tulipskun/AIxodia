@@ -1,189 +1,193 @@
 package com.tulipskun.aixodia.data.remote
 
-import android.annotation.SuppressLint
 import android.content.Context
-import android.net.http.SslError
-import android.webkit.CookieManager
-import android.webkit.SslErrorHandler
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.content.Intent
+import android.net.Uri
+import androidx.browser.customtabs.CustomTabsIntent
 import com.tulipskun.aixodia.ConnConfig
 import com.tulipskun.aixodia.SettingsStore
-import java.io.IOException
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
+import java.security.MessageDigest
+import java.security.SecureRandom
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Cloudflare Access sign-in for the Android app.
+ * Native-app sign-in: the browser does the login, this app gets a PKCE code back.
  *
- * Sign-in happens in Cloudflare, not in this app: Access fronts the engine
- * hostname, shows the GitHub / one-time-PIN login, and stores a
- * `CF_Authorization` cookie for the engine's origin. This class drives that
- * login in an off-screen WebView, then keeps the resulting cookie and presents
- * it on every engine request.
+ * Why the system browser and not a WebView (RFC 8252): an embedded user-agent
+ * lets the app read the credentials the user types, which trains people to
+ * authenticate in windows that may not be theirs. It also cannot reuse the
+ * session the user already has in their browser. A Custom Tab fixes both, and
+ * the app still ends up with a credential of its own because Access redirects
+ * back to the `aixodia://auth/callback` deep link registered in the manifest.
  *
- * Why a WebView and not a browser: the app must end up holding the cookie
- * itself. A Custom Tab would authenticate the user's browser and leave the app
- * without credentials, and shipping a Cloudflare service token in a publicly
- * released APK would hand anyone who downloads it full control of the engine.
- *
- * There is no client secret, no PKCE verifier and no GitHub token here: the
- * only thing stored is the Access cookie, encrypted with the Android Keystore.
+ * No client secret exists in this app — the APK is published publicly, so this
+ * is an OAuth public client. PKCE is what stops another app that intercepts the
+ * deep link from redeeming the code: only the verifier this device generated
+ * hashes to the challenge the engine recorded before the browser opened.
  */
 object AccessLogin {
-    /** Access sets this cookie for the engine's origin once the login succeeds. */
-    private const val SESSION_COOKIE = "CF_Authorization"
+    /** Deep link Access returns to; must match the manifest's intent-filter. */
+    const val REDIRECT_URI = "aixodia://auth/callback"
 
-    /**
-     * The URL the WebView starts on.
-     *
-     * Not `/cdn-cgi/access/login`: that route answers 404 unless it is handed a
-     * kid and redirect_url, which stranded the sign-in on an error page. Any
-     * protected path works because Access redirects it to the real login page.
-     */
-    internal fun loginEntryUrl(origin: String): String =
-        "${origin.trim().trimEnd('/')}/healthz"
+    private const val AUTHORIZE_PATH = "/v1/auth/authorize"
+    private const val EXCHANGE_PATH = "/v1/auth/exchange"
 
-    /**
-     * The cookie lives in [SettingsStore], not in a store of this object's own.
-     *
-     * It briefly used EncryptedSharedPreferences here while the sign-in gate read
-     * `SettingsStore.isSignedInFlow` from DataStore. Nothing ever wrote the value
-     * the gate was watching, so a successful login left the user on the sign-in
-     * screen. One owner, one key, or the two disagree.
-     */
-    private fun store(context: Context) = SettingsStore(context)
+    /** PKCE allows 43..128 characters; 48 random bytes encodes to 64. */
+    private const val VERIFIER_BYTES = 48
 
-    /** The cookie header value remembered for [origin], or empty when signed out. */
-    suspend fun cookie(context: Context, origin: String): String = withContext(Dispatchers.IO) {
-        val stored = store(context).current()
-        if (stored.daemonUrl.trimEnd('/') != origin.trimEnd('/')) return@withContext ""
-        stored.accessCookie
+    /** base64url without padding, as PKCE requires. */
+    private fun base64Url(bytes: ByteArray): String =
+        android.util.Base64.encodeToString(bytes, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP)
+
+    fun newVerifier(): String {
+        val bytes = ByteArray(VERIFIER_BYTES)
+        SecureRandom().nextBytes(bytes)
+        return base64Url(bytes)
     }
 
-    suspend fun save(context: Context, origin: String, cookie: String) = withContext(Dispatchers.IO) {
-        store(context).saveAccessCookie(cookie)
-    }
-
-    suspend fun clear(context: Context) = withContext(Dispatchers.IO) {
-        store(context).saveAccessCookie("")
+    fun challengeFor(verifier: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII))
+        return base64Url(digest)
     }
 
     /**
-     * Run the Access login for [origin] and return the resulting cookie header.
+     * The verifier for the attempt currently in flight.
      *
-     * The WebView is shown in a dialog the caller owns ([attach]), because the
-     * user has to see and dismiss Cloudflare's page. It is destroyed before
-     * returning so no authenticated page is left in memory.
+     * It has to outlive the browser round trip, which leaves this process and
+     * comes back through a deep link handled by MainActivity — so it cannot
+     * live in composable state. It is only ever held in memory: a stolen
+     * verifier plus a stolen code is what PKCE exists to prevent, and neither is
+     * written to disk.
      */
-    @SuppressLint("SetJavaScriptEnabled")
-    suspend fun signIn(
-        context: Context,
-        origin: String,
-        attach: (WebView) -> Unit = {},
-    ): String {
+    @Volatile
+    var pendingVerifier: String = ""
+        private set
+
+    /** Starts a sign-in attempt and remembers the verifier for the exchange. */
+    fun startAttempt(): String = newVerifier().also { pendingVerifier = it }
+
+    /** Drops the in-flight verifier once it has been redeemed. */
+    fun clearPending() {
+        pendingVerifier = ""
+    }
+
+    private val http = OkHttpClient.Builder().build()
+
+    /** Registers the attempt and returns the URL to open in the browser. */
+    suspend fun begin(origin: String, verifier: String): String = withContext(Dispatchers.IO) {
         val base = origin.trim().trimEnd('/')
-        require(base.startsWith("https://") || base.startsWith("http://")) {
-            "Engine address is invalid"
+        val body = JSONObject()
+            .put("code_challenge", challengeFor(verifier))
+            .put("redirect_uri", REDIRECT_URI)
+            .toString()
+
+        val request = Request.Builder()
+            .url("$base$AUTHORIZE_PATH")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = http.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException("Could not start sign-in (${response.code})")
+            }
+            text
         }
-        CookieManager.getInstance().setAcceptCookie(true)
 
-        return withContext(Dispatchers.Main) {
-            val scope = CoroutineScope(Dispatchers.IO)
-            suspendCancellableCoroutine { continuation ->
-                var settled = false
-                val view = WebView(context)
-                fun finish(result: Result<String>) {
-                    if (settled) return
-                    settled = true
-                    view.stopLoading()
-                    view.destroy()
-                    result.fold(continuation::resume, continuation::resumeWithException)
+        val code = runCatching { JSONObject(response).optString("code") }.getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: throw IOException("Could not start sign-in: no code returned")
+
+        // The browser lands on the engine's own hostname first, because that is
+        // the only redirect Access accepts; that page forwards to the deep link.
+        // Asking Access to redirect straight to aixodia:// is rejected with 400.
+        "$base/cdn-cgi/access/login?redirect_url=" +
+            java.net.URLEncoder.encode("$base/v1/auth/callback?code=$code", "UTF-8")
+    }
+
+    /** Trades the deep-link code for a session token. */
+    suspend fun exchange(origin: String, code: String, verifier: String): Session =
+        withContext(Dispatchers.IO) {
+            val base = origin.trim().trimEnd('/')
+            val body = JSONObject()
+                .put("code", code)
+                .put("code_verifier", verifier)
+                .put("redirect_uri", REDIRECT_URI)
+                .toString()
+
+            val request = Request.Builder()
+                .url("$base$EXCHANGE_PATH")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            http.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    throw IOException(exchangeError(response.code, text))
                 }
-
-                view.settings.javaScriptEnabled = true
-                view.settings.domStorageEnabled = true
-                view.webViewClient = object : WebViewClient() {
-                    // The cookie is set on the cross-origin redirect chain, so it
-                    // is read on every finished page, not only the last one.
-                    override fun onPageFinished(view: WebView, url: String?) {
-                        val cookie = CookieManager.getInstance().getCookie(base).orEmpty()
-                        if (cookie.contains(SESSION_COOKIE)) {
-                            // Persist off the main thread; the flow the gate reads
-                            // only updates once this write lands.
-                            scope.launch {
-                                runCatching { save(context, base, cookie) }
-                                finish(Result.success(cookie))
-                            }
-                        }
-                    }
-
-                    // Without this a failed load left the user staring at a
-                    // blank page with the button spinning and no way to tell
-                    // what went wrong.
-                    override fun onReceivedError(
-                        view: WebView,
-                        request: WebResourceRequest,
-                        error: WebResourceError,
-                    ) {
-                        if (!request.isForMainFrame) return
-                        finish(Result.failure(IOException("Could not reach the sign-in page: ${error.description}")))
-                    }
-
-                    override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
-                        // Cancelling leaves the page blank, so end the flow with
-                        // a reason instead.
-                        handler.cancel()
-                        finish(Result.failure(IOException("The sign-in page's certificate was not trusted (${error.primaryError})")))
-                    }
-                }
-                continuation.invokeOnCancellation { finish(Result.failure(CancellationException())) }
-                try {
-                    attach(view)
-                    view.loadUrl(loginEntryUrl(base))
-                } catch (error: Throwable) {
-                    finish(Result.failure(error))
-                }
+                val obj = runCatching { JSONObject(text) }.getOrNull()
+                    ?: throw IOException("Sign-in returned an unexpected response")
+                Session(
+                    token = obj.optString("token"),
+                    subject = obj.optString("subject"),
+                    expiresAt = obj.optLong("expires_at", 0L),
+                )
             }
         }
+
+    private fun exchangeError(status: Int, text: String): String {
+        val code = runCatching { JSONObject(text).optString("code") }.getOrNull()
+        return when (code) {
+            "PKCE_MISMATCH" -> "Sign-in could not be verified. Try again."
+            "UNKNOWN_CODE" -> "This sign-in link has expired. Try again."
+            "NO_SUBJECT" -> "Sign-in did not finish in the browser. Try again."
+            "REDIRECT_MISMATCH" -> "Sign-in was redirected unexpectedly. Try again."
+            else -> "Sign-in failed ($status)"
+        }
     }
 
-    /** Forget the local Access cookie. The session at Cloudflare is left alone. */
-    suspend fun signOut(context: Context, origin: String) = withContext(Dispatchers.IO) {
-        clear(context)
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
+    /** Opens [url] in a Custom Tab, the browser surface RFC 8252 asks for. */
+    fun openBrowser(context: Context, url: String) {
+        val intent = CustomTabsIntent.Builder()
+            .setShowTitle(true)
+            .build()
+        intent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        intent.launchUrl(context, Uri.parse(url))
     }
+
+    /** Pulls the one-time code out of the `aixodia://auth/callback` deep link. */
+    fun codeFromDeepLink(uri: Uri): String? =
+        if (uri.scheme == "aixodia" && uri.host == "auth") uri.getQueryParameter("code") else null
+
+    data class Session(val token: String, val subject: String, val expiresAt: Long)
 }
 
 /**
  * Supplies the engine credential for a request.
  *
- * The engine no longer issues tokens, so this object's only job is to hand back
- * the Access cookie header. It keeps the small surface the rest of the app
- * already calls (`get`, `refresh`, `reset`) so transports did not have to change.
+ * The engine issues the session token now, so this reads it from
+ * [SettingsStore] and presents it as a bearer. Kept as a class with the same
+ * small surface the transports already call.
  */
 class ClientToken(
-    private val cookieProvider: (ConnConfig) -> String = { "" },
+    private val tokenProvider: (ConnConfig) -> String = { "" },
 ) {
-    /**
-     * Returns the `Cookie:` header value to present. When Cloudflare Access
-     * rejects the stored cookie the call fails and the UI asks for sign-in.
-     */
     suspend fun get(config: ConnConfig, settings: SettingsStore): String {
         val fixed = fixedValue
         if (fixed != null) return fixed
-        val cookie = cookieProvider(config).ifBlank { config.accessCookie }
-        require(cookie.isNotBlank()) { "Sign in to AIxodia to continue" }
-        return cookie
+        val token = tokenProvider(config).ifBlank { config.sessionToken }
+        require(token.isNotBlank()) { "Sign in to AIxodia to continue" }
+        return token
     }
 
     /** Legacy pass-through overload retained for isolated transport tests. */
@@ -194,9 +198,9 @@ class ClientToken(
         return sessionToken
     }
 
-    /** No refresh exists: Cloudflare owns the session, so this is a no-op. */
+    /** Sessions are minted by the engine; re-run the browser hand-off instead. */
     suspend fun refresh(refreshToken: String, daemonUrl: String): EngineSession =
-        throw IllegalStateException("The session is managed by Cloudflare Access")
+        throw IllegalStateException("Sign in again to renew the session")
 
     fun reset() = Unit
 

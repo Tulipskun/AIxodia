@@ -154,7 +154,7 @@ class DaemonDiscoveryTest {
         // now, so the socket's own state is what redraws it.
         val settings: SettingsStore = mock()
         whenever(settings.current()).thenReturn(
-            ConnConfig("", "https://aixodia.dpdns.org", "", "", "", "s", accessCookie = "A"),
+            ConnConfig("", "https://aixodia.dpdns.org", "", "", "", "s", sessionToken = "A"),
         )
         val history: HistoryApi = mock()
         whenever(history.node()).thenReturn(node("https://aixodia.dpdns.org", online = true))

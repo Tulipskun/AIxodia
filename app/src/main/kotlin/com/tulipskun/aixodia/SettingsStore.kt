@@ -21,12 +21,15 @@ const val DEFAULT_DAEMON_URL = "https://aixodia.dpdns.org"
 class SettingsStore(private val ctx: Context) {
     private val endpoint = stringPreferencesKey("endpoint")
     private val daemonUrl = stringPreferencesKey("daemon_url")
-    // Opaque Engine-issued session token, protected by Android Keystore.
-    private val sessionToken = stringPreferencesKey("session_token")
+    // Opaque Engine-issued session token, protected by Android Keystore. It
+    // lives in the "access_cookie" slot, which held the Cloudflare Access cookie
+    // before sign-in moved to the browser PKCE exchange; the name keeps the key
+    // stable so an existing install keeps working rather than silently signing
+    // everyone out.
+    private val sessionToken = stringPreferencesKey("access_cookie")
     private val sessionExpiresAt = stringPreferencesKey("session_expires_at")
     private val refreshToken = stringPreferencesKey("refresh_token")
     private val refreshExpiresAt = stringPreferencesKey("refresh_expires_at")
-    private val accessCookie = stringPreferencesKey("access_cookie")
     private val legacyGithubToken = stringPreferencesKey("github_token")
     private val sessionId = stringPreferencesKey("session_id")
     private val terminalSessionId = stringPreferencesKey("terminal_session_id")
@@ -143,7 +146,6 @@ class SettingsStore(private val ctx: Context) {
             sessionExpiresAt = accessExpires,
             refreshToken = storedRefresh,
             refreshExpiresAt = if (refreshInDate) refreshExpires else 0L,
-            accessCookie = TokenCipher.open(prefs[accessCookie].orEmpty()),
         )
     }
 
@@ -151,7 +153,7 @@ class SettingsStore(private val ctx: Context) {
     suspend fun saveAccessCookie(cookie: String) {
         val trimmed = cookie.trim()
         ctx.ds.edit {
-            if (trimmed.isBlank()) it.remove(accessCookie) else it[accessCookie] = TokenCipher.seal(trimmed)
+            if (trimmed.isBlank()) it.remove(sessionToken) else it[sessionToken] = TokenCipher.seal(trimmed)
         }
     }
 
@@ -194,7 +196,7 @@ class SettingsStore(private val ctx: Context) {
      * the cookie is still accepted is answered by the engine, not locally.
      */
     val isSignedInFlow: Flow<Boolean> = ctx.ds.data.map { prefs ->
-        TokenCipher.open(prefs[accessCookie].orEmpty()).isNotBlank()
+        TokenCipher.open(prefs[sessionToken].orEmpty()).isNotBlank()
     }
 
     suspend fun saveProvidersCache(daemonUrl: String, json: String) {
@@ -367,9 +369,4 @@ data class ConnConfig(
     val sessionExpiresAt: Long = 0L,
     val refreshToken: String = "",
     val refreshExpiresAt: Long = 0L,
-    /**
-     * The Cloudflare Access `Cookie:` header for [daemonUrl]. Sign-in is
-     * completed in Cloudflare, so this is the only credential the app carries.
-     */
-    val accessCookie: String = "",
 )

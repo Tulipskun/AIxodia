@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.lifecycle.lifecycleScope
+import com.tulipskun.aixodia.data.remote.AccessLogin
 import com.tulipskun.aixodia.ui.chat.ChatScreen
 import com.tulipskun.aixodia.ui.theme.AIxodiaTheme
 import kotlinx.coroutines.launch
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
         )
         val c = (application as AixodiaApp).container
         applyDebugSeed(intent)
+        finishSignInIfDeepLink(intent, c.settings)
         setContent {
             AIxodiaTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
@@ -41,6 +43,53 @@ class MainActivity : ComponentActivity() {
                         socket = c.chat, discovery = c.discovery,
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Cloudflare Access sends the browser back through `aixodia://auth/callback`.
+     *
+     * The activity may already be running when that arrives, so this handles
+     * both a cold start (from onCreate) and a warm one (onNewIntent).
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        finishSignInIfDeepLink(intent, (application as AixodiaApp).container.settings)
+    }
+
+    private fun finishSignInIfDeepLink(intent: Intent?, settings: SettingsStore) {
+        val uri = intent?.data ?: return
+        val code = AccessLogin.codeFromDeepLink(uri) ?: return
+        val verifier = AccessLogin.pendingVerifier
+        if (verifier.isBlank()) {
+            // No attempt in flight: a stale link, or one from a previous launch.
+            Toast.makeText(this, "That sign-in link has expired. Try again.", Toast.LENGTH_LONG).show()
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val origin = settings.current().daemonUrl
+                val session = AccessLogin.exchange(origin, code, verifier)
+                settings.saveSessionCredentials(
+                    accessToken = session.token,
+                    accessExpiresAt = session.expiresAt,
+                    refreshCredential = "",
+                    refreshCredentialExpiresAt = 0L,
+                )
+                AccessLogin.clearPending()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (session.subject.isBlank()) "Signed in" else "Signed in as ${session.subject}",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } catch (failure: Throwable) {
+                Toast.makeText(
+                    this@MainActivity,
+                    failure.message ?: "Sign-in failed",
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }

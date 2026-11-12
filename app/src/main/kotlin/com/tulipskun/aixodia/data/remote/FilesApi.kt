@@ -51,7 +51,7 @@ class FilesApi(
         val config = settings.current()
         val base = config.daemonUrl.trim().trimEnd('/')
         if (base.isBlank()) throw IllegalStateException("Daemon URL is not configured")
-        if (config.accessCookie.isBlank()) throw IllegalStateException("Sign in to AIxodia first")
+        if (config.sessionToken.isBlank()) throw IllegalStateException("Sign in to AIxodia first")
         return Request.Builder()
             .url(base + path)
             .header(

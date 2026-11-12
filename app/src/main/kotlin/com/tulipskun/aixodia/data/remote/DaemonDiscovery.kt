@@ -104,7 +104,7 @@ class DaemonDiscovery(
             report(DiscoveryPhase.UNREACHABLE, error = e.message?.take(120).orEmpty())
             return
         }
-        if (current.accessCookie.isBlank()) {
+        if (current.sessionToken.isBlank()) {
             report(DiscoveryPhase.NO_TOKEN)
             return
         }

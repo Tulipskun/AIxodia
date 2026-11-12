@@ -145,41 +145,6 @@ fun SetupNeeded(
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var webView by remember { mutableStateOf<android.webkit.WebView?>(null) }
-    var cancel by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var loading by remember { mutableStateOf(false) }
-
-    // Cloudflare's page has to be visible: the user picks GitHub or a PIN and
-    // types the code there. A headless WebView would leave the button looking
-    // like it did nothing.
-    if (webView != null) {
-        androidx.compose.ui.window.Dialog(
-            // Dismissing has to end the sign-in, or the coroutine waits forever
-            // and the button stays disabled with no way back.
-            onDismissRequest = { cancel?.invoke() },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            Surface(Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxSize()) {
-                    // AndroidView does not fill its parent on its own: it measured
-                    // to its intrinsic height and left Cloudflare's page as a thin
-                    // strip at the top that could not be scrolled or tapped.
-                    androidx.compose.ui.viewinterop.AndroidView(
-                        factory = { webView!! },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    // The first load is a redirect to another origin; show
-                    // something during it instead of a blank black screen.
-                    if (loading) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
@@ -195,7 +160,7 @@ fun SetupNeeded(
             Text("Sign in to AIxodia", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Spacer(Modifier.size(8.dp))
             Text(
-                "Sign in with GitHub or a one-time email PIN. Cloudflare handles the sign-in.",
+                "Sign in with GitHub or a one-time email PIN in your browser. Cloudflare handles the sign-in.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -206,40 +171,35 @@ fun SetupNeeded(
                 onClick = {
                     error = ""
                     busy = true
-                    val job = scope.launch {
+                    scope.launch {
                         try {
                             val origin = if (daemonUrl.isBlank()) {
                                 com.tulipskun.aixodia.DEFAULT_DAEMON_URL
                             } else {
                                 daemonUrl
                             }
-                            com.tulipskun.aixodia.data.remote.AccessLogin.signIn(
-                                context,
+                            // The browser does the login (RFC 8252), so an
+                            // existing session there means no typing at all.
+                            // The engine hands a code back on the aixodia://
+                            // deep link, and MainActivity completes the exchange.
+                            val url = com.tulipskun.aixodia.data.remote.AccessLogin.begin(
                                 origin,
-                                attach = { webView = it },
+                                com.tulipskun.aixodia.data.remote.AccessLogin.startAttempt(),
                             )
-                            webView = null
-                            cancel = null
-                            onSignedIn()
+                            com.tulipskun.aixodia.data.remote.AccessLogin.openBrowser(context, url)
                         } catch (failure: Throwable) {
-                            if (failure !is kotlinx.coroutines.CancellationException) {
-                                error = failure.message ?: "Unable to finish sign-in"
-                            }
-                            webView = null
-                            cancel = null
-                        } finally {
+                            error = failure.message ?: "Unable to open sign-in"
                             busy = false
-                            loading = false
                         }
                     }
-                    cancel = { job.cancel() }
-                    loading = true
                 },
                 enabled = !busy,
                 modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
             ) {
-                Text(if (busy) "Signing in…" else "Continue to sign in")
+                Text(if (busy) "Waiting for the browser…" else "Continue to sign in")
             }
+            Spacer(Modifier.size(12.dp))
+            TextButton(onClick = { error = ""; busy = false }) { Text("Cancel") }
             if (error.isNotBlank()) {
                 Spacer(Modifier.size(12.dp))
                 Text(error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)

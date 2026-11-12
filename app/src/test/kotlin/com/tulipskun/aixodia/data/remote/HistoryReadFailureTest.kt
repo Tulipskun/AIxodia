@@ -35,7 +35,7 @@ class HistoryReadFailureTest {
     }
 
     private suspend fun api(code: Int = 200, body: String = "{}", url: String = "https://daemon.test"): HistoryApi {
-        whenever(settings.current()).thenReturn(ConnConfig("", url, "", "", "", "A", accessCookie = "test-token"))
+        whenever(settings.current()).thenReturn(ConnConfig("", url, "", "", "", "A", sessionToken = "test-token"))
         whenever(client.newCall(any())).thenReturn(call)
         whenever(call.execute()).thenAnswer {
             Response.Builder().request(Request.Builder().url("https://daemon.test").build())
