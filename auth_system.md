@@ -1,112 +1,80 @@
-# Auth System: Cloudflare Access Service Token (ผู้ใช้กรอกเองครั้งเดียว)
+# Auth System: Email Gate + Cloudflare Access Session Confirmation
 
-แอปนี้ใช้คนเดียว จึงเลือกแบบ **ให้ผู้ใช้กรอก Service Token เองในหน้า Settings ครั้งเดียว** แล้วเก็บแบบเข้ารหัสในเครื่อง
-ไม่มี token อยู่ในซอร์สโค้ด, `BuildConfig`, หรือ APK เลย
+## เป้าหมาย
 
-## หลักการ
+ให้ Android App ขอ Token จาก Engine ได้เฉพาะเมื่อผู้ใช้กรอก Email ที่อยู่ในรายการ Email ที่อนุญาตไว้แล้ว จากนั้นให้ผู้ใช้เปิดหน้าเว็บผ่าน Cloudflare Access และกด Confirm เพื่อเปิดใช้งาน Token ที่ Engine ออกให้
 
-1. สร้าง Service Token ใน Cloudflare Zero Trust
-   - Access → Service Auth → Service Tokens → Create Service Token
-   - ก๊อป `Client ID` และ `Client Secret` ทันที (Secret แสดงครั้งเดียว)
-2. ตั้ง Policy ของ Application ที่ครอบ hostname ของ tunnel
-   - Action ต้องเป็น **Service Auth** (ไม่ใช่ Allow)
-   - Include เลือก token ที่สร้างไว้
-   - จำกัดเฉพาะ hostname ที่แอปเรียกจริง
-3. เปิดแอป → Settings → วาง Client ID / Client Secret ครั้งเดียว
-4. แอปเก็บค่าด้วย `EncryptedSharedPreferences` (คีย์อยู่ใน Android Keystore)
-5. ทุก request ไปยัง hostname ที่กำหนด แอปแนบ header:
-   - `CF-Access-Client-Id`
-   - `CF-Access-Client-Secret`
+## Flow
 
-## Dependency
+1. Android App แสดงช่องให้ผู้ใช้กรอก Email
+2. App ส่ง Email ไปยัง Engine เพื่อขอ Token
+3. Engine ตรวจสอบ Email กับรายการ Email ที่อนุญาต (Allowlist)
+4. หาก Email ว่าง, รูปแบบไม่ถูกต้อง หรือไม่อยู่ใน Allowlist:
+   - ปฏิเสธคำขอ
+   - ไม่ออก Token และไม่สร้าง Pending Session
+   - ไม่อนุญาตให้ App เข้าถึง API ที่ต้องยืนยันตัวตน
+5. หาก Email ผ่านการตรวจสอบ:
+   - Engine ออก Token ให้ทันทีในสถานะ `pending`
+   - Engine สร้างรายการ Session ที่รอการยืนยัน
+   - Engine ส่ง Token และ URL สำหรับยืนยันกลับให้ App
+6. ผู้ใช้เปิด URL ใน Browser ซึ่งหน้าเว็บถูกป้องกันด้วย Cloudflare Access
+7. หน้าเว็บแสดง Session ที่รอยืนยัน และให้ผู้ใช้กด **Confirm**
+8. เมื่อผู้ใช้กด Confirm หน้าเว็บส่งคำขอยืนยันไปยัง Engine
+9. Engine เปลี่ยน Token เดิมจาก `pending` เป็น `active` โดยไม่ต้องออก Token ใหม่
+10. App ตรวจสอบสถานะ Session จนเป็น `active` แล้วจึงใช้ Token เข้าถึง API ได้
 
-```kotlin
-// app/build.gradle.kts
-implementation("androidx.security:security-crypto:1.1.0-alpha06")
-implementation("com.squareup.okhttp3:okhttp:4.12.0")
-```
+## ขอบเขตหน้าที่
 
-## ตัวเก็บ token
+### Android App
+- รับ Email จากผู้ใช้และส่งให้ Engine
+- เก็บ Token ที่ได้รับอย่างปลอดภัย
+- เปิด URL ยืนยันใน Browser
+- รอผล Session และอนุญาตการเรียก API เฉพาะเมื่อ Session เป็น `active`
 
-```kotlin
-import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+### Engine
+- เป็นผู้ตรวจสอบ Email กับ Allowlist ก่อนออก Token
+- ห้ามออก Token หรือสร้าง Pending Session เมื่อ Email ไม่ผ่าน
+- ออก Token แบบสุ่มที่คาดเดาไม่ได้ในสถานะ `pending` เมื่อ Email ผ่าน
+- ผูก Token กับ Pending Session ที่สร้างขึ้น
+- แสดง/จัดเตรียมข้อมูล Session สำหรับหน้าเว็บยืนยัน
+- รับคำสั่ง Confirm และเปลี่ยนสถานะ Token เดิมเป็น `active`
+- ปฏิเสธ Token ที่ยังเป็น `pending`, หมดอายุ หรือถูกเพิกถอน
 
-class CfAccessStore(context: Context) {
+### Cloudflare Access
+- ป้องกันหน้าเว็บยืนยัน Session
+- บังคับให้ผู้ใช้ผ่าน Cloudflare Access ก่อนเข้าหน้ายืนยัน
+- ใช้เป็นด่านควบคุมการเข้าถึงหน้าเว็บเท่านั้น ไม่ใช่การตรวจ Email ซ้ำกับ Email ที่กรอกใน App
 
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "cf_access",
-        MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+### หน้าเว็บยืนยัน
+- แสดง Session ที่รอการยืนยัน
+- ให้ผู้ใช้กด Confirm อย่างชัดเจน
+- ส่งคำขอ Confirm ไปยัง Engine
+- แสดงผลว่ายืนยันสำเร็จหรือไม่
 
-    var clientId: String?
-        get() = prefs.getString(KEY_ID, null)
-        set(value) = prefs.edit().putString(KEY_ID, value).apply()
+## สถานะ Session
 
-    var clientSecret: String?
-        get() = prefs.getString(KEY_SECRET, null)
-        set(value) = prefs.edit().putString(KEY_SECRET, value).apply()
+- `pending`: Engine ออก Token แล้ว แต่ยังใช้เข้าถึง API ไม่ได้
+- `active`: ผู้ใช้กด Confirm บนหน้าเว็บแล้ว ใช้ Token เข้าถึง API ได้
+- `expired`: หมดเวลารอยืนยันหรือ Token หมดอายุ
+- `revoked`: Token ถูกเพิกถอนและใช้ไม่ได้อีก
 
-    val isConfigured: Boolean
-        get() = !clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()
+## เงื่อนไขความปลอดภัย
 
-    fun clear() = prefs.edit().clear().apply()
+- ตรวจสอบ Allowlist ที่ Engine ทุกครั้งก่อนออก Token
+- Email ว่างหรือไม่อยู่ใน Allowlist ต้องไม่ทำให้เกิด Token หรือ Pending Session
+- Token ต้องสุ่มอย่างปลอดภัยและคาดเดาไม่ได้
+- Token สถานะ `pending` ต้องใช้เรียก API ที่ต้องยืนยันตัวตนไม่ได้
+- URL ยืนยันต้องมีรหัสอ้างอิงแบบสุ่มและหมดอายุได้ ห้ามใช้ Token สำหรับเรียก API เป็นรหัสยืนยันใน URL
+- การกด Confirm ต้องเปลี่ยนสถานะของ Token เดิม ไม่ออก Token ใหม่
+- คำขอ Confirm ต้องตรวจสอบสถานะและอายุของ Pending Session ก่อนเปลี่ยนเป็น `active`
+- จำกัดอายุของ Pending Session และป้องกันการยืนยันซ้ำ
+- ห้ามบันทึก Token หรือข้อมูลลับลง Log
 
-    private companion object {
-        const val KEY_ID = "client_id"
-        const val KEY_SECRET = "client_secret"
-    }
-}
-```
+## ข้อกำหนดที่ห้ามเปลี่ยน
 
-## OkHttp Interceptor
-
-แนบ header เฉพาะ host ของเรา เพื่อไม่ให้ token รั่วไปยัง host อื่น
-
-```kotlin
-import okhttp3.Interceptor
-import okhttp3.Response
-
-class CfAccessInterceptor(
-    private val store: CfAccessStore,
-    private val allowedHost: String   // เช่น "mcp.example.com"
-) : Interceptor {
-
-    override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        if (request.url.host != allowedHost || !store.isConfigured) {
-            return chain.proceed(request)
-        }
-        val authed = request.newBuilder()
-            .header("CF-Access-Client-Id", store.clientId!!)
-            .header("CF-Access-Client-Secret", store.clientSecret!!)
-            .build()
-        return chain.proceed(authed)
-    }
-}
-```
-
-```kotlin
-val client = OkHttpClient.Builder()
-    .addInterceptor(CfAccessInterceptor(store, allowedHost = "mcp.example.com"))
-    .build()
-```
-
-## ข้อควรระวัง
-
-- **ห้าม log header**: ถ้าใช้ `HttpLoggingInterceptor` ให้ `redactHeader("CF-Access-Client-Secret")` และ `redactHeader("CF-Access-Client-Id")`
-- **กัน backup**: ตั้ง `android:allowBackup="false"` หรือ exclude ไฟล์ `cf_access` ใน `backup_rules.xml` / `data_extraction_rules.xml`
-- **ห้าม commit token** ลง git ถ้าเผลอ ให้ revoke ใน Zero Trust แล้วสร้างใหม่ทันที (ลบ commit ไม่พอ เพราะยังอยู่ใน history)
-- **เครื่องหาย / สงสัยว่าหลุด**: Zero Trust → Service Auth → Service Tokens → Revoke แล้วสร้างใหม่
-- **ตั้งอายุ token** ตามต้องการ แล้วใส่หน้าจอเตือนในแอปเมื่อใกล้หมดอายุ (ถ้าไม่เลือก Non-expiring)
-- ถ้ารับ 401/403 จาก Cloudflare ให้แสดงข้อความให้ผู้ใช้ตรวจ token ใน Settings แทนการ retry วนซ้ำ
-
-## ทางเลือกที่ปลอดภัยกว่า (ถ้าต้องการในอนาคต)
-
-**mTLS client certificate**: เก็บ private key ใน Android Keystore แบบ non-exportable ต่อให้ได้ APK ไปก็ดึง key ไม่ได้ และไม่ต้องมี header
+- ต้องกรอก Email ก่อน Engine จึงจะออก Token
+- Email ไม่ผ่าน Allowlist = ไม่ออก Token และปฏิเสธการเข้าถึง
+- เมื่อ Email ผ่าน Engine ออก Token ให้ทันที แต่ Token ยังเป็น `pending`
+- ผู้ใช้ต้องเปิดหน้าเว็บผ่าน Cloudflare Access และกด Confirm เพื่อเปิดใช้งาน
+- ไม่มีการตรวจ Email เป็นด่านที่สองในขั้นตอน Confirm
+- เมื่อ Confirm สำเร็จ ต้องเปิดใช้งาน Token เดิมทันที
