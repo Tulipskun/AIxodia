@@ -13,6 +13,17 @@ private val Context.ds by preferencesDataStore("aixodia")
 const val DEFAULT_DAEMON_URL = "https://engine.aixodia.dpdns.org"
 
 /**
+ * Where the device authorization flow lives.
+ *
+ * Deliberately not [DEFAULT_DAEMON_URL]: the engine is not the sign-in
+ * authority and serves none of the device routes at all — asking it there gets
+ * an Access redirect, which is how a sign-in silently became an HTML page
+ * instead of a token. The auth Worker answers these routes directly, with no
+ * Access in front of them, so the app can talk to it before anyone signs in.
+ */
+const val DEFAULT_AUTH_URL = "https://aixodia-auth.aixodia.workers.dev"
+
+/**
  * The Engine URL defaults to the stable Named Tunnel hostname. GitHub
  * Authorization Code + PKCE verifies the account in the system browser; only
  * Engine-issued access/refresh credentials are sealed with Android Keystore.

@@ -189,7 +189,10 @@ fun SetupNeeded(
                     busy = true
                     scope.launch {
                         try {
-                            val origin = daemonUrl.ifBlank { com.tulipskun.aixodia.DEFAULT_DAEMON_URL }
+                            // The device flow belongs to the auth Worker, not the
+                            // engine: the engine may be down, and it serves no
+                            // /auth/device/* route at all.
+                            val origin = com.tulipskun.aixodia.DEFAULT_AUTH_URL
                             val code = com.tulipskun.aixodia.data.remote.DeviceFlow
                                 .requestCode(origin, android.os.Build.MODEL ?: "Android")
                             userCode = code.userCode
