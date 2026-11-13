@@ -74,23 +74,48 @@ object EmailGate {
             .toRequestBody("application/json".toMediaType())
         val http = Request.Builder()
             .url(origin.trimEnd('/') + REQUEST_PATH)
+            .header("Accept", "application/json")
             .post(body)
             .build()
 
         client.newCall(http).execute().use { response ->
             val text = response.body?.string().orEmpty()
+            val json = parseObject(text)
+                ?: throw Refused("NOT_JSON", describeNonJson(response.code, text))
             if (!response.isSuccessful) {
-                val parsed = runCatching { JSONObject(text) }.getOrNull()
-                val code = parsed?.optString("code").orEmpty().ifBlank { "HTTP_${response.code}" }
+                val code = json.optString("code").ifBlank { "HTTP_${response.code}" }
                 throw Refused(code, explain(code))
             }
-            val json = JSONObject(text)
             val token = json.getString("token")
             val path = json.getString("confirm_path")
             // The engine reports the path, not a full URL: it does not know the
             // hostname the app reaches it by (it may be the tunnel or a LAN
             // address), so the app composes the URL from the origin it used.
             Issued(token = token, confirmPath = path, confirmUrl = origin.trimEnd('/') + path)
+        }
+    }
+
+    /**
+     * Parses a body that should be JSON, or says why it was not.
+     *
+     * A body starting with `<` is HTML, and the only thing that answers with HTML
+     * in front of the engine is Cloudflare Access: the hostname is protected as a
+     * whole, so a request to a public engine route is intercepted and redirected
+     * to the login page before the engine ever sees it. Reporting that as
+     * "JSONObject cannot be converted" sends anyone reading the error looking for
+     * a parsing bug instead of a policy one, so it is named here.
+     */
+    private fun parseObject(text: String): JSONObject? =
+        runCatching { JSONObject(text) }.getOrNull()
+
+    private fun describeNonJson(status: Int, text: String): String {
+        val trimmed = text.trimStart()
+        return if (trimmed.startsWith("<")) {
+            "Cloudflare Access is intercepting this request (HTTP $status). " +
+                "The engine hostname is protected as a whole, so sign-in cannot reach " +
+                "/v1/auth/request. Exempt that path from Access."
+        } else {
+            "The engine answered with something that is not JSON (HTTP $status)."
         }
     }
 
@@ -104,14 +129,15 @@ object EmailGate {
 
         client.newCall(http).execute().use { response ->
             val text = response.body?.string().orEmpty()
+            val json = parseObject(text)
             if (!response.isSuccessful) {
-                val parsed = runCatching { JSONObject(text) }.getOrNull()
                 // A token the engine has never heard of is not an error here: it
                 // is one of the states the caller waits out.
-                if (parsed?.optString("code") == "UNKNOWN_TOKEN") return@withContext State.Unknown
-                throw IOException("status ${response.code}")
+                if (json?.optString("code") == "UNKNOWN_TOKEN") return@withContext State.Unknown
+                throw IOException(describeNonJson(response.code, text))
             }
-            when (JSONObject(text).optString("state")) {
+            if (json == null) throw IOException(describeNonJson(response.code, text))
+            when (json.optString("state")) {
                 "pending" -> State.Pending
                 "active" -> State.Active
                 "expired" -> State.Expired
