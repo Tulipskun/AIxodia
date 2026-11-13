@@ -1,4 +1,4 @@
-# Auth System (สั้น)
+# Auth System
 
 สถานะ: ร่าง ยังไม่ implement
 
