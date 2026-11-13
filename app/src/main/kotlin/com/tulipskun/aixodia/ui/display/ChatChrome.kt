@@ -155,8 +155,7 @@ fun SetupNeeded(
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var email by remember { mutableStateOf("") }
-    var awaitingConfirm by remember { mutableStateOf(false) }
+    var userCode by remember { mutableStateOf("") }
     val store = remember { SettingsStore(context) }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Column(
@@ -173,100 +172,68 @@ fun SetupNeeded(
             Text("Sign in to AIxodia", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Spacer(Modifier.size(8.dp))
             Text(
-                "Enter the email address this engine allows, then confirm in the browser.",
+                "Approve this device in your browser. No password is typed here.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.widthIn(max = 420.dp),
             )
             Spacer(Modifier.size(20.dp))
-            // The email gate. Disabled while a request is in flight so a
-            // double tap cannot mint two tokens.
-            OutlinedTextField(
-                value = email,
-                onValueChange = { email = it; error = "" },
-                label = { Text("Email") },
-                singleLine = true,
-                enabled = !busy && !awaitingConfirm,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Email,
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Go,
-                ),
-                modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
-            )
-            Spacer(Modifier.size(10.dp))
+            // One button: the Worker mints the code, the browser proves the
+            // account, and the app only waits. Disabled while in flight so a
+            // double tap cannot open two approvals.
             Button(
-                enabled = !busy && !awaitingConfirm && email.isNotBlank(),
+                enabled = !busy,
                 onClick = {
                     error = ""
                     busy = true
                     scope.launch {
                         try {
                             val origin = daemonUrl.ifBlank { com.tulipskun.aixodia.DEFAULT_DAEMON_URL }
-                            val issued = com.tulipskun.aixodia.data.remote.EmailGate
-                                .request(origin, email)
-                            // Store the token now: it is inert until confirmed, and
-                            // holding it means the app can poll for the change
-                            // without keeping it only in memory.
-                            store.saveAccessCookie(issued.token)
-                            awaitingConfirm = true
-                            busy = false
-                            // Open the confirmation page. It sits behind Access,
-                            // so the user logs in there; the page then offers the
-                            // Confirm button.
+                            val code = com.tulipskun.aixodia.data.remote.DeviceFlow
+                                .requestCode(origin, android.os.Build.MODEL ?: "Android")
+                            userCode = code.userCode
+                            // The browser does the login and the Approve page.
                             context.startActivity(
                                 android.content.Intent(
                                     android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(issued.confirmUrl),
+                                    android.net.Uri.parse(code.openUrl),
                                 ),
                             )
-                            // Poll until the engine says active. The window is
-                            // short (the confirm TTL), and giving up quietly is
-                            // right: the user can press the button again.
-                            repeat(150) { attempt ->
-                                kotlinx.coroutines.delay(2_000)
-                                val state = com.tulipskun.aixodia.data.remote.EmailGate
-                                    .status(origin, issued.token)
-                                when (state) {
-                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Active -> {
-                                        awaitingConfirm = false
-                                        onSignedIn()
-                                        return@launch
-                                    }
-                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Expired,
-                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Revoked,
-                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Unknown -> {
-                                        // The engine no longer has this token
-                                        // (restarted, or it timed out). Start
-                                        // over rather than polling a dead one.
-                                        awaitingConfirm = false
-                                        store.saveAccessCookie("")
-                                        error = "That link expired. Send a new one."
-                                        return@launch
-                                    }
-                                    com.tulipskun.aixodia.data.remote.EmailGate.State.Pending -> {
-                                        if (attempt == 149) {
-                                            awaitingConfirm = false
-                                            error = "Still waiting for the browser. Tap Send again."
-                                        }
-                                    }
-                                }
-                            }
+                            // Wait for the approval, then keep the token. It is
+                            // delivered exactly once, so it is stored before
+                            // anything else can fail.
+                            val token = com.tulipskun.aixodia.data.remote.DeviceFlow
+                                .awaitToken(origin, code)
+                            store.saveAccessCookie(token)
+                            userCode = ""
+                            busy = false
+                            onSignedIn()
+                        } catch (refused: com.tulipskun.aixodia.data.remote.DeviceFlow.Refused) {
+                            busy = false
+                            userCode = ""
+                            error = refused.message ?: "Unable to sign in"
                         } catch (failure: Throwable) {
                             busy = false
-                            awaitingConfirm = false
-                            error = failure.message ?: "Unable to request a sign-in"
+                            userCode = ""
+                            error = failure.message ?: "Unable to sign in"
                         }
                     }
                 },
                 modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
             ) {
-                Text(if (awaitingConfirm) "Waiting for Confirm…" else "Send sign-in link")
+                Text(if (busy) "Signing in…" else "Sign in with browser")
             }
-            if (awaitingConfirm) {
-                Spacer(Modifier.size(8.dp))
+            if (userCode.isNotBlank()) {
+                Spacer(Modifier.size(12.dp))
                 Text(
-                    "Press Confirm in the browser, then come back here.",
+                    "Code: $userCode",
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.size(4.dp))
+                Text(
+                    "Approve it in the browser, then come back here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
