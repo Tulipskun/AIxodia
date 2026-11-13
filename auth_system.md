@@ -34,7 +34,7 @@
 | POST | `/auth/device/approve` | เว็บ (Access, CSRF) |
 | GET | `/auth/sessions` | เว็บ (Access) |
 | POST | `/auth/revoke` | เว็บ หรือแอป |
-| POST | `/v1/auth/sessions/sync` | Worker → engine |
+| POST | `/auth/sessions/sync` | Worker → engine |
 | GET | `/auth/sessions/active` | engine → Worker |
 
 ## ความเสี่ยงที่ยอมรับ
