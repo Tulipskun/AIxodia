@@ -20,7 +20,7 @@
 | แอป Android | ขอ device code, แสดง user code, เปิดเบราว์เซอร์, poll จนได้ token, เก็บ token |
 | Auth Worker (`workers/auth/`) | ออก device code และ user code, ออก token หลังอนุมัติ, เก็บ hash ของ token ใน D1, ตอบ `/auth/verify` |
 | Cloudflare Access | ล็อกหน้าอนุมัติด้วย GitHub, กำหนดว่า GitHub account ไหนเข้าหน้านี้ได้ |
-| D1 `aixodia` | เก็บ device code และ session (เก็บเฉพาะ hash) |
+| D1 `aixodia` | เก็บ device code และ session (เก็บ token แบบไม่ hash ตามที่ตัดสินใจ ดูหัวข้อความเสี่ยง) |
 
 ## ลำดับการทำงาน (เหมือน `gh auth login`)
 
@@ -47,15 +47,15 @@
 ## Token
 
 - ค่าสุ่ม 256 บิต ออกโดย Worker เท่านั้น
-- เก็บเป็น SHA-256 hash ใน D1
+- เก็บ token ตรง ๆ ใน D1 ไม่ hash (เป็นการตัดสินใจที่ยอมรับความเสี่ยง ดูหัวข้อความเสี่ยง)
 - **ไม่มี `expires_at`** สถานะเปลี่ยนได้ทางเดียวคือ `active → revoked` โดยผู้ใช้
 - ลบ `ACTIVE_TTL_SECS` ออกจาก `workers/auth/src/index.js` และไม่ตรวจอายุของ active session
 - Device code และ user code หมดอายุได้และใช้ซ้ำไม่ได้ (เป็นเวลาของการยืนยัน ไม่ใช่ของ token)
 
 ## การซิงก์กับ Engine
 
-- Worker push การเปลี่ยนแปลงไปที่ engine ทันที: `activate(token_hash)` เมื่อ approve และ `revoke(token_hash)` เมื่อผู้ใช้กด revoke
-- Engine เก็บชุด hash ของ token ที่ active ไว้ในหน่วยความจำ และตรวจ token จากชุดนี้
+- Worker push การเปลี่ยนแปลงไปที่ engine ทันที: `activate(token)` เมื่อ approve และ `revoke(token)` เมื่อผู้ใช้กด revoke
+- Engine เก็บชุด token ที่ active ไว้ในหน่วยความจำ และตรวจ token จากชุดนี้
 - ถ้า engine offline ตอน Worker push ไม่ต้อง retry หรือเก็บคิว
 - ตอน engine เริ่มทำงาน ต้องดึงชุดเต็มจาก Worker ก่อนรับ request และเช็ค token ทั้งหมดกับชุดนี้ก่อนเสมอ
 - ระหว่างที่ยังดึงชุดเต็มไม่สำเร็จ engine ปฏิเสธทุก token แม้ token นั้นเคย active มาก่อน และลองดึงใหม่ได้ตามปกติ
@@ -69,8 +69,8 @@
 | `GET` | `/auth/device` | เบราว์เซอร์ | อยู่หลัง Access, แสดงหน้าอนุมัติ |
 | `POST` | `/auth/device/approve` | เบราว์เซอร์ | อยู่หลัง Access, ต้องมี CSRF token, body: user_code และ action |
 | `GET` | `/auth/status` | แอป | Bearer, คืน `active` หรือ `revoked` |
-| `POST` | `/v1/auth/sessions/sync` (engine) | Worker | master token, body: `{ "op": "activate" \| "revoke", "token_hash": "..." }` |
-| `GET` | `/auth/sessions/active` | engine | master token, คืนรายการ hash ที่ active ทั้งหมด สำหรับตอน engine เริ่มทำงาน |
+| `POST` | `/v1/auth/sessions/sync` (engine) | Worker | master token, body: `{ "op": "activate" \| "revoke", "token": "..." }` |
+| `GET` | `/auth/sessions/active` | engine | master token, คืนรายการ token ที่ active ทั้งหมด สำหรับตอน engine เริ่มทำงาน |
 | `GET` | `/auth/sessions` | เว็บ | อยู่หลัง Access, รายการเครื่องทั้งหมด |
 | `POST` | `/auth/revoke` | เว็บ หรือแอป | เว็บ revoke ได้ทุกเครื่อง, แอป revoke ได้เฉพาะตัวเอง |
 
@@ -90,10 +90,16 @@
 - ห้าม log header `Authorization`
 - Logout เรียก `/auth/revoke` แล้วลบ token ในเครื่องเสมอ แม้เรียกไม่สำเร็จ
 
+## ความเสี่ยงที่ยอมรับ: เก็บ token ไม่ hash
+
+- ถ้า D1 อ่านได้โดยไม่มีสิทธิ์ เช่น dump หลุด ผู้โจมตีใช้ token ที่ active ได้ทันที
+- ถ้าผู้โจมตีเขียน D1 ได้ เขาสร้าง session `active` ได้เอง ดังนั้นต้องคุม credential ของ Cloudflare ให้เข้มงวด (ดูหัวข้อ Cloudflare account)
+- การป้องกันที่ยังคงอยู่คือ Access policy, การ Approve บนเว็บ, และ token ที่สุ่มยาว 256 บิต
+
 ## ความปลอดภัย
 
 - **การ Approve บนเว็บเป็นด่านหลัก** ผู้ใช้ต้องตรวจรายละเอียดเครื่องและ user code ให้ตรงกับแอปก่อนกดเสมอ เพื่อกัน device flow phishing
-- **Token เป็นค่าสุ่ม 256 บิต** เก็บเฉพาะ hash ถ้า D1 หลุดก็ใช้ token ไม่ได้
+- **Token เป็นค่าสุ่ม 256 บิต** ความเสี่ยงของการเก็บ token ไม่ hash: ถ้า D1 หรือ dump ของตารางรั่ว ผู้ได้ไปใช้ token ได้ทันที และ token จริงอยู่ในหน่วยความจำของ engine ด้วย (ดูหัวข้อความเสี่ยง)
 - **Device code ใช้ได้ครั้งเดียว** และ user code หมดอายุ 10 นาที
 - **Rate limit** ที่ `/auth/device/code` ต่อ IP และที่ `/auth/device/token` ต่อ device code
 - **Revoke มีผลทันที** เมื่อ engine online เพราะ Worker push `revoke` ทันทีที่ผู้ใช้กด ถ้า engine offline ตอนนั้น ผลจะมีเมื่อ engine เริ่มทำงานและซิงก์ชุดเต็มเสร็จ engine ไม่รับ token ที่ไม่อยู่ในชุด active
