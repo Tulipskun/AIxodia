@@ -265,7 +265,7 @@ fun SettingsScreen(
                         value = address,
                         onValueChange = { address = it },
                         label = "Engine address",
-                        placeholder = "https://aixodia.dpdns.org",
+                        placeholder = "https://engine.aixodia.dpdns.org",
                         hint = "The app connects directly to the AIxodia Engine. No Cloudflare token or Worker is used.",
                         singleLine = false,
                         minLines = 2,

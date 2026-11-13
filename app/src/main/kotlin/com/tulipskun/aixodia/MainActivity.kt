@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
      * without hand-typing on a phone:
      *
      *   adb shell am start -n com.tulipskun.aixodia/.MainActivity \
-     *     --es aixodia.address https://aixodia.dpdns.org \
+     *     --es aixodia.address https://engine.aixodia.dpdns.org \
      *     --es aixodia.session work-1
      *
      * It is compiled out of release builds: BuildConfig.DEBUG is false there,

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.map
 
 private val Context.ds by preferencesDataStore("aixodia")
 
-const val DEFAULT_DAEMON_URL = "https://aixodia.dpdns.org"
+const val DEFAULT_DAEMON_URL = "https://engine.aixodia.dpdns.org"
 
 /**
  * The Engine URL defaults to the stable Named Tunnel hostname. GitHub
