@@ -1,6 +1,6 @@
 # Auth System
 
-สถานะ: ร่าง ยังไม่ implement
+สถานะ: implement แล้ว (Worker `aixodia-auth`, engine sync, แอป `DeviceFlow.kt`)
 ขอบเขต: flow นี้ใช้กับทุกทางเข้า — แอปและเว็บคอนโซลออก token จากชุดเดียวกัน
 (token ที่เว็บได้จาก `/auth/token` หลัง Access ก็ผ่าน `activate` เข้า engine เหมือนกัน)
 flow PKCE เดิม (`/v1/auth/authorize|exchange`) กลายเป็น legacy ลบทิ้งเมื่อ flow นี้ขึ้นแทน
