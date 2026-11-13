@@ -56,9 +56,9 @@
 
 - Worker push การเปลี่ยนแปลงไปที่ engine ทันที: `activate(token_hash)` เมื่อ approve และ `revoke(token_hash)` เมื่อผู้ใช้กด revoke
 - Engine เก็บชุด hash ของ token ที่ active ไว้ในหน่วยความจำ และตรวจ token จากชุดนี้
-- ตอน engine เริ่มทำงาน ต้องดึงชุดเต็มจาก Worker ก่อนรับ request
-- Engine ที่ยังซิงก์ไม่สำเร็จต้อง fail closed คือปฏิเสธ request ไม่เดาว่า token ใช้ได้
-- ถ้า push ล้มเหลว Worker retry จนสำเร็จ โดยเก็บคิวการ push ไว้ (ใช้ Cloudflare Queues หรือตาราง retry ใน D1)
+- ถ้า engine offline ตอน Worker push ไม่ต้อง retry หรือเก็บคิว
+- ตอน engine เริ่มทำงาน ต้องดึงชุดเต็มจาก Worker ก่อนรับ request และเช็ค token ทั้งหมดกับชุดนี้ก่อนเสมอ
+- ระหว่างที่ยังดึงชุดเต็มไม่สำเร็จ engine ปฏิเสธทุก token แม้ token นั้นเคย active มาก่อน และลองดึงใหม่ได้ตามปกติ
 
 ## Endpoints
 
@@ -96,7 +96,7 @@
 - **Token เป็นค่าสุ่ม 256 บิต** เก็บเฉพาะ hash ถ้า D1 หลุดก็ใช้ token ไม่ได้
 - **Device code ใช้ได้ครั้งเดียว** และ user code หมดอายุ 10 นาที
 - **Rate limit** ที่ `/auth/device/code` ต่อ IP และที่ `/auth/device/token` ต่อ device code
-- **Revoke มีผลทันที** เพราะ Worker push `revoke` ไปที่ engine ทันทีที่ผู้ใช้กด และ engine ไม่รับ token ที่ไม่อยู่ในชุด active
+- **Revoke มีผลทันที** เมื่อ engine online เพราะ Worker push `revoke` ทันทีที่ผู้ใช้กด ถ้า engine offline ตอนนั้น ผลจะมีเมื่อ engine เริ่มทำงานและซิงก์ชุดเต็มเสร็จ engine ไม่รับ token ที่ไม่อยู่ในชุด active
 - **Token ที่ไม่หมดอายุ** หมายความว่าเครื่องที่หลุดจะใช้ได้จนกว่าจะ revoke จึงต้องมีหน้า `/auth/sessions` ให้เห็นรายการและวันที่ใช้ล่าสุด
 - ห้าม log token หรือ device code
 
@@ -112,4 +112,3 @@
 1. ใครเป็นเจ้าของ GitHub account ที่อนุมัติได้ ตั้งใน Access policy ที่ไหน (แนะนำ user ID ตัวเลข)
 2. คง GitHub OAuth + PKCE ของ dashboard ไว้ด้วยหรือไม่
 3. หน้า `/auth/sessions` จะอยู่ใน `aixodia-web` หรือแอป
-4. ถ้า engine ล่มตอนที่ Worker push revoke ให้ retry นานแค่ไหนก่อนแจ้งเตือน
