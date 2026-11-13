@@ -18,7 +18,7 @@
 | ส่วน | หน้าที่ |
 |---|---|
 | แอป Android | ขอ device code, แสดง user code, เปิดเบราว์เซอร์, poll จนได้ token, เก็บ token |
-| Auth Worker (`workers/auth/`) | ออก device code และ user code, ออก token หลังอนุมัติ, เก็บ hash ของ token ใน D1, ตอบ `/auth/verify` |
+| Auth Worker (`workers/auth/`) | ออก device code และ user code, ออก token หลังอนุมัติ, เก็บ token ใน D1, ซิงก์ไป engine |
 | Cloudflare Access | ล็อกหน้าอนุมัติด้วย GitHub, กำหนดว่า GitHub account ไหนเข้าหน้านี้ได้ |
 | D1 `aixodia` | เก็บ device code และ session (เก็บ token แบบไม่ hash ตามที่ตัดสินใจ ดูหัวข้อความเสี่ยง) |
 
@@ -40,9 +40,9 @@
    - `slow_down`: เพิ่ม interval
    - `access_denied`: ผู้ใช้กด Deny
    - `expired_token`: หมดเวลา ให้เริ่มใหม่
-   - สำเร็จ: ได้ `access_token` **ครั้งเดียว** Worker เก็บเฉพาะ hash
+   - สำเร็จ: ได้ `access_token` **ครั้งเดียว** Worker เก็บ token ไว้ใน D1
 9. แอปเก็บ token แล้วส่ง `Authorization: Bearer <token>` ทุก request
-10. Engine ตรวจ token จากชุด hash ที่ active ซึ่งซิงก์มาจาก Worker (ดูหัวข้อการซิงก์) ไม่เรียก Worker ต่อ request
+10. Engine ตรวจ token จากชุด token ที่ active ซึ่งซิงก์มาจาก Worker (ดูหัวข้อการซิงก์) ไม่เรียก Worker ต่อ request
 
 ## Token
 
