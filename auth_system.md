@@ -42,7 +42,7 @@
    - `expired_token`: หมดเวลา ให้เริ่มใหม่
    - สำเร็จ: ได้ `access_token` **ครั้งเดียว** Worker เก็บเฉพาะ hash
 9. แอปเก็บ token แล้วส่ง `Authorization: Bearer <token>` ทุก request
-10. Engine เรียก `POST /auth/verify` ทุก request และไม่แคช เพื่อให้ revoke มีผลทันที
+10. Engine ตรวจ token จากชุด hash ที่ active ซึ่งซิงก์มาจาก Worker (ดูหัวข้อการซิงก์) ไม่เรียก Worker ต่อ request
 
 ## Token
 
@@ -51,6 +51,14 @@
 - **ไม่มี `expires_at`** สถานะเปลี่ยนได้ทางเดียวคือ `active → revoked` โดยผู้ใช้
 - ลบ `ACTIVE_TTL_SECS` ออกจาก `workers/auth/src/index.js` และไม่ตรวจอายุของ active session
 - Device code และ user code หมดอายุได้และใช้ซ้ำไม่ได้ (เป็นเวลาของการยืนยัน ไม่ใช่ของ token)
+
+## การซิงก์กับ Engine
+
+- Worker push การเปลี่ยนแปลงไปที่ engine ทันที: `activate(token_hash)` เมื่อ approve และ `revoke(token_hash)` เมื่อผู้ใช้กด revoke
+- Engine เก็บชุด hash ของ token ที่ active ไว้ในหน่วยความจำ และตรวจ token จากชุดนี้
+- ตอน engine เริ่มทำงาน ต้องดึงชุดเต็มจาก Worker ก่อนรับ request
+- Engine ที่ยังซิงก์ไม่สำเร็จต้อง fail closed คือปฏิเสธ request ไม่เดาว่า token ใช้ได้
+- ถ้า push ล้มเหลว Worker retry จนสำเร็จ โดยเก็บคิวการ push ไว้ (ใช้ Cloudflare Queues หรือตาราง retry ใน D1)
 
 ## Endpoints
 
@@ -61,7 +69,8 @@
 | `GET` | `/auth/device` | เบราว์เซอร์ | อยู่หลัง Access, แสดงหน้าอนุมัติ |
 | `POST` | `/auth/device/approve` | เบราว์เซอร์ | อยู่หลัง Access, ต้องมี CSRF token, body: user_code และ action |
 | `GET` | `/auth/status` | แอป | Bearer, คืน `active` หรือ `revoked` |
-| `POST` | `/auth/verify` | engine | master token, คืน valid หรือ invalid |
+| `POST` | `/v1/auth/sessions/sync` (engine) | Worker | master token, body: `{ "op": "activate" \| "revoke", "token_hash": "..." }` |
+| `GET` | `/auth/sessions/active` | engine | master token, คืนรายการ hash ที่ active ทั้งหมด สำหรับตอน engine เริ่มทำงาน |
 | `GET` | `/auth/sessions` | เว็บ | อยู่หลัง Access, รายการเครื่องทั้งหมด |
 | `POST` | `/auth/revoke` | เว็บ หรือแอป | เว็บ revoke ได้ทุกเครื่อง, แอป revoke ได้เฉพาะตัวเอง |
 
@@ -87,7 +96,7 @@
 - **Token เป็นค่าสุ่ม 256 บิต** เก็บเฉพาะ hash ถ้า D1 หลุดก็ใช้ token ไม่ได้
 - **Device code ใช้ได้ครั้งเดียว** และ user code หมดอายุ 10 นาที
 - **Rate limit** ที่ `/auth/device/code` ต่อ IP และที่ `/auth/device/token` ต่อ device code
-- **Revoke มีผลทันที** เพราะ engine เรียก `/auth/verify` ทุก request
+- **Revoke มีผลทันที** เพราะ Worker push `revoke` ไปที่ engine ทันทีที่ผู้ใช้กด และ engine ไม่รับ token ที่ไม่อยู่ในชุด active
 - **Token ที่ไม่หมดอายุ** หมายความว่าเครื่องที่หลุดจะใช้ได้จนกว่าจะ revoke จึงต้องมีหน้า `/auth/sessions` ให้เห็นรายการและวันที่ใช้ล่าสุด
 - ห้าม log token หรือ device code
 
@@ -103,3 +112,4 @@
 1. ใครเป็นเจ้าของ GitHub account ที่อนุมัติได้ ตั้งใน Access policy ที่ไหน (แนะนำ user ID ตัวเลข)
 2. คง GitHub OAuth + PKCE ของ dashboard ไว้ด้วยหรือไม่
 3. หน้า `/auth/sessions` จะอยู่ใน `aixodia-web` หรือแอป
+4. ถ้า engine ล่มตอนที่ Worker push revoke ให้ retry นานแค่ไหนก่อนแจ้งเตือน
