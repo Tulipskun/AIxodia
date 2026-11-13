@@ -24,6 +24,16 @@ const val DEFAULT_DAEMON_URL = "https://engine.aixodia.dpdns.org"
 const val DEFAULT_AUTH_URL = "https://aixodia-auth.aixodia.workers.dev"
 
 /**
+ * Expiry stamped on a token that has none.
+ *
+ * Device-flow tokens live until revoked, not until a clock passes. Storing a
+ * real future date would quietly expire a session the Worker still considers
+ * valid, so these carry a date far enough out that nothing here ever outlives
+ * it. Revocation is the actual end of a session.
+ */
+private const val NEVER_EXPIRES = 253_402_300_799L // 9999-12-31T23:59:59Z
+
+/**
  * The Engine URL defaults to the stable Named Tunnel hostname. GitHub
  * Authorization Code + PKCE verifies the account in the system browser; only
  * Engine-issued access/refresh credentials are sealed with Android Keystore.
@@ -160,11 +170,29 @@ class SettingsStore(private val ctx: Context) {
         )
     }
 
-    /** Store the Cloudflare Access cookie; encrypted by the Android Keystore. */
+    /**
+     * Store a bearer token from the device flow; encrypted by the Android
+     * Keystore.
+     *
+     * The Worker mints these without an expiry — a session lives until it is
+     * revoked, which is the whole point of the หน้า sessions — so the token is
+     * recorded as valid far into the future.
+     *
+     * Without this the token was written but never read back: [current] only
+     * returns a token whose `sessionExpiresAt` is in the future, and a missing
+     * expiry reads as 0, which is in the past. Sign-in looked successful and the
+     * next request still said "Sign in to AIxodia to continue".
+     */
     suspend fun saveAccessCookie(cookie: String) {
         val trimmed = cookie.trim()
         ctx.ds.edit {
-            if (trimmed.isBlank()) it.remove(sessionToken) else it[sessionToken] = TokenCipher.seal(trimmed)
+            if (trimmed.isBlank()) {
+                it.remove(sessionToken)
+                it.remove(sessionExpiresAt)
+            } else {
+                it[sessionToken] = TokenCipher.seal(trimmed)
+                it[sessionExpiresAt] = NEVER_EXPIRES.toString()
+            }
         }
     }
 

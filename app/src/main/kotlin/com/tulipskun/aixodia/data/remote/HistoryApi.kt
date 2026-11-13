@@ -621,9 +621,12 @@ class HistoryApi(
      */
     private suspend fun engineConfig(): ConnConfig {
         val raw = settings.current()
-        return raw.copy(
-            token = clientToken.get(raw, settings),
-        )
+        // A blank token must not throw here: the caller turns a 401 into "sign in"
+        // and a 200 into data, while an exception here made every screen report
+        // "Failed to load providers: Sign in to AIxodia to continue" as if the
+        // engine were broken.
+        val token = runCatching { clientToken.get(raw, settings) }.getOrDefault("")
+        return raw.copy(token = token)
     }
 
     /**
@@ -638,7 +641,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val req = Request.Builder().url("$base/restart")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
@@ -655,7 +658,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/logs?limit=$limit")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get()
                 .build()
@@ -700,7 +703,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
             val req = Request.Builder().url("$base/v1/sessions")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
@@ -741,7 +744,7 @@ class HistoryApi(
             if (id.isNotBlank()) body.put("id", id)
             val request = body.toString()
             val req = Request.Builder().url("$base/v1/sessions")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post(request.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -760,7 +763,7 @@ class HistoryApi(
         runCatching {
             val body = JSONObject().put("title", title).toString()
             val req = Request.Builder().url("$base/v1/sessions/$sessionId")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .patch(body.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -774,7 +777,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val req = Request.Builder().url("$base/v1/sessions/$sessionId")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .delete()
                 .build()
             client.newCall(req).execute().use { r -> r.isSuccessful }
@@ -822,7 +825,7 @@ class HistoryApi(
             val url = "$base/v1/sessions/$sessionId/turns" + if (query.isEmpty()) "" else "?$query"
             runCatchingCancellable {
                 val req = Request.Builder().url(url)
-                    .header("Cookie", c.token)
+                    .header("Authorization", "Bearer " + c.token)
                     .header("Accept", "application/json")
                     .get().build()
                 client.newCall(req).execute().use { r ->
@@ -868,7 +871,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/models")
-                .header("Cookie", c.token).get().build()
+                .header("Authorization", "Bearer " + c.token).get().build()
             client.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) return@use emptyList()
                 modelsAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
@@ -883,7 +886,7 @@ class HistoryApi(
         val body = JSONObject().put("provider", provider).put("model", model).toString()
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .patch(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -902,7 +905,7 @@ class HistoryApi(
         val body = JSONObject().put("clear_model", true).toString()
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .patch(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -949,7 +952,7 @@ class HistoryApi(
     private fun patchSession(base: String, token: String, sessionId: String, body: String): Boolean {
         return runCatching {
             val req = Request.Builder().url("$base/api/sessions/$sessionId")
-                .header("Cookie", token)
+                .header("Authorization", "Bearer " + token)
                 .header("Content-Type", "application/json")
                 .patch(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -963,7 +966,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext cachedProviders()
         val list = runCatching {
             val req = Request.Builder().url("$base/api/providers")
-                .header("Cookie", c.token).get().build()
+                .header("Authorization", "Bearer " + c.token).get().build()
             client.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) return@use emptyList()
                 providersAdapter.fromJson(r.body!!.source())?.providers ?: emptyList()
@@ -994,7 +997,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext emptyList()
         runCatching {
             val req = Request.Builder().url("$base/api/providers/refresh")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1011,7 +1014,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId/refresh")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1049,7 +1052,7 @@ class HistoryApi(
             .toString()
         runCatching {
             val req = Request.Builder().url("$base/api/providers")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1074,7 +1077,7 @@ class HistoryApi(
         }.toString()
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId/keys")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1089,7 +1092,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         runCatching {
             val req = Request.Builder().url("$base/api/providers/$providerId")
-                .header("Cookie", c.token).delete().build()
+                .header("Authorization", "Bearer " + c.token).delete().build()
             client.newCall(req).execute().use { r ->
                 failure("Removed $providerId", r).let { if (r.isSuccessful) it else "Remove failed: $it" }
             }
@@ -1112,7 +1115,7 @@ class HistoryApi(
             .toString()
         runCatching {
             val req = Request.Builder().url("$base/api/settings")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .put(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1154,7 +1157,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/api/settings")
-                .header("Cookie", c.token).get().build()
+                .header("Authorization", "Bearer " + c.token).get().build()
             client.newCall(req).execute().use { r ->
                 if (r.isSuccessful) settingsAdapter.fromJson(r.body!!.source()) else null
             }
@@ -1170,7 +1173,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals/ticket")
-                .header("Cookie", authToken ?: c.token)
+                .header("Authorization", "Bearer " + (authToken ?: c.token))
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(req).execute().use { r ->
@@ -1187,7 +1190,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals/${URLEncoder.encode(id, "UTF-8")}")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .delete().build()
             client.newCall(req).execute().use { it.isSuccessful }
         }.getOrDefault(false)
@@ -1207,7 +1210,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext TerminalShells.Unreachable
         runCatching {
             val req = Request.Builder().url("$base/v1/terminals")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
@@ -1237,7 +1240,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
             val req = Request.Builder().url("$base/v1/sessions/$sessionId/objectives")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
@@ -1273,7 +1276,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext 0
         runCatching {
             val req = Request.Builder().url("$base/v1/sessions")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
@@ -1322,7 +1325,7 @@ class HistoryApi(
                 }
             }
             val req = Request.Builder().url("$base/v1/attachments?$query")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .post(body)
                 .build()
             uploadClient.newCall(req).execute().use { r ->
@@ -1349,7 +1352,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
@@ -1369,7 +1372,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext "Daemon URL not configured"
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1391,7 +1394,7 @@ class HistoryApi(
         val body = JSONObject().put("confirm", true).toString()
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup/restore")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1428,7 +1431,7 @@ class HistoryApi(
         }.toString()
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup/config")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .put(body.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1460,7 +1463,7 @@ class HistoryApi(
             .toString()
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup/config")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .put(body.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1481,7 +1484,7 @@ class HistoryApi(
         val url = "$base/api/backup/browse?path=" + URLEncoder.encode(path, "UTF-8")
         runCatchingCancellable {
             val req = Request.Builder().url(url)
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
             client.newCall(req).execute().use { r ->
@@ -1513,7 +1516,7 @@ class HistoryApi(
         }.toString()
         runCatchingCancellable {
             val req = Request.Builder().url("$base/api/backup/preview")
-                .header("Cookie", c.token)
+                .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()

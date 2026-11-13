@@ -55,8 +55,8 @@ class FilesApi(
         return Request.Builder()
             .url(base + path)
             .header(
-                "Cookie",
-                clientToken.get(config, settings),
+                "Authorization",
+                "Bearer " + clientToken.get(config, settings),
             )
     }
 

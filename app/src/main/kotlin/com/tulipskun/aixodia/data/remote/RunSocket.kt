@@ -203,7 +203,7 @@ class RunSocket(
             runCatching {
                 val req = Request.Builder()
                     .url("${cfg.base}/v1/runs/$id/cancel")
-                    .header("Cookie", cfg.token)
+                    .header("Authorization", "Bearer " + cfg.token)
                     .header("Content-Type", "application/json")
                     .post("{}".toRequestBody(JSON))
                     .build()
@@ -350,7 +350,7 @@ class RunSocket(
 
         val request = Request.Builder()
             .url("${cfg.base}/v1/runs")
-            .header("Cookie", cfg.token)
+            .header("Authorization", "Bearer " + cfg.token)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .post(body.toString().toRequestBody(JSON))
@@ -441,7 +441,7 @@ class RunSocket(
             val before = lastSeq
             val request = Request.Builder()
                 .url("${cfg.base}/v1/runs/$id/events?after=$lastSeq&poll=1")
-                .header("Cookie", cfg.token)
+                .header("Authorization", "Bearer " + cfg.token)
                 .header("Accept", "text/event-stream")
                 .get()
                 .build()
@@ -611,7 +611,7 @@ class RunSocket(
         }
         val request = Request.Builder()
             .url("${cfg.base}/v1/sessions")
-            .header("Cookie", cfg.token)
+            .header("Authorization", "Bearer " + cfg.token)
             .header("Accept", "application/json")
             .get()
             .build()
@@ -646,7 +646,7 @@ class RunSocket(
         val cfg = config() ?: return
         val request = Request.Builder()
             .url("${cfg.base}/v1/runs/$id")
-            .header("Cookie", cfg.token)
+            .header("Authorization", "Bearer " + cfg.token)
             .header("Accept", "application/json")
             .get()
             .build()
