@@ -59,7 +59,6 @@ fun ScreenPanel(
     var hello by remember { mutableStateOf<ScreenSocket.Hello?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var quality by remember { mutableIntStateOf(62) }
-    var directTouch by rememberSaveable { mutableStateOf(false) }
     var keyboardShown by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(false) }
     val surface = remember { ScreenSurface() }
@@ -189,7 +188,6 @@ fun ScreenPanel(
         ScreenBar(
             hello = hello,
             quality = quality,
-            direct = directTouch,
             keyboard = keyboardShown,
             expanded = showControls,
             socket = socket,
@@ -198,16 +196,6 @@ fun ScreenPanel(
             onQuality = { value ->
                 quality = value
                 socket.settings(quality = value)
-            },
-            onMode = { chosen ->
-                directTouch = chosen
-                // The view holds the mode because it is the thing that
-                // interprets a finger; the bar only chooses.
-                view?.touchMode = if (chosen) {
-                    ScreenView.TouchMode.Direct
-                } else {
-                    ScreenView.TouchMode.Trackpad
-                }
             },
         )
     }
@@ -232,14 +220,12 @@ private fun Centered(text: String) {
 private fun ScreenBar(
     hello: ScreenSocket.Hello?,
     quality: Int,
-    direct: Boolean,
     keyboard: Boolean,
     expanded: Boolean,
     socket: ScreenSocket,
     onToggle: () -> Unit,
     onKeyboard: () -> Unit,
     onQuality: (Int) -> Unit,
-    onMode: (Boolean) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(
@@ -260,15 +246,6 @@ private fun ScreenBar(
                     modifier = Modifier
                         .padding(end = 16.dp)
                         .pointerTap(onKeyboard, size = 20.dp),
-                )
-                // Which of the two ways a finger works. Labelled by what the
-                // finger does, not by the name of a mode.
-                Text(
-                    if (direct) "touch" else "trackpad",
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier
-                        .padding(end = 12.dp)
-                        .pointerTap({ onMode(!direct) }, size = 14.dp),
                 )
                 Text(
                     "${quality}%",

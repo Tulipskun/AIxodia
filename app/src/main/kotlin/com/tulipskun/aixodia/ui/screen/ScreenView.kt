@@ -152,6 +152,9 @@ class ScreenView(context: Context) : View(context) {
     private var downAt = 0L
     private var downX = 0f
     private var downY = 0f
+    /** Where the press began, in picture pixels. */
+    private var downPx = 0
+    private var downPy = 0
     private var lastX = 0f
     private var lastY = 0f
     private var dragging = false
@@ -166,21 +169,6 @@ class ScreenView(context: Context) : View(context) {
     private var twoFingerY = 0f
 
     /**
-     * How a finger drives the far machine.
-     *
-     * [TouchMode.Trackpad] treats the screen as a trackpad: the pointer moves
-     * with the finger and stays where it is let go, which is how a careful click
-     * is made. [TouchMode.Direct] puts the pointer exactly under the finger,
-     * which is quicker for pressing something visible but hides the target
-     * under the fingertip. A viewer usually wants one and switches to the other
-     * for a particular job, so both are offered rather than one being chosen for
-     * everybody.
-     */
-    enum class TouchMode { Trackpad, Direct }
-
-    var touchMode: TouchMode = TouchMode.Trackpad
-
-    /**
      * True when the picture is a decoded video underneath this view rather than
      * a bitmap drawn by it.
      *
@@ -189,11 +177,6 @@ class ScreenView(context: Context) : View(context) {
      */
     var videoMode: Boolean = false
 
-    /** Where the pointer is, in picture pixels, while a trackpad finger works. */
-    private var pointerX = 0
-    private var pointerY = 0
-    /** The finger's last place, so its travel can be measured. */
-    private var lastFinger: Pair<Int, Int>? = null
     /** When the last pointer move was sent, so they are not sent faster than frames. */
     private var lastMoveSent = 0L
     /** True when the newest position has been sent, false while it is only owed. */
@@ -306,16 +289,30 @@ class ScreenView(context: Context) : View(context) {
      * the letterbox during a drag should keep dragging along the nearest edge,
      * the way a mouse at the edge of a screen does.
      */
-    private fun toScreen(x: Float, y: Float): Pair<Int, Int> {
-        val picture = surface?.bitmap() ?: return 0 to 0
+    private fun toScreen(x: Float, y: Float): Pair<Int, Int>? {
+        // The picture's size comes from the frame, not from the view: turning a
+        // touch into a pointer position means undoing exactly what drawing did
+        // — the fit, the zoom and the pan — so the two must share one rectangle.
+        val picture = surface?.bitmap() ?: return null
+        if (picture.width <= 0 || picture.height <= 0) return null
         val box = pictureRect(picture.width, picture.height)
-        if (box.width() <= 0f || box.height() <= 0f) return 0 to 0
+        if (box.width() <= 0f || box.height() <= 0f) return null
         val scaleX = picture.width / box.width()
         val scaleY = picture.height / box.height()
         val px = ((x - box.left) * scaleX).roundToInt().coerceIn(0, picture.width - 1)
         val py = ((y - box.top) * scaleY).roundToInt().coerceIn(0, picture.height - 1)
         return px to py
     }
+
+    /**
+     * The pointer's place, in picture pixels, under the finger.
+     *
+     * A phone touch screen is used as the machine's screen, the way RealVNC does
+     * it: the arrow goes exactly where the finger is, unreached by any gain or
+     * offset. Anything else makes the arrow land somewhere the finger is not,
+     * which reads as "the position is wrong" — because it is.
+     */
+    private fun pointerFor(event: MotionEvent): Pair<Int, Int>? = toScreen(event.x, event.y)
 
     /** Keeps the picture from being dragged off into empty space. */
     private fun clampPan() {
@@ -359,32 +356,22 @@ class ScreenView(context: Context) : View(context) {
 
                 val press = Runnable {
                     if (movedEnough) return@Runnable
-                    val (px, py) = if (touchMode == TouchMode.Direct) {
-                        toScreen(lastX, lastY)
-                    } else {
-                        pointerX to pointerY
+                    toScreen(lastX, lastY)?.let { (px, py) ->
+                        socket.down(px, py, "right")
+                        socket.up(px, py, "right")
                     }
-                    socket.down(px, py, "right")
-                    socket.up(px, py, "right")
                 }
                 longPress = press
                 postDelayed(press, LONG_PRESS_MS)
 
                 // The pointer follows the finger from the first moment, exactly
                 // as a remote desktop's does: there is no separate "grab" step.
-                val (cx, cy) = toScreen(event.x, event.y)
-                if (touchMode == TouchMode.Direct) {
-                    socket.move(cx, cy)
-                    markCursor(cx, cy)
-                } else {
-                    // Trackpad: the pointer keeps its place and only the finger's
-                    // travel is added to it, so lifting and starting again does
-                    // not make the pointer jump. That is the whole point of the
-                    // mode — a precise click needs a pointer that stays put.
-                    val origin = surface?.cursor ?: (cx to cy)
-                    pointerX = origin.first
-                    pointerY = origin.second
-                    lastFinger = cx to cy
+                // In trackpad mode the first touch only remembers where the
+                // finger started; the pointer stays where it was left.
+                val at = pointerFor(event)
+                if (at != null) {
+                    socket.move(at.first, at.second)
+                    markCursor(at.first, at.second)
                 }
                 return true
             }
@@ -396,8 +383,7 @@ class ScreenView(context: Context) : View(context) {
                     // A second finger switches the whole gesture to the picture:
                     // from here nothing is sent to the machine until both lift.
                     if (dragging) {
-                        val (px, py) = toScreen(lastX, lastY)
-                        socket.up(px, py, "left")
+                        toScreen(lastX, lastY)?.let { (px, py) -> socket.up(px, py, "left") }
                         dragging = false
                     }
                     twoFinger = true
@@ -416,36 +402,31 @@ class ScreenView(context: Context) : View(context) {
 
             MotionEvent.ACTION_MOVE -> {
                 if (twoFinger) {
-                    // Two fingers: pinch to zoom, or move together to pan.
+                    // Two fingers do both at once, as a photo viewer does: the
+                    // spread of the fingers sets the zoom, and where they sit as
+                    // a pair sets the pan. Doing one and then returning left the
+                    // pan waiting for the pinch to finish, and a pinch that also
+                    // slides is the commonest gesture there is.
                     val apart = distance(event)
-                    if (pinchStartDistance > 0f && apart > 0f) {
-                        val ratio = apart / pinchStartDistance
-                        val wanted = (pinchStartZoom * ratio).coerceIn(MIN_ZOOM, MAX_ZOOM)
-                        if (abs(wanted - zoom) > 0.01f) {
-                            applyZoom(wanted, pinchFocusX, pinchFocusY, pinchStartPanX, pinchStartPanY)
-                            return true
-                        }
-                    }
-                    // Both fingers moved together: that is a pan, the way a
-                    // photo viewer treats it, not a scroll to the machine. A
-                    // remote desktop sends wheel notches only when the picture
-                    // already fits the screen, otherwise the picture itself is
-                    // what wants to move.
+                    val ratio = if (pinchStartDistance > 0f) apart / pinchStartDistance else 1f
+                    val wanted = (pinchStartZoom * ratio).coerceIn(MIN_ZOOM, MAX_ZOOM)
+                    // The pair's own movement, applied on top of the pinch's.
                     val dx = focusX(event) - twoFingerX
                     val dy = focusY(event) - twoFingerY
-                    if (abs(dx) > 0.5f || abs(dy) > 0.5f) {
-                        if (zoom > 1.01f) {
-                            panX = pinchStartPanX + dx
-                            panY = pinchStartPanY + dy
-                            clampPan()
-                            invalidate()
-                        } else {
-                            val step = (event.getY(1) - scrollFrom).toInt()
-                            if (abs(step) > SCROLL_STEP_PX) {
-                                val (px, py) = toScreen(event.getX(1), event.getY(1))
+                    applyZoom(wanted, pinchFocusX, pinchFocusY, pinchStartPanX + dx, pinchStartPanY + dy)
+                    if (abs(wanted - pinchStartZoom) > 0.005f || abs(dx) > 0.5f || abs(dy) > 0.5f) {
+                        return true
+                    }
+                    // Neither zoomed nor moved: a scroll to the machine, and only
+                    // when the picture fits. When it does not, the picture is what
+                    // wants to move, not the page inside it.
+                    if (zoom <= 1.01f) {
+                        val step = (event.getY(1) - scrollFrom).toInt()
+                        if (abs(step) > SCROLL_STEP_PX) {
+                            toScreen(event.getX(1), event.getY(1))?.let { (px, py) ->
                                 socket.wheel(px, py, if (step > 0) 1 else -1)
-                                scrollFrom = event.getY(1)
                             }
+                            scrollFrom = event.getY(1)
                         }
                     }
                     return true
@@ -458,32 +439,15 @@ class ScreenView(context: Context) : View(context) {
 
                 // One finger always drives the machine: move continuously, and
                 // press only once the movement is a drag rather than a tap.
-                val (fingerX, fingerY) = toScreen(event.x, event.y)
-                val (px, py) = if (touchMode == TouchMode.Direct) {
-                    fingerX to fingerY
-                } else {
-                    // Travel since the last event, added to where the pointer
-                    // already is. The scale lifts a finger's movement to cover
-                    // the whole screen, so a small gesture reaches the corners.
-                    val (seenX, seenY) = lastFinger ?: (fingerX to fingerY)
-                    val movedX = pointerX + ((fingerX - seenX) * TRACKPAD_GAIN).roundToInt()
-                    val movedY = pointerY + ((fingerY - seenY) * TRACKPAD_GAIN).roundToInt()
-                    val picture = surface?.bitmap()
-                    pointerX = movedX.coerceIn(0, (picture?.width ?: 1) - 1)
-                    pointerY = movedY.coerceIn(0, (picture?.height ?: 1) - 1)
-                    pointerX to pointerY
-                }
-                lastFinger = fingerX to fingerY
+                val (px, py) = pointerFor(event) ?: return true
 
-                if (movedEnough && !dragging && touchMode == TouchMode.Direct) {
-                    val (sx, sy) = toScreen(downX, downY)
+                if (movedEnough && !dragging) {
+                    // The press lands where the pointer is: in direct mode that
+                    // is where the finger first went down, in trackpad mode it
+                    // is wherever the pointer was left.
+                    val (sx, sy) = downPx to downPy
                     dragging = true
                     socket.down(sx, sy, "left")
-                } else if (movedEnough && !dragging) {
-                    // In trackpad mode the press happens at the pointer, which
-                    // is where the user is looking, not under the finger.
-                    dragging = true
-                    socket.down(px, py, "left")
                 }
                 // At most one move per frame. A finger produces events far
                 // faster than the machine can act on them, and a queue of
@@ -514,11 +478,7 @@ class ScreenView(context: Context) : View(context) {
                     // Where the finger is in the picture, or in trackpad mode
                     // where the pointer ended up — which is not the same place,
                     // and is the one the user is looking at.
-                    val (px, py) = if (touchMode == TouchMode.Direct) {
-                        toScreen(event.x, event.y)
-                    } else {
-                        pointerX to pointerY
-                    }
+                    val (px, py) = pointerFor(event) ?: return true
                     if (dragging) {
                         socket.up(px, py, "left")
                     } else if (!movedEnough) {
@@ -532,15 +492,13 @@ class ScreenView(context: Context) : View(context) {
                 movedEnough = false
                 twoFinger = false
                 fingertips = 0
-                lastFinger = null
                 return true
             }
 
             MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_UP -> {
                 dropLongPress()
                 if (event.actionMasked == MotionEvent.ACTION_CANCEL && dragging) {
-                    val (px, py) = toScreen(lastX, lastY)
-                    socket.up(px, py, "left")
+                    toScreen(lastX, lastY)?.let { (px, py) -> socket.up(px, py, "left") }
                 }
                 dragging = false
                 movedEnough = false
@@ -566,16 +524,25 @@ class ScreenView(context: Context) : View(context) {
      * what makes a pinch feel anchored rather than skating.
      */
     private fun applyZoom(wanted: Float, focusX: Float, focusY: Float, basePanX: Float, basePanY: Float) {
-        val previous = zoom
-        zoom = wanted.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        // Derived from where the pinch began, never from the frame before.
+        // Compounding on the running zoom made every event depend on the last
+        // one, so the base pan and the zoom disagreed and the picture shifted
+        // under the fingers a little more each time — which reads as a stutter.
+        val previous = pinchStartZoom
+        val zoom = wanted.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        this.zoom = zoom
         val growth = if (previous <= 0f) 1f else zoom / previous
-        // Distance of the focus from the view's centre, scaled by the growth.
+        // The point under the fingers when the pinch began must stay put: the
+        // picture grows about it, so its distance from the centre shifts by the
+        // same proportion.
         val centreX = width / 2f
         val centreY = height / 2f
         panX = basePanX + (focusX - centreX - basePanX) * (1 - growth)
         panY = basePanY + (focusY - centreY - basePanY) * (1 - growth)
         clampPan()
-        invalidate()
+        // On the next frame, not now: touch events arrive faster than the screen
+        // refreshes, and drawing per event is the other half of the stutter.
+        postInvalidateOnAnimation()
     }
 
     private fun dropLongPress() {
@@ -601,14 +568,6 @@ class ScreenView(context: Context) : View(context) {
         /** How much the picture may grow; below 1 it would be a keyhole. */
         private const val MIN_ZOOM = 1f
         private const val MAX_ZOOM = 4f
-
-        /**
-         * How far the pointer travels for a finger's travel.
-         *
-         * A thumb can cross about half the screen comfortably, and the picture
-         * is wider than that, so the finger's movement is amplified a little.
-         */
-        private const val TRACKPAD_GAIN = 2.2f
 
         /**
          * The shortest gap between two pointer moves, in milliseconds.

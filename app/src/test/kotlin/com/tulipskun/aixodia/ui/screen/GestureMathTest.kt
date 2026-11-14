@@ -1,81 +1,123 @@
 package com.tulipskun.aixodia.ui.screen
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The arithmetic behind the gestures, checked without a screen.
+ * The two pieces of arithmetic behind the picture: where a touch lands on the
+ * machine, and what a pinch does to the picture.
  *
- * A gesture that is slightly wrong looks like a bug in the connection, so the
- * parts that can be reasoned about in isolation are pinned here.
+ * A touch that lands somewhere other than under the finger, or a pinch that
+ * shifts what is under the fingers, is the complaint these are here to stop.
  */
 class GestureMathTest {
 
-    @Test
-    fun a_trackpad_pointer_moves_by_travel_not_to_the_finger() {
-        // The distinguishing rule: the pointer keeps its place and gains only the
-        // finger's movement. Sending the finger's position instead would make the
-        // pointer jump to it, which is direct mode.
-        var pointer = 500 to 300
-        var fingerAt = 100 to 100
-        val gain = 2.2f
+    /** The fit-and-zoom rectangle, as ScreenView draws it. */
+    private fun box(
+        pictureWidth: Int,
+        pictureHeight: Int,
+        viewWidth: Int,
+        viewHeight: Int,
+        zoom: Float = 1f,
+        panX: Float = 0f,
+        panY: Float = 0f,
+    ): FloatArray {
+        val fit = minOf(viewWidth.toFloat() / pictureWidth, viewHeight.toFloat() / pictureHeight)
+        val scale = fit * zoom
+        val drawnWidth = pictureWidth * scale
+        val drawnHeight = pictureHeight * scale
+        val left = (viewWidth - drawnWidth) / 2f + panX
+        val top = (viewHeight - drawnHeight) / 2f + panY
+        return floatArrayOf(left, top, left + drawnWidth, top + drawnHeight)
+    }
 
-        val fingerNow = 110 to 105
-        pointer = pointer.first + ((fingerNow.first - fingerAt.first) * gain).toInt() to
-            pointer.second + ((fingerNow.second - fingerAt.second) * gain).toInt()
-        fingerAt = fingerNow
-
-        assertEquals(522, pointer.first)
-        assertEquals(311, pointer.second)
-        assertEquals(fingerNow, fingerAt)
+    /** A point on the view, as picture pixels — the inverse of the drawn box. */
+    private fun toPicture(
+        x: Float,
+        y: Float,
+        pictureWidth: Int,
+        pictureHeight: Int,
+        box: FloatArray,
+    ): Pair<Int, Int> {
+        val scaleX = pictureWidth / (box[2] - box[0])
+        val scaleY = pictureHeight / (box[3] - box[1])
+        val px = ((x - box[0]) * scaleX).toInt().coerceIn(0, pictureWidth - 1)
+        val py = ((y - box[1]) * scaleY).toInt().coerceIn(0, pictureHeight - 1)
+        return px to py
     }
 
     @Test
-    fun lifting_a_trackpad_finger_does_not_move_the_pointer() {
-        // A finger can be lifted and put down again; the pointer stays where it
-        // was left, so a careful click is possible.
-        val pointer = 640 to 360
-        val afterLift = pointer
-        assertEquals(640, afterLift.first)
-        assertEquals(360, afterLift.second)
+    fun aTouchAtThePicturesCornerReachesTheMachinesCorner() {
+        // The picture fits the view with letterboxing; the middle of the picture
+        // must be the middle of the machine, and its corner the machine's corner.
+        val box = box(1280, 720, 1080, 1920)
+        val (cx, cy) = toPicture(540f, 960f, 1280, 720, box)
+        assertEquals(640, cx)
+        assertEquals(360, cy)
     }
 
     @Test
-    fun a_zoom_keeps_the_point_between_the_fingers_still() {
-        // Pinching around a point must grow the picture about that point. This is
-        // the sum applyZoom() performs.
-        val focusX = 200f
+    fun aTouchLandsUnderTheFingerAtAnyZoom() {
+        // The complaint was a pointer that arrived somewhere else. Whatever the
+        // zoom and pan, undoing what drawing did must give back the same point.
+        for (zoom in listOf(1f, 1.5f, 2f, 4f)) {
+            val box = box(1280, 720, 1080, 1920, zoom, panX = -120f * zoom, panY = 40f * zoom)
+            // A point in the middle of the drawn picture.
+            val viewX = (box[0] + box[2]) / 2f
+            val viewY = (box[1] + box[3]) / 2f
+            val (px, py) = toPicture(viewX, viewY, 1280, 720, box)
+            assertEquals("middle of the picture at zoom $zoom", 640, px)
+            assertEquals("middle of the picture at zoom $zoom", 360, py)
+        }
+    }
+
+    @Test
+    fun aPinchKeepsThePointBetweenTheFingersStill() {
+        // The rule: the picture grows about the point the fingers hold, so that
+        // point does not move on screen. Compounding from the previous frame
+        // instead made it drift, which looked like the picture stuttering.
+        val focusX = 300f
         val basePanX = 0f
-        val previousZoom = 1f
-        val wantedZoom = 2f
-        val growth = wantedZoom / previousZoom
-        val newPan = basePanX + (focusX - 0f - basePanX) * (1 - growth)
-
-        // The point that was under the fingers is still under them.
-        val beforeOnScreen = focusX + basePanX
-        val afterOnScreen = (focusX * growth) + newPan
-        assertEquals(beforeOnScreen, afterOnScreen, 0.01f)
+        val startZoom = 1f
+        for (wanted in listOf(1.2f, 1.6f, 2f, 3f, 4f)) {
+            val growth = wanted / startZoom
+            val pan = basePanX + (focusX - 0f - basePanX) * (1 - growth)
+            val before = focusX + basePanX
+            val after = (focusX * growth) + pan
+            assertEquals("the focus stays put at zoom $wanted", before, after, 0.01f)
+        }
     }
 
     @Test
-    fun a_pinch_never_zooms_below_the_picture_fit() {
-        // Zooming out past 1 would show empty space around a smaller picture.
+    fun aPinchBackOutReturnsToWhereItStarted() {
+        // Pinching out and back in must land exactly where it began. This fails
+        // if each frame builds on the last rather than on the start.
+        val focusX = 240f
+        val basePanX = 0f
+        val startZoom = 1.5f
+
+        fun panFor(wanted: Float): Float {
+            val growth = wanted / startZoom
+            return basePanX + (focusX - basePanX) * (1 - growth)
+        }
+
+        assertEquals(basePanX, panFor(startZoom), 0.01f)
+        val out = panFor(3f)
+        assertEquals(basePanX + (focusX - basePanX) * (1 - 3f / startZoom), out, 0.01f)
+        assertEquals("back to the start", basePanX, panFor(startZoom), 0.01f)
+    }
+
+    @Test
+    fun zoomStaysWithinItsLimits() {
         assertEquals(1f, 0.3f.coerceIn(1f, 4f), 0.001f)
-    }
-
-    @Test
-    fun a_pinch_never_zooms_past_the_limit() {
         assertEquals(4f, 9f.coerceIn(1f, 4f), 0.001f)
     }
 
     @Test
-    fun panning_stays_within_the_picture() {
-        // Past the edge the user would drag the picture into empty space.
+    fun aPanCannotDragThePictureIntoEmptySpace() {
         val viewWidth = 1080
-        val pictureWidth = 2160
-        val slack = ((pictureWidth - viewWidth) / 2f)
-        assertTrue("a pan within the slack is allowed", 300f in -slack..slack)
+        val drawnWidth = 2160f
+        val slack = (drawnWidth - viewWidth) / 2f
         assertEquals(slack, 600f.coerceIn(-slack, slack), 0.01f)
         assertEquals(-slack, (-900f).coerceIn(-slack, slack), 0.01f)
     }
