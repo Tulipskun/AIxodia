@@ -434,16 +434,16 @@ class ScreenView(context: Context) : View(context) {
     }
 
     /**
-     * One finger drags the mouse, and the pointer goes where the finger is.
+     * One finger drags: the pointer moves by how far the finger moved.
      *
-     * Checked against the viewer rather than assumed: its JNI entry point is
-     * `pointerEvent(session, x, y, button)` — a plain absolute position, with no
-     * offset and no gain, and the shared library contains no such constant
-     * either. Its help text mentions the pointer being "offset from under your
-     * finger", which describes the arrow being drawn where the pointer really
-     * is rather than under the fingertip, not the position being shifted. So the
-     * touch is converted straight to picture pixels, and the drawn arrow is what
-     * makes the pointer visible.
+     * The picture is used as a drag pad, not as a touch screen. That is what the
+     * viewer's own code does, and it is worth being exact about where it shows:
+     * its pointer arithmetic is `new f(from, to, scale)` whose body is
+     * `from / scale - to / scale` — a difference of two positions, i.e. a
+     * movement — and that movement is then turned into a screen point by adding
+     * it to the current view offset and clamping it to the desktop. Placing the
+     * pointer at the touch instead would make it jump under the finger and would
+     * lose the whole desktop the moment the finger leaves the picture.
      */
     private fun moveOneFinger(event: MotionEvent) {
         val socket = socket ?: return
@@ -451,7 +451,8 @@ class ScreenView(context: Context) : View(context) {
         if (picture.width <= 0 || picture.height <= 0) return
         val box = pictureRect(picture.width, picture.height)
         if (box.width() <= 0f || box.height() <= 0f) return
-        // Where the finger is, in the machine's pixels.
+        // How much of the machine one pixel of view covers, so a movement of the
+        // finger becomes an equal-looking movement of the arrow.
         val scaleX = picture.width / box.width()
         val scaleY = picture.height / box.height()
 
@@ -460,14 +461,19 @@ class ScreenView(context: Context) : View(context) {
             dropLongPress()
         }
 
-        val fingerX = ((event.x - box.left) * scaleX).roundToInt()
-        val fingerY = ((event.y - box.top) * scaleY).roundToInt()
+        // The movement since the last event, in the machine's pixels. This is the
+        // difference the viewer computes, and it is added to where the pointer
+        // already is — not used as an absolute position.
+        val from = surface?.cursor ?: (picture.width / 2 to picture.height / 2)
+        val stepX = ((event.x - lastX) * scaleX).roundToInt()
+        val stepY = ((event.y - lastY) * scaleY).roundToInt()
         lastX = event.x
         lastY = event.y
         if (movedEnough) dragged = true
+        if (stepX == 0 && stepY == 0) return
 
-        val wantX = fingerX.coerceIn(0, picture.width - 1)
-        val wantY = fingerY.coerceIn(0, picture.height - 1)
+        val wantX = (from.first + stepX).coerceIn(0, picture.width - 1)
+        val wantY = (from.second + stepY).coerceIn(0, picture.height - 1)
         markCursor(wantX, wantY)
 
         // Held down for a double-tap-and-drag: the button stays pressed and the
