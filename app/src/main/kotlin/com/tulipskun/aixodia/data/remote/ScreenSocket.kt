@@ -189,6 +189,24 @@ class ScreenSocket(
         send("""{"type":"key","keysym":"$keysym","mods":[$held]}""")
     }
 
+    /**
+     * Types a string on the machine, in whatever language it is written in.
+     *
+     * Sent as text rather than as keys because a phone can type characters the
+     * machine's own keyboard has no key for — Thai, emoji — and pressing keys by
+     * name would drop them silently.
+     */
+    fun text(value: String) {
+        if (value.isEmpty()) return
+        // Built with the JSON encoder rather than interpolated: a quote or a
+        // backslash in the text would otherwise break the message.
+        val message = org.json.JSONObject().apply {
+            put("type", "text")
+            put("text", value)
+        }.toString()
+        send(message)
+    }
+
     /** Changes the picture without redialling. */
     fun settings(width: Int? = null, height: Int? = null, fps: Int? = null, tile: Int? = null, quality: Int? = null) {
         val parts = buildList {

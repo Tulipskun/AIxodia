@@ -60,6 +60,7 @@ fun ScreenPanel(
     var failure by remember { mutableStateOf<String?>(null) }
     var quality by remember { mutableIntStateOf(62) }
     var directTouch by rememberSaveable { mutableStateOf(false) }
+    var keyboardShown by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(false) }
     val surface = remember { ScreenSurface() }
     var view by remember { mutableStateOf<ScreenView?>(null) }
@@ -189,8 +190,11 @@ fun ScreenPanel(
             hello = hello,
             quality = quality,
             direct = directTouch,
+            keyboard = keyboardShown,
             expanded = showControls,
+            socket = socket,
             onToggle = { showControls = !showControls },
+            onKeyboard = { keyboardShown = !keyboardShown },
             onQuality = { value ->
                 quality = value
                 socket.settings(quality = value)
@@ -229,8 +233,11 @@ private fun ScreenBar(
     hello: ScreenSocket.Hello?,
     quality: Int,
     direct: Boolean,
+    keyboard: Boolean,
     expanded: Boolean,
+    socket: ScreenSocket,
     onToggle: () -> Unit,
+    onKeyboard: () -> Unit,
     onQuality: (Int) -> Unit,
     onMode: (Boolean) -> Unit,
 ) {
@@ -245,6 +252,15 @@ private fun ScreenBar(
                 style = MaterialTheme.typography.labelMedium,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // The keys a phone keyboard does not have: Escape, Tab, arrows,
+                // function keys, and a field that types any language.
+                Text(
+                    "⌨",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier
+                        .padding(end = 16.dp)
+                        .pointerTap(onKeyboard, size = 20.dp),
+                )
                 // Which of the two ways a finger works. Labelled by what the
                 // finger does, not by the name of a mode.
                 Text(
@@ -259,6 +275,9 @@ private fun ScreenBar(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
+        }
+        if (keyboard) {
+            KeyboardBar(socket)
         }
         if (expanded) {
             Slider(

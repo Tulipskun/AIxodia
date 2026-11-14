@@ -174,8 +174,11 @@ class ScreenView(context: Context) : View(context) {
      */
     var videoMode: Boolean = false
 
-    /** Where the pointer was when a trackpad finger landed. */
-    private var trackpadAnchor: Pair<Int, Int>? = null
+    /** Where the pointer is, in picture pixels, while a trackpad finger works. */
+    private var pointerX = 0
+    private var pointerY = 0
+    /** The finger's last place, so its travel can be measured. */
+    private var lastFinger: Pair<Int, Int>? = null
 
     // Pinch state, captured when the second finger lands.
     private var pinchStartDistance = 0f
@@ -328,7 +331,11 @@ class ScreenView(context: Context) : View(context) {
 
                 val press = Runnable {
                     if (movedEnough) return@Runnable
-                    val (px, py) = toScreen(lastX, lastY)
+                    val (px, py) = if (touchMode == TouchMode.Direct) {
+                        toScreen(lastX, lastY)
+                    } else {
+                        pointerX to pointerY
+                    }
                     socket.down(px, py, "right")
                     socket.up(px, py, "right")
                 }
@@ -342,12 +349,14 @@ class ScreenView(context: Context) : View(context) {
                     socket.move(cx, cy)
                     markCursor(cx, cy)
                 } else {
-                    // Trackpad: the pointer keeps its place and the finger's
-                    // travel is added to it, so a finger can lift and start
-                    // again without the pointer jumping back.
-                    trackpadAnchor = surface?.cursor ?: (cx to cy)
-                    socket.move(cx, cy)
-                    markCursor(cx, cy)
+                    // Trackpad: the pointer keeps its place and only the finger's
+                    // travel is added to it, so lifting and starting again does
+                    // not make the pointer jump. That is the whole point of the
+                    // mode — a precise click needs a pointer that stays put.
+                    val origin = surface?.cursor ?: (cx to cy)
+                    pointerX = origin.first
+                    pointerY = origin.second
+                    lastFinger = cx to cy
                 }
                 return true
             }
@@ -421,11 +430,32 @@ class ScreenView(context: Context) : View(context) {
 
                 // One finger always drives the machine: move continuously, and
                 // press only once the movement is a drag rather than a tap.
-                val (px, py) = toScreen(event.x, event.y)
-                if (movedEnough && !dragging) {
+                val (fingerX, fingerY) = toScreen(event.x, event.y)
+                val (px, py) = if (touchMode == TouchMode.Direct) {
+                    fingerX to fingerY
+                } else {
+                    // Travel since the last event, added to where the pointer
+                    // already is. The scale lifts a finger's movement to cover
+                    // the whole screen, so a small gesture reaches the corners.
+                    val (seenX, seenY) = lastFinger ?: (fingerX to fingerY)
+                    val movedX = pointerX + ((fingerX - seenX) * TRACKPAD_GAIN).roundToInt()
+                    val movedY = pointerY + ((fingerY - seenY) * TRACKPAD_GAIN).roundToInt()
+                    val picture = surface?.bitmap()
+                    pointerX = movedX.coerceIn(0, (picture?.width ?: 1) - 1)
+                    pointerY = movedY.coerceIn(0, (picture?.height ?: 1) - 1)
+                    pointerX to pointerY
+                }
+                lastFinger = fingerX to fingerY
+
+                if (movedEnough && !dragging && touchMode == TouchMode.Direct) {
                     val (sx, sy) = toScreen(downX, downY)
                     dragging = true
                     socket.down(sx, sy, "left")
+                } else if (movedEnough && !dragging) {
+                    // In trackpad mode the press happens at the pointer, which
+                    // is where the user is looking, not under the finger.
+                    dragging = true
+                    socket.down(px, py, "left")
                 }
                 socket.move(px, py)
                 markCursor(px, py)
@@ -437,7 +467,14 @@ class ScreenView(context: Context) : View(context) {
             MotionEvent.ACTION_UP -> {
                 dropLongPress()
                 if (!twoFinger) {
-                    val (px, py) = toScreen(event.x, event.y)
+                    // Where the finger is in the picture, or in trackpad mode
+                    // where the pointer ended up — which is not the same place,
+                    // and is the one the user is looking at.
+                    val (px, py) = if (touchMode == TouchMode.Direct) {
+                        toScreen(event.x, event.y)
+                    } else {
+                        pointerX to pointerY
+                    }
                     if (dragging) {
                         socket.up(px, py, "left")
                     } else if (!movedEnough) {
@@ -451,6 +488,7 @@ class ScreenView(context: Context) : View(context) {
                 movedEnough = false
                 twoFinger = false
                 fingertips = 0
+                lastFinger = null
                 return true
             }
 
@@ -519,6 +557,14 @@ class ScreenView(context: Context) : View(context) {
         /** How much the picture may grow; below 1 it would be a keyhole. */
         private const val MIN_ZOOM = 1f
         private const val MAX_ZOOM = 4f
+
+        /**
+         * How far the pointer travels for a finger's travel.
+         *
+         * A thumb can cross about half the screen comfortably, and the picture
+         * is wider than that, so the finger's movement is amplified a little.
+         */
+        private const val TRACKPAD_GAIN = 2.2f
 
         /** The arrow's size at 1:1, and the largest it is allowed to grow. */
         private const val CURSOR_SIZE = 14f
