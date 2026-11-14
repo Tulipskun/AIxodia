@@ -170,8 +170,6 @@ class ScreenView(context: Context) : View(context) {
     private var lastTapAt = 0L
     /** True when this touch is the second tap of a double tap. */
     private var secondTap = false
-    /** Where the pointer was when a drag began, before any travel. */
-    private var pointerStart: Pair<Int, Int>? = null
     private var scrollFromY = 0f
     private var scrollFromX = 0f
     /** True once a second finger has turned the gesture into picture handling. */
@@ -436,14 +434,16 @@ class ScreenView(context: Context) : View(context) {
     }
 
     /**
-     * One finger drags the mouse, and the mouse follows by how far it moved.
+     * One finger drags the mouse, and the pointer goes where the finger is.
      *
-     * RealVNC's own description is exact about this: "your finger moves the
-     * mouse cursor rather than clicking where you touch", with the pointer
-     * "offset from under your finger so you can always see it". So the arrow is
-     * not placed at the touch, which would hide it under a fingertip and make a
-     * precise position impossible; it is nudged by the finger's travel and kept
-     * a little way from the touch, where it can be seen.
+     * Checked against the viewer rather than assumed: its JNI entry point is
+     * `pointerEvent(session, x, y, button)` — a plain absolute position, with no
+     * offset and no gain, and the shared library contains no such constant
+     * either. Its help text mentions the pointer being "offset from under your
+     * finger", which describes the arrow being drawn where the pointer really
+     * is rather than under the fingertip, not the position being shifted. So the
+     * touch is converted straight to picture pixels, and the drawn arrow is what
+     * makes the pointer visible.
      */
     private fun moveOneFinger(event: MotionEvent) {
         val socket = socket ?: return
@@ -451,29 +451,23 @@ class ScreenView(context: Context) : View(context) {
         if (picture.width <= 0 || picture.height <= 0) return
         val box = pictureRect(picture.width, picture.height)
         if (box.width() <= 0f || box.height() <= 0f) return
-        // How much of the machine one pixel of view covers. A drag must move the
-        // pointer as far as the finger looks like it moved, so the travel is
-        // converted rather than used raw.
-        val perViewX = picture.width / box.width()
-        val perViewY = picture.height / box.height()
+        // Where the finger is, in the machine's pixels.
+        val scaleX = picture.width / box.width()
+        val scaleY = picture.height / box.height()
 
         if (abs(event.x - downX) > TOUCH_SLOP || abs(event.y - downY) > TOUCH_SLOP) {
             movedEnough = true
             dropLongPress()
         }
 
-        val (atX, atY) = surface?.cursor ?: (pointerStart ?: return)
-        val stepX = ((event.x - lastX) * perViewX).roundToInt()
-        val stepY = ((event.y - lastY) * perViewY).roundToInt()
+        val fingerX = ((event.x - box.left) * scaleX).roundToInt()
+        val fingerY = ((event.y - box.top) * scaleY).roundToInt()
         lastX = event.x
         lastY = event.y
-        if (stepX == 0 && stepY == 0 && !movedEnough) return
         if (movedEnough) dragged = true
 
-        // Kept a little clear of the finger, so the arrow stays visible under a
-        // thumb instead of being covered by it.
-        val wantX = (atX + stepX).coerceIn(0, picture.width - 1)
-        val wantY = (atY + stepY).coerceIn(0, picture.height - 1)
+        val wantX = fingerX.coerceIn(0, picture.width - 1)
+        val wantY = fingerY.coerceIn(0, picture.height - 1)
         markCursor(wantX, wantY)
 
         // Held down for a double-tap-and-drag: the button stays pressed and the
