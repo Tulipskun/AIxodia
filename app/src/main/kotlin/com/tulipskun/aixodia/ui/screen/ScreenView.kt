@@ -157,11 +157,23 @@ class ScreenView(context: Context) : View(context) {
     private var downPy = 0
     private var lastX = 0f
     private var lastY = 0f
-    private var dragging = false
+    private var dragged = false
+    /** True while a double tap is holding the left button down. */
+    private var held = false
+    /** True once a two-finger gesture has spread, so it is a pinch not a scroll. */
+    private var pinched = false
+    /** True once a two-finger gesture has scrolled the machine. */
+    private var scrolled = false
     private var movedEnough = false
-    private var fingertips = 0
-    private var scrollFrom = 0f
-    private var longPress: Runnable? = null
+    private var fingersDown = 0
+    /** When the last tap ended, so a second one can be recognised. */
+    private var lastTapAt = 0L
+    /** True when this touch is the second tap of a double tap. */
+    private var secondTap = false
+    /** Where the pointer was when a drag began, before any travel. */
+    private var pointerStart: Pair<Int, Int>? = null
+    private var scrollFromY = 0f
+    private var scrollFromX = 0f
     /** True once a second finger has turned the gesture into picture handling. */
     private var twoFinger = false
     /** Where two fingers started, so their movement can be measured. */
@@ -342,51 +354,34 @@ class ScreenView(context: Context) : View(context) {
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val socket = socket ?: return false
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                fingertips = 1
+                dropLongPress()
                 downAt = System.currentTimeMillis()
                 downX = event.x
                 downY = event.y
                 lastX = event.x
                 lastY = event.y
-                dragging = false
+                dragged = false
+                pinched = false
                 movedEnough = false
-                twoFinger = false
-
-                val press = Runnable {
-                    if (movedEnough) return@Runnable
-                    toScreen(lastX, lastY)?.let { (px, py) ->
-                        socket.down(px, py, "right")
-                        socket.up(px, py, "right")
-                    }
-                }
-                longPress = press
-                postDelayed(press, LONG_PRESS_MS)
-
-                // The pointer follows the finger from the first moment, exactly
-                // as a remote desktop's does: there is no separate "grab" step.
-                // In trackpad mode the first touch only remembers where the
-                // finger started; the pointer stays where it was left.
-                val at = pointerFor(event)
-                if (at != null) {
-                    socket.move(at.first, at.second)
-                    markCursor(at.first, at.second)
-                }
+                fingersDown = 1
+                // A second tap that lands soon after the first is the start of a
+                // double tap, which in this viewer is click-and-hold.
+                secondTap = downAt - lastTapAt <= DOUBLE_TAP_MS
+                lastTapAt = downAt
+                // A tap is remembered so a second one can turn it into a double.
                 return true
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
-                fingertips = event.pointerCount
-                dropLongPress()
-                if (fingertips >= 2) {
-                    // A second finger switches the whole gesture to the picture:
-                    // from here nothing is sent to the machine until both lift.
-                    if (dragging) {
-                        toScreen(lastX, lastY)?.let { (px, py) -> socket.up(px, py, "left") }
-                        dragging = false
-                    }
-                    twoFinger = true
+                fingersDown = event.pointerCount
+                dragged = false
+                if (fingersDown >= 2) {
+                    // Two fingers own the picture; the movement done with one is
+                    // over, and it never pressed anything — a drag that begins
+                    // with a tap is the double-tap-and-drag gesture, not a move.
                     pinchStartDistance = distance(event)
                     pinchStartZoom = zoom
                     pinchFocusX = focusX(event)
@@ -395,119 +390,195 @@ class ScreenView(context: Context) : View(context) {
                     pinchStartPanY = panY
                     twoFingerX = focusX(event)
                     twoFingerY = focusY(event)
-                    scrollFrom = event.getY(1)
+                    scrollFromY = focusY(event)
+                    scrollFromX = focusY(event)
+                    scrolled = false
                 }
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (twoFinger) {
-                    // Two fingers do both at once, as a photo viewer does: the
-                    // spread of the fingers sets the zoom, and where they sit as
-                    // a pair sets the pan. Doing one and then returning left the
-                    // pan waiting for the pinch to finish, and a pinch that also
-                    // slides is the commonest gesture there is.
-                    val apart = distance(event)
-                    val ratio = if (pinchStartDistance > 0f) apart / pinchStartDistance else 1f
-                    val wanted = (pinchStartZoom * ratio).coerceIn(MIN_ZOOM, MAX_ZOOM)
-                    // The pair's own movement, applied on top of the pinch's.
-                    val dx = focusX(event) - twoFingerX
-                    val dy = focusY(event) - twoFingerY
-                    applyZoom(wanted, pinchFocusX, pinchFocusY, pinchStartPanX + dx, pinchStartPanY + dy)
-                    if (abs(wanted - pinchStartZoom) > 0.005f || abs(dx) > 0.5f || abs(dy) > 0.5f) {
-                        return true
-                    }
-                    // Neither zoomed nor moved: a scroll to the machine, and only
-                    // when the picture fits. When it does not, the picture is what
-                    // wants to move, not the page inside it.
-                    if (zoom <= 1.01f) {
-                        val step = (event.getY(1) - scrollFrom).toInt()
-                        if (abs(step) > SCROLL_STEP_PX) {
-                            toScreen(event.getX(1), event.getY(1))?.let { (px, py) ->
-                                socket.wheel(px, py, if (step > 0) 1 else -1)
-                            }
-                            scrollFrom = event.getY(1)
-                        }
-                    }
+                if (fingersDown >= 2) {
+                    moveTwoFingers(event)
                     return true
                 }
+                moveOneFinger(event)
+                return true
+            }
 
-                if (abs(event.x - downX) > TOUCH_SLOP || abs(event.y - downY) > TOUCH_SLOP) {
-                    movedEnough = true
-                    dropLongPress()
-                }
-
-                // One finger always drives the machine: move continuously, and
-                // press only once the movement is a drag rather than a tap.
-                val (px, py) = pointerFor(event) ?: return true
-
-                if (movedEnough && !dragging) {
-                    // The press lands where the pointer is: in direct mode that
-                    // is where the finger first went down, in trackpad mode it
-                    // is wherever the pointer was left.
-                    val (sx, sy) = downPx to downPy
-                    dragging = true
-                    socket.down(sx, sy, "left")
-                }
-                // At most one move per frame. A finger produces events far
-                // faster than the machine can act on them, and a queue of
-                // positions nobody will ever see only delays the ones that
-                // matter. The newest position is what gets sent.
-                val now = System.currentTimeMillis()
-                if (now - lastMoveSent >= MOVE_INTERVAL_MS) {
-                    socket.move(px, py)
-                    lastMoveSent = now
-                    pointerSettled = true
-                } else {
-                    // Remember it instead of dropping it: the finger often stops
-                    // between two of these gaps, and a dropped last position
-                    // leaves the pointer short of where it was put.
-                    pointerSettled = false
-                    settleMove = { socket.move(px, py) }
-                    postDelayed(settleRun, MOVE_INTERVAL_MS)
-                }
-                markCursor(px, py)
-                lastX = event.x
-                lastY = event.y
+            MotionEvent.ACTION_POINTER_UP -> {
+                // One of two fingers left. The gesture is over; the remaining
+                // finger must not be mistaken for a fresh tap or drag.
+                fingersDown = event.pointerCount - 1
+                dragged = false
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
-                dropLongPress()
-                if (!twoFinger) {
-                    // Where the finger is in the picture, or in trackpad mode
-                    // where the pointer ended up — which is not the same place,
-                    // and is the one the user is looking at.
-                    val (px, py) = pointerFor(event) ?: return true
-                    if (dragging) {
-                        socket.up(px, py, "left")
-                    } else if (!movedEnough) {
-                        // A tap is a click. It is sent after the grace window so
-                        // that the first half of a double tap is not one.
-                        postDelayed({ socket.down(px, py, "left"); socket.up(px, py, "left") }, TAP_GRACE_MS)
-                    }
-                    markCursor(px, py)
-                }
-                dragging = false
-                movedEnough = false
-                twoFinger = false
-                fingertips = 0
+                endOneFinger(event)
+                fingersDown = 0
                 return true
             }
 
-            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_UP -> {
+            MotionEvent.ACTION_CANCEL -> {
                 dropLongPress()
-                if (event.actionMasked == MotionEvent.ACTION_CANCEL && dragging) {
-                    toScreen(lastX, lastY)?.let { (px, py) -> socket.up(px, py, "left") }
+                if (held) {
+                    surface?.cursor?.let { (x, y) -> socket.up(x, y, "left") }
+                    held = false
                 }
-                dragging = false
-                movedEnough = false
-                twoFinger = false
-                fingertips = 0
+                dragged = false
+                pinched = false
+                fingersDown = 0
                 return true
             }
         }
-        return super.onTouchEvent(event)
+        return true
+    }
+
+    /**
+     * One finger drags the mouse, and the mouse follows by how far it moved.
+     *
+     * RealVNC's own description is exact about this: "your finger moves the
+     * mouse cursor rather than clicking where you touch", with the pointer
+     * "offset from under your finger so you can always see it". So the arrow is
+     * not placed at the touch, which would hide it under a fingertip and make a
+     * precise position impossible; it is nudged by the finger's travel and kept
+     * a little way from the touch, where it can be seen.
+     */
+    private fun moveOneFinger(event: MotionEvent) {
+        val socket = socket ?: return
+        val picture = surface?.bitmap() ?: return
+        if (picture.width <= 0 || picture.height <= 0) return
+        val box = pictureRect(picture.width, picture.height)
+        if (box.width() <= 0f || box.height() <= 0f) return
+        // How much of the machine one pixel of view covers. A drag must move the
+        // pointer as far as the finger looks like it moved, so the travel is
+        // converted rather than used raw.
+        val perViewX = picture.width / box.width()
+        val perViewY = picture.height / box.height()
+
+        if (abs(event.x - downX) > TOUCH_SLOP || abs(event.y - downY) > TOUCH_SLOP) {
+            movedEnough = true
+            dropLongPress()
+        }
+
+        val (atX, atY) = surface?.cursor ?: (pointerStart ?: return)
+        val stepX = ((event.x - lastX) * perViewX).roundToInt()
+        val stepY = ((event.y - lastY) * perViewY).roundToInt()
+        lastX = event.x
+        lastY = event.y
+        if (stepX == 0 && stepY == 0 && !movedEnough) return
+        if (movedEnough) dragged = true
+
+        // Kept a little clear of the finger, so the arrow stays visible under a
+        // thumb instead of being covered by it.
+        val wantX = (atX + stepX).coerceIn(0, picture.width - 1)
+        val wantY = (atY + stepY).coerceIn(0, picture.height - 1)
+        markCursor(wantX, wantY)
+
+        // Held down for a double-tap-and-drag: the button stays pressed and the
+        // object follows the pointer.
+        if (held) {
+            // Already pressed: moving the pointer is what drags.
+            socket.move(wantX, wantY)
+            return
+        }
+        // One move per frame; a finger reports far faster than the machine can
+        // act on it and a queue of stale positions only adds delay.
+        val now = System.currentTimeMillis()
+        if (now - lastMoveSent >= MOVE_INTERVAL_MS) {
+            socket.move(wantX, wantY)
+            lastMoveSent = now
+            pointerSettled = true
+        } else {
+            pointerSettled = false
+            settleMove = { socket.move(wantX, wantY) }
+            postDelayed(settleRun, MOVE_INTERVAL_MS)
+        }
+    }
+
+    /** A tap clicks at the pointer, never at the finger. */
+    private fun endOneFinger(event: MotionEvent) {
+        val socket = socket ?: return
+        dropLongPress()
+        val at = surface?.cursor
+        val now = System.currentTimeMillis()
+
+        if (held) {
+            // The press that a double tap started is let go here.
+            at?.let { (x, y) -> socket.up(x, y, "left") }
+            held = false
+            return
+        }
+        if (dragged || movedEnough) return
+        if (at == null) return
+
+        val isDouble = secondTap && now - lastTapAt <= DOUBLE_TAP_MS
+        if (isDouble) {
+            // RealVNC's click-and-hold: press and keep it pressed, so a drag
+            // that follows moves the object rather than the pointer's target.
+            socket.down(at.first, at.second, "left")
+            held = true
+            secondTap = false
+            return
+        }
+        // A single tap clicks the left button where the pointer is.
+        when (fingersDown) {
+            2 -> {
+                socket.down(at.first, at.second, "right")
+                socket.up(at.first, at.second, "right")
+            }
+            3 -> {
+                socket.down(at.first, at.second, "middle")
+                socket.up(at.first, at.second, "middle")
+            }
+            else -> {
+                socket.down(at.first, at.second, "left")
+                socket.up(at.first, at.second, "left")
+            }
+        }
+    }
+
+    /**
+     * Two fingers: pinch to zoom, move together to scroll the machine, or both.
+     *
+     * RealVNC spells these out — "pinch with two fingers to zoom", and "place
+     * two fingers and drag up or down to scroll" — and doing them from one
+     * gesture is what makes the picture feel attached to the hand rather than
+     * switching between modes.
+     */
+    private fun moveTwoFingers(event: MotionEvent) {
+        val socket = socket ?: return
+        val apart = distance(event)
+        val ratio = if (pinchStartDistance > 0f) apart / pinchStartDistance else 1f
+        val wanted = (pinchStartZoom * ratio).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val dx = focusX(event) - twoFingerX
+        val dy = focusY(event) - twoFingerY
+        if (abs(wanted - zoom) > 0.002f || abs(dx) > 0.5f || abs(dy) > 0.5f) pinched = true
+
+        // The picture follows the fingers exactly: zoom about the point held,
+        // and move by however far the pair moved.
+        applyZoom(wanted, pinchFocusX, pinchFocusY, pinchStartPanX + dx, pinchStartPanY + dy)
+
+        // Scrolling the machine is a separate thing from moving the picture, and
+        // RealVNC offers it with the same two fingers. It is sent when the pair
+        // moves up or down without spreading, so it does not fight the pinch.
+        if (!pinched || abs(wanted - pinchStartZoom) < 0.01f) {
+            val upDown = focusY(event) - scrollFromY
+            val leftRight = focusX(event) - scrollFromX
+            if (abs(upDown) > SCROLL_STEP_PX || abs(leftRight) > SCROLL_STEP_PX) {
+                val (px, py) = surface?.cursor ?: (0 to 0)
+                val delta = if (abs(upDown) >= abs(leftRight)) {
+                    if (upDown > 0) 1 else -1
+                } else {
+                    if (leftRight > 0) 1 else -1
+                }
+                socket.wheel(px, py, delta)
+                scrollFromY = focusY(event)
+                scrollFromX = focusX(event)
+                scrolled = true
+            }
+        }
     }
 
     /** Keeps the drawn arrow where the local finger just put it. */
@@ -546,8 +617,8 @@ class ScreenView(context: Context) : View(context) {
     }
 
     private fun dropLongPress() {
-        longPress?.let { removeCallbacks(it) }
-        longPress = null
+        // Nothing is posted any more: a long press is not a gesture this viewer
+        // has, because its right click is a two-finger tap.
     }
 
     override fun onDetachedFromWindow() {
@@ -576,6 +647,9 @@ class ScreenView(context: Context) : View(context) {
          * machine can redraw costs a queue and gains nothing visible.
          */
         private const val MOVE_INTERVAL_MS = 16L
+
+        /** How soon a second tap counts as a double tap. */
+        private const val DOUBLE_TAP_MS = 300L
 
         /** The arrow's size at 1:1, and the largest it is allowed to grow. */
         private const val CURSOR_SIZE = 14f
