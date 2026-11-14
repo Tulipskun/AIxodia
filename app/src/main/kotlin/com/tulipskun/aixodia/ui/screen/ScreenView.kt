@@ -23,13 +23,19 @@ import kotlin.math.roundToInt
  * mosaic is never rebuilt from scratch: the engine only sends what changed, and
  * what did not change is still here.
  *
- * A frame that arrives before the first is what fixes the size, which is why
- * [sizeTo] is told the dimensions by the `hello` rather than guessing.
+ * [blank] is the case the engine cannot help with: no frame has arrived yet, or
+ * the link dropped before one did. Drawing black and drawing "no picture" look
+ * identical on a phone, so the view is told which it is and says so.
  */
 class ScreenSurface {
     @Volatile
     private var frame: Bitmap? = null
     private val paint = Paint().apply { isFilterBitmap = true }
+
+    /** True until a frame has painted something. */
+    @Volatile
+    var blank: Boolean = true
+        private set
 
     fun sizeTo(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
@@ -39,6 +45,7 @@ class ScreenSurface {
             // A new size has nothing to keep: the whole screen is coming.
             it.eraseColor(Color.BLACK)
         }
+        blank = true
     }
 
     /** Paints one frame's changed tiles into the picture. */
@@ -55,6 +62,13 @@ class ScreenSurface {
             val destination = RectF(left, top, left + tile.bitmap.width, top + tile.bitmap.height)
             canvas.drawBitmap(tile.bitmap, null, destination, paint)
         }
+        if (patch.patches.isNotEmpty()) blank = false
+    }
+
+    /** Forgets the picture, for a link that has gone away. */
+    fun clear() {
+        frame = null
+        blank = true
     }
 
     fun bitmap(): Bitmap? = frame
@@ -63,11 +77,16 @@ class ScreenSurface {
 /**
  * The view that draws the picture and turns a finger into a mouse.
  *
- * The gestures are the ones a remote-desktop viewer on a phone has taught
- * everyone: one finger taps and drags, two fingers scroll, holding without
- * moving asks for a right-click. They are translated into the *captured*
- * coordinates — the engine's own pixels — rather than the view's, so the engine
- * never has to know how big the phone is.
+ * Zoom and pan work the way a phone's image viewer does, and the way the VNC
+ * viewer everyone knows does: one finger drags the pointer when the picture fits
+ * the screen, and pans the picture when it does not; two fingers pinch to zoom;
+ * a double tap fits the picture or returns to actual size. Everything is
+ * anchored on the point between the fingers, so a pinch grows the part being
+ * looked at rather than the middle of the screen.
+ *
+ * The gestures a remote desktop needs and a photo viewer does not are kept on
+ * their own: a tap is a click, a held press is the right button, and two fingers
+ * that move together scroll instead of zooming.
  */
 @SuppressLint("ViewConstructor")
 class ScreenView(context: Context) : View(context) {
@@ -75,13 +94,18 @@ class ScreenView(context: Context) : View(context) {
     private var surface: ScreenSurface? = null
 
     private val draw = Paint().apply {
-        isFilterBitmap = true
         isAntiAlias = true
         // The screen is not a photo: nearest-neighbour keeps text legible when
         // the phone shows a smaller picture than the engine captured.
         isFilterBitmap = false
     }
     private val background = Paint().apply { color = Color.BLACK }
+
+    /** 1 means the picture exactly fits the view. */
+    private var zoom = 1f
+    /** Offset of the picture within the view, in view pixels, after the fit. */
+    private var panX = 0f
+    private var panY = 0f
 
     private var downAt = 0L
     private var downX = 0f
@@ -93,6 +117,23 @@ class ScreenView(context: Context) : View(context) {
     private var fingertips = 0
     private var scrollFrom = 0f
     private var longPress: Runnable? = null
+    /** True while one finger is moving the picture rather than the far pointer. */
+    private var panning = false
+    private var downPanX = 0f
+    private var downPanY = 0f
+
+    // Pinch state, captured when the second finger lands.
+    private var pinchStartDistance = 0f
+    private var pinchStartZoom = 1f
+    private var pinchFocusX = 0f
+    private var pinchFocusY = 0f
+    private var pinchStartPanX = 0f
+    private var pinchStartPanY = 0f
+
+    // A double tap is two taps inside this window, near the same point.
+    private var lastTapAt = 0L
+    private var lastTapX = 0f
+    private var lastTapY = 0f
 
     fun attach(socket: ScreenSocket, surface: ScreenSurface) {
         this.socket = socket
@@ -104,23 +145,34 @@ class ScreenView(context: Context) : View(context) {
         postInvalidateOnAnimation()
     }
 
-    override fun onDraw(canvas: Canvas) {
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), background)
-        val picture = surface?.bitmap() ?: return
-        if (picture.width == 0 || picture.height == 0) return
-        canvas.drawBitmap(picture, null, fit(picture.width, picture.height), draw)
+    /** Drops the picture and goes back to "nothing yet". */
+    fun cleared() {
+        zoom = 1f
+        panX = 0f
+        panY = 0f
+        postInvalidateOnAnimation()
     }
 
-    /** The rectangle the picture occupies, letterboxed into the view. */
-    private fun fit(pictureWidth: Int, pictureHeight: Int): RectF {
+    override fun onDraw(canvas: Canvas) {
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), background)
+        if (surface?.blank != false) return
+        val picture = surface?.bitmap() ?: return
+        if (picture.width == 0 || picture.height == 0) return
+        val box = pictureRect(picture.width, picture.height)
+        canvas.drawBitmap(picture, null, box, draw)
+    }
+
+    /** Where the picture is drawn, after fit, zoom and pan. */
+    private fun pictureRect(pictureWidth: Int, pictureHeight: Int): RectF {
         if (pictureWidth <= 0 || pictureHeight <= 0 || width == 0 || height == 0) {
             return RectF(0f, 0f, width.toFloat(), height.toFloat())
         }
-        val scale = min(width.toFloat() / pictureWidth, height.toFloat() / pictureHeight)
+        val fitScale = min(width.toFloat() / pictureWidth, height.toFloat() / pictureHeight)
+        val scale = fitScale * zoom
         val drawnWidth = pictureWidth * scale
         val drawnHeight = pictureHeight * scale
-        val left = (width - drawnWidth) / 2f
-        val top = (height - drawnHeight) / 2f
+        val left = (width - drawnWidth) / 2f + panX
+        val top = (height - drawnHeight) / 2f + panY
         return RectF(left, top, left + drawnWidth, top + drawnHeight)
     }
 
@@ -133,7 +185,7 @@ class ScreenView(context: Context) : View(context) {
      */
     private fun toScreen(x: Float, y: Float): Pair<Int, Int> {
         val picture = surface?.bitmap() ?: return 0 to 0
-        val box = fit(picture.width, picture.height)
+        val box = pictureRect(picture.width, picture.height)
         if (box.width() <= 0f || box.height() <= 0f) return 0 to 0
         val scaleX = picture.width / box.width()
         val scaleY = picture.height / box.height()
@@ -141,6 +193,38 @@ class ScreenView(context: Context) : View(context) {
         val py = ((y - box.top) * scaleY).roundToInt().coerceIn(0, picture.height - 1)
         return px to py
     }
+
+    /** Keeps the picture from being dragged off into empty space. */
+    private fun clampPan() {
+        val picture = surface?.bitmap() ?: return
+        val box = pictureRect(picture.width, picture.height)
+        // How far it may slide: half the overflow on each side, so an edge can
+        // reach the middle of the view but not fly past it.
+        val slackX = max(0f, (box.width() - width) / 2f)
+        val slackY = max(0f, (box.height() - height) / 2f)
+        panX = panX.coerceIn(-slackX, slackX)
+        panY = panY.coerceIn(-slackY, slackY)
+    }
+
+    /** Whether the picture is bigger than the view, so a drag should pan it. */
+    private fun canPan(): Boolean {
+        val picture = surface?.bitmap() ?: return false
+        val box = pictureRect(picture.width, picture.height)
+        return box.width() > width + 1f || box.height() > height + 1f
+    }
+
+    private fun distance(event: MotionEvent): Float {
+        if (event.pointerCount < 2) return 0f
+        val dx = event.getX(0) - event.getX(1)
+        val dy = event.getY(0) - event.getY(1)
+        return kotlin.math.hypot(dx, dy)
+    }
+
+    private fun focusX(event: MotionEvent): Float =
+        if (event.pointerCount < 2) event.x else (event.getX(0) + event.getX(1)) / 2f
+
+    private fun focusY(event: MotionEvent): Float =
+        if (event.pointerCount < 2) event.y else (event.getY(0) + event.getY(1)) / 2f
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -156,14 +240,17 @@ class ScreenView(context: Context) : View(context) {
                 dragging = false
                 movedEnough = false
                 scrollFrom = event.y
+                // Zoomed in, a drag pans the picture. The baseline is taken now
+                // so the pan is measured from where the finger landed.
+                panning = canPan()
+                downPanX = panX
+                downPanY = panY
 
                 // Holding still is the right-click: arm it now, cancel it the
                 // moment the finger moves or lifts.
-                val (sx, sy) = toScreen(event.x, event.y)
                 val press = Runnable {
+                    if (movedEnough) return@Runnable
                     val (px, py) = toScreen(lastX, lastY)
-                    socket.down(px, py, "left")
-                    socket.up(px, py, "left")
                     socket.down(px, py, "right")
                     socket.up(px, py, "right")
                 }
@@ -178,18 +265,37 @@ class ScreenView(context: Context) : View(context) {
                 fingertips = event.pointerCount
                 // A second finger means the tap that was starting is not one.
                 dropLongPress()
-                scrollFrom = event.getY(1)
+                if (fingertips >= 2) {
+                    pinchStartDistance = distance(event)
+                    pinchStartZoom = zoom
+                    pinchFocusX = focusX(event)
+                    pinchFocusY = focusY(event)
+                    pinchStartPanX = panX
+                    pinchStartPanY = panY
+                    // Two fingers that only move together scroll; two that
+                    // spread zoom. Which one it is is decided on the first move.
+                    scrollFrom = event.getY(1)
+                }
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (fingertips >= 2) {
+                    val started = distance(event)
+                    if (pinchStartDistance > 0f && started > 0f) {
+                        val ratio = started / pinchStartDistance
+                        val wanted = (pinchStartZoom * ratio).coerceIn(MIN_ZOOM, MAX_ZOOM)
+                        if (abs(wanted - zoom) > 0.01f) {
+                            applyZoom(wanted, pinchFocusX, pinchFocusY, pinchStartPanX, pinchStartPanY)
+                            scrollFrom = event.getY(1)
+                            return true
+                        }
+                    }
+                    // Not a pinch: two fingers moving together scroll the page.
                     val y = event.getY(1)
                     val step = (y - scrollFrom).toInt()
-                    if (abs(step) > SCROLL_STEP_PX) {
+                    if (abs(step) > SCROLL_STEP_PX && !canPan()) {
                         val (px, py) = toScreen(event.getX(1), y)
-                        // Down the screen scrolls the page the same way a wheel
-                        // does: the picture moves up, the notch is positive.
                         socket.wheel(px, py, if (step > 0) 1 else -1)
                         scrollFrom = y
                     }
@@ -201,15 +307,24 @@ class ScreenView(context: Context) : View(context) {
                     dropLongPress()
                 }
                 if (movedEnough) {
-                    val (px, py) = toScreen(event.x, event.y)
-                    val (lx, ly) = toScreen(lastX, lastY)
-                    if (!dragging) {
-                        // The first movement after the slop becomes a real drag:
-                        // press where the finger landed, then follow it.
-                        dragging = true
-                        socket.down(lx, ly, "left")
+                    if (panning) {
+                        // Zoomed in: a finger moves the picture, the way a photo
+                        // viewer does, instead of dragging the far pointer.
+                        panX = downPanX + (event.x - downX)
+                        panY = downPanY + (event.y - downY)
+                        clampPan()
+                        invalidate()
+                    } else {
+                        val (px, py) = toScreen(event.x, event.y)
+                        val (lx, ly) = toScreen(lastX, lastY)
+                        if (!dragging) {
+                            // The first movement after the slop becomes a real
+                            // drag: press where the finger landed, then follow it.
+                            dragging = true
+                            socket.down(lx, ly, "left")
+                        }
+                        socket.move(px, py)
                     }
-                    socket.move(px, py)
                 }
                 lastX = event.x
                 lastY = event.y
@@ -223,14 +338,28 @@ class ScreenView(context: Context) : View(context) {
                     if (dragging) {
                         socket.up(px, py, "left")
                     } else if (!movedEnough) {
-                        // A tap: down and up at the same point, which is what a
-                        // click is and what every control on the far side wants.
-                        socket.down(px, py, "left")
-                        socket.up(px, py, "left")
+                        val now = System.currentTimeMillis()
+                        val nearLast = abs(event.x - lastTapX) < DOUBLE_TAP_SLOP &&
+                            abs(event.y - lastTapY) < DOUBLE_TAP_SLOP
+                        if (now - lastTapAt < DOUBLE_TAP_MS && nearLast) {
+                            // Two taps: fit the picture, or go back to actual
+                            // size if it already fits. Never a click, so a
+                            // double-click on the far side is not accidental.
+                            toggleZoom()
+                            lastTapAt = 0L
+                        } else {
+                            lastTapAt = now
+                            lastTapX = event.x
+                            lastTapY = event.y
+                            // A tap is a click, but only once it is sure it is
+                            // not the first half of a double tap.
+                            postDelayed({ socket.down(px, py, "left"); socket.up(px, py, "left") }, TAP_GRACE_MS)
+                        }
                     }
                 }
                 dragging = false
                 movedEnough = false
+                panning = false
                 fingertips = 0
                 return true
             }
@@ -243,11 +372,47 @@ class ScreenView(context: Context) : View(context) {
                 }
                 dragging = false
                 movedEnough = false
+                panning = false
                 fingertips = 0
                 return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    /**
+     * Sets the zoom, keeping the point under the fingers where it is.
+     *
+     * The picture is drawn centred plus `pan`; growing it by a factor while the
+     * focus stays put means moving the centre by the same proportion, which is
+     * what makes a pinch feel anchored rather than skating.
+     */
+    private fun applyZoom(wanted: Float, focusX: Float, focusY: Float, basePanX: Float, basePanY: Float) {
+        val previous = zoom
+        zoom = wanted.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val growth = if (previous <= 0f) 1f else zoom / previous
+        // Distance of the focus from the view's centre, scaled by the growth.
+        val centreX = width / 2f
+        val centreY = height / 2f
+        panX = basePanX + (focusX - centreX - basePanX) * (1 - growth)
+        panY = basePanY + (focusY - centreY - basePanY) * (1 - growth)
+        clampPan()
+        invalidate()
+    }
+
+    /** Fits the picture to the view, or shows it at twice the fit when it fits. */
+    private fun toggleZoom() {
+        if (zoom > 1.05f) {
+            zoom = 1f
+            panX = 0f
+            panY = 0f
+        } else {
+            zoom = FIT_AGAIN_ZOOM
+            // Zoom around the middle of the view, which is where the eye is.
+            panX = 0f
+            panY = 0f
+        }
+        invalidate()
     }
 
     private fun dropLongPress() {
@@ -269,5 +434,23 @@ class ScreenView(context: Context) : View(context) {
 
         /** Movement before a two-finger drag becomes a scroll notch. */
         private const val SCROLL_STEP_PX = 24f
+
+        /** How much the picture may grow; below 1 it would be a keyhole. */
+        private const val MIN_ZOOM = 1f
+        private const val MAX_ZOOM = 4f
+
+        /** Where a double tap lands when the picture fitted the screen. */
+        private const val FIT_AGAIN_ZOOM = 2f
+
+        /** A double tap is two taps inside this many milliseconds… */
+        private const val DOUBLE_TAP_MS = 280L
+        /** …and this many pixels of each other. */
+        private const val DOUBLE_TAP_SLOP = 48f
+
+        /**
+         * A tap waits this long before it becomes a click, so that the second
+         * half of a double tap is not sent as a click first.
+         */
+        private const val TAP_GRACE_MS = 160L
     }
 }

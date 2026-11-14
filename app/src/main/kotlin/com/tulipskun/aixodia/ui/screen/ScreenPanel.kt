@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -76,13 +79,25 @@ fun ScreenPanel(
                     // composable re-runs for it.
                     view?.invalidateFrame()
                 }
-                is ScreenSocket.Event.Failed -> failure = event.reason
-                ScreenSocket.Event.Closed -> Unit
+                is ScreenSocket.Event.Failed -> {
+                    failure = event.reason
+                    // The picture on screen is now a photograph of the past: say
+                    // so rather than leaving it looking live.
+                    surface.clear()
+                    view?.cleared()
+                }
+                ScreenSocket.Event.Closed -> {
+                    surface.clear()
+                    view?.cleared()
+                }
             }
         }
     }
 
-    Column(modifier.fillMaxSize()) {
+    // The system bars are drawn over the app (edge-to-edge), so the picture is
+    // laid out inside them: without this the quality strip sits under the
+    // navigation bar and cannot be reached.
+    Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             AndroidView(
                 factory = { context ->
@@ -93,9 +108,13 @@ fun ScreenPanel(
                 },
                 modifier = Modifier.fillMaxSize(),
             )
+            val problem = failure
             when {
-                failure != null -> Centered(failure ?: "")
-                state == ScreenSocket.State.CONNECTING -> Box(
+                problem != null -> Centered(problem)
+                // Before the first frame there is nothing to look at. A spinner
+                // says the picture is coming; a black rectangle says the feature
+                // is broken, and both are the same black rectangle otherwise.
+                hello == null -> Box(
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator() }
