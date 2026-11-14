@@ -155,6 +155,8 @@ import com.tulipskun.aixodia.ui.settings.BackupScreen
 import com.tulipskun.aixodia.ui.settings.SettingsScreen
 import com.tulipskun.aixodia.ui.files.FilesScreen
 import com.tulipskun.aixodia.ui.terminal.TerminalUiState
+import com.tulipskun.aixodia.data.remote.ScreenSocket
+import com.tulipskun.aixodia.ui.screen.ScreenPanel
 import com.tulipskun.aixodia.ui.terminal.TerminalWindow
 import com.tulipskun.aixodia.term.TerminalConnections
 import com.tulipskun.aixodia.term.TerminalLiveService
@@ -201,6 +203,10 @@ fun ChatScreen(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showProviders by rememberSaveable { mutableStateOf(false) }
     var showTerminal by rememberSaveable { mutableStateOf(false) }
+    // The machine's own display, beside the shell. It is a branch of the chat
+    // for the same reason the terminal is: it is the whole screen, because a
+    // desktop sharing a screen with a composer is a desktop in a letterbox.
+    var showScreen by rememberSaveable { mutableStateOf(false) }
     // The engine's backup is a branch of the chat like these three, because a
     // run outlasts the window it was started from and the reader needs a place
     // to come back to — not a line of text inside the chat it interrupts.
@@ -243,6 +249,7 @@ fun ChatScreen(
     BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showProviders) { showProviders = false }
     BackHandler(enabled = showTerminal) { showTerminal = false }
+    BackHandler(enabled = showScreen) { showScreen = false }
     BackHandler(enabled = showBackup) { showBackup = false }
     BackHandler(enabled = showFiles) { showFiles = false }
 
@@ -295,6 +302,19 @@ fun ChatScreen(
     // screen, because a shell that shares a screen with a chat composer is a
     // shell in a letterbox. It needs no session and no view model: it talks to
     // the machine, not to the chat.
+    if (showScreen) {
+        // The socket belongs to this branch: a screen nobody is looking at is a
+        // socket the engine has to keep encoding for, so it is closed on the way
+        // out rather than kept warm like the terminal's.
+        val screenSocket = remember(settings, clientToken) { ScreenSocket(settings, clientToken) }
+        ScreenPanel(
+            socket = screenSocket,
+            baseUrl = daemonUrl,
+            modifier = Modifier.fillMaxSize(),
+        )
+        return
+    }
+
     if (showTerminal) {
         // The socket and the per-tab emulators were created above and outlive
         // this branch. Leaving the window only hides it; the shells stay on the
@@ -917,6 +937,7 @@ fun ChatScreen(
                                 showModelPicker = true
                             },
                             onTerminal = { showTerminal = true },
+                            onScreen = { showScreen = true },
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                             attachments = pendingAttachments,
                             uploading = uploading,

@@ -348,6 +348,8 @@ fun ChatComposer(
     onModel: () -> Unit,
     /** Opens the terminal window: the shell on the machine the engine runs on. */
     onTerminal: () -> Unit = {},
+    /** Opens the screen window: the machine's own display, under a finger. */
+    onScreen: () -> Unit = {},
     modifier: Modifier = Modifier,
     attachments: List<AttachmentRef> = emptyList(),
     uploading: Boolean = false,
@@ -468,6 +470,20 @@ fun ChatComposer(
                 ) {
                     Text(
                         ">_",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(Modifier.size(6.dp))
+                // The screen sits beside the shell it belongs to: a monitor is
+                // what the machine looks like, `>_` is what talking to it does.
+                DiscControl(
+                    label = stringResource(R.string.screen),
+                    onClick = onScreen,
+                    outlined = true,
+                ) {
+                    Text(
+                        "▭",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
