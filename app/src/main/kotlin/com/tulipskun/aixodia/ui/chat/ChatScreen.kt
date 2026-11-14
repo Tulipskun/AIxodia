@@ -277,10 +277,11 @@ fun ChatScreen(
             daemonUrl = daemonUrl,
             onOpenSettings = { showSettings = true },
             onSignedIn = {
-                // AccessLogin already wrote the cookie to SettingsStore, which
-                // isSignedInFlow watches, so the gate reopens on its own. This
-                // flag only forces an immediate re-read for the case where the
-                // DataStore emission is not picked up while the dialog closes.
+                // The token is on disk now, so the very next request can use it.
+                // Probing on a timer would leave the header saying OFFLINE for up
+                // to five seconds after a successful sign-in, which reads as a
+                // failure the user just fixed.
+                socket.reconnect()
                 configuredScope.launch {
                     hasResolvedToken = true
                 }

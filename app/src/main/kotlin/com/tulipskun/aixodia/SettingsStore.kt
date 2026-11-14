@@ -133,9 +133,16 @@ class SettingsStore(private val ctx: Context) {
         val rawRefresh = prefs[refreshToken].orEmpty()
         val accessInDate = accessExpires > now
         val refreshInDate = refreshExpires > now
-        val accessToken = if (accessInDate) TokenCipher.open(rawAccess) else ""
+        // A token with no recorded expiry is one the Worker issued without one:
+        // device-flow sessions live until revoked. Treating a missing expiry as
+        // "expired" deleted the token on the first read after sign-in, so the app
+        // fell straight back to OFFLINE and signing in again could not fix it —
+        // there was always one read between the write and the next request.
+        val accessNoExpiry = accessExpires == 0L && rawAccess.isNotBlank()
+        val accessUsable = accessInDate || accessNoExpiry
+        val accessToken = if (accessUsable) TokenCipher.open(rawAccess) else ""
         val storedRefresh = if (refreshInDate) TokenCipher.open(rawRefresh) else ""
-        val unreadableAccess = accessInDate && rawAccess.isNotBlank() && accessToken.isBlank()
+        val unreadableAccess = accessUsable && rawAccess.isNotBlank() && accessToken.isBlank()
         val unreadableRefresh = refreshInDate && rawRefresh.isNotBlank() && storedRefresh.isBlank()
         val clearExpiredRefresh = !refreshInDate && rawRefresh.isNotBlank()
         val clearLegacyGithubCredential = !prefs[legacyGithubToken].isNullOrBlank()
@@ -149,8 +156,9 @@ class SettingsStore(private val ctx: Context) {
                 } else if (clearExpiredRefresh) {
                     it.remove(refreshToken)
                     it.remove(refreshExpiresAt)
-                    // Keep a still-valid access token until its own expiry.
-                    if (accessExpires <= now) {
+                    // Keep the access token unless it is genuinely expired; a
+                    // token with no expiry is still good.
+                    if (!accessUsable) {
                         it.remove(sessionToken)
                         it.remove(sessionExpiresAt)
                     }
