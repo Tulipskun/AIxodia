@@ -57,13 +57,28 @@ class ScreenSurface {
         } ?: return
         val canvas = Canvas(target)
         for (tile in patch.patches) {
-            val left = (tile.col * tile.bitmap.width).toFloat()
-            val top = (tile.row * tile.bitmap.height).toFloat()
-            // The tile size is the grid's, so a clipped edge tile lands correctly.
-            val destination = RectF(left, top, left + tile.bitmap.width, top + tile.bitmap.height)
+            val destination = tileRect(tile.col, tile.row, tile.cell, tile.bitmap.width, tile.bitmap.height)
             canvas.drawBitmap(tile.bitmap, null, destination, paint)
         }
         if (patch.patches.isNotEmpty()) blank = false
+    }
+
+    companion object Place {
+        /**
+         * Where a tile's pixels land in the picture.
+         *
+         * The place comes from the grid, not from the tile's own size: a tile
+         * against the right or bottom edge is clipped to what is left of the
+         * picture, so it is smaller than its cell. Measuring by the bitmap would
+         * pull such a tile toward the origin — a 720-high picture with 64-pixel
+         * tiles leaves a last row 16 high, which would be drawn at 176 instead
+         * of 704 — and the real edge would never be painted at all.
+         */
+        fun tileRect(col: Int, row: Int, cell: Int, width: Int, height: Int): RectF {
+            val left = (col * cell).toFloat()
+            val top = (row * cell).toFloat()
+            return RectF(left, top, left + width, top + height)
+        }
     }
 
     /**
@@ -179,6 +194,19 @@ class ScreenView(context: Context) : View(context) {
     private var pointerY = 0
     /** The finger's last place, so its travel can be measured. */
     private var lastFinger: Pair<Int, Int>? = null
+    /** When the last pointer move was sent, so they are not sent faster than frames. */
+    private var lastMoveSent = 0L
+    /** True when the newest position has been sent, false while it is only owed. */
+    private var pointerSettled = true
+    /** The move that is owed, kept as a closure so the newest one wins. */
+    private var settleMove: (() -> Unit)? = null
+    private val settleRun = Runnable {
+        if (!pointerSettled) {
+            settleMove?.invoke()
+            pointerSettled = true
+            lastMoveSent = System.currentTimeMillis()
+        }
+    }
 
     // Pinch state, captured when the second finger lands.
     private var pinchStartDistance = 0f
@@ -457,7 +485,23 @@ class ScreenView(context: Context) : View(context) {
                     dragging = true
                     socket.down(px, py, "left")
                 }
-                socket.move(px, py)
+                // At most one move per frame. A finger produces events far
+                // faster than the machine can act on them, and a queue of
+                // positions nobody will ever see only delays the ones that
+                // matter. The newest position is what gets sent.
+                val now = System.currentTimeMillis()
+                if (now - lastMoveSent >= MOVE_INTERVAL_MS) {
+                    socket.move(px, py)
+                    lastMoveSent = now
+                    pointerSettled = true
+                } else {
+                    // Remember it instead of dropping it: the finger often stops
+                    // between two of these gaps, and a dropped last position
+                    // leaves the pointer short of where it was put.
+                    pointerSettled = false
+                    settleMove = { socket.move(px, py) }
+                    postDelayed(settleRun, MOVE_INTERVAL_MS)
+                }
                 markCursor(px, py)
                 lastX = event.x
                 lastY = event.y
@@ -565,6 +609,14 @@ class ScreenView(context: Context) : View(context) {
          * is wider than that, so the finger's movement is amplified a little.
          */
         private const val TRACKPAD_GAIN = 2.2f
+
+        /**
+         * The shortest gap between two pointer moves, in milliseconds.
+         *
+         * Sixteen is one frame at sixty a second: sending faster than the
+         * machine can redraw costs a queue and gains nothing visible.
+         */
+        private const val MOVE_INTERVAL_MS = 16L
 
         /** The arrow's size at 1:1, and the largest it is allowed to grow. */
         private const val CURSOR_SIZE = 14f
