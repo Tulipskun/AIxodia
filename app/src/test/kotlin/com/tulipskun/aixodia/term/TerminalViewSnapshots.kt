@@ -191,4 +191,15 @@ class TerminalViewSnapshots {
         }
         paparazzi.snapshot(page.view)
     }
+    /**
+     * A reattach replays ESC c and the prompt. If the reset did not reach the
+     * screen the reader would see the earlier prompt above the new one.
+     */
+    @Test
+    fun reattachedSessionShowsOnePrompt() = render {
+        write("\u001bc\u001b[?2004hroot@instabox-main:~# ".toByteArray())
+        // The link drops and dials again: the engine replays the same prefix.
+        write("\u001bc\u001b[?2004hroot@instabox-main:~# ".toByteArray())
+    }
+
 }

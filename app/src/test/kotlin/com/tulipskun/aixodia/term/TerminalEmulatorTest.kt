@@ -415,4 +415,29 @@ class TerminalEmulatorTest {
         assertEquals(TerminalColors.DEFAULT_FG, term.buffer.lines[0].fg[0])
         assertTrue(out.redraws > redrawsBefore)
     }
+    /**
+     * A reattach replays the whole screen: ESC c first, then the prompt. The
+     * reset has to wipe what the previous connection left, or the reader sees
+     * the old prompt above the new one.
+     */
+    @Test
+    fun a_reset_clears_the_screen_the_previous_connection_left() {
+        val (em, _) = emulator()
+        em.send("old prompt$ ")
+        em.send("\u001bc")
+        em.send("new prompt$ ")
+        // text() drops trailing blanks, so the space the shell left after $ is gone.
+        assertEquals("new prompt$", em.buffer.lines[0].text())
+    }
+
+    /** The reset also drops the history above the screen. */
+    @Test
+    fun a_reset_clears_the_scrollback() {
+        val (em, _) = emulator(rows = 3)
+        repeat(6) { em.send("line$it\r\n") }
+        assertTrue("history should have rows before the reset", em.buffer.scrollback.isNotEmpty())
+        em.send("\u001bc")
+        assertTrue("scrollback must be empty after ESC c", em.buffer.scrollback.isEmpty())
+    }
+
 }
