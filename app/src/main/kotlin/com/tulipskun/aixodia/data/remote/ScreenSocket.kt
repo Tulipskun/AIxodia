@@ -50,6 +50,8 @@ class ScreenSocket(
         val tile: Int,
         val quality: Int,
         val sharedMemory: Boolean,
+        /** "jpeg" or "h264": which decoder the frames need. */
+        val codec: String = "jpeg",
     )
 
     /**
@@ -66,6 +68,29 @@ class ScreenSocket(
 
     sealed interface Event {
         data class Ready(val hello: Hello) : Event
+
+    /**
+     * One video frame, already parsed but not decoded.
+     *
+     * The access unit is Annex B — start codes, not length prefixes — because
+     * that is what MediaCodec reads. Decoding is left to the view, which owns
+     * the decoder's lifetime.
+     */
+    data class Video(
+        val width: Int,
+        val height: Int,
+        val seq: Long,
+        val cursor: Pair<Int, Int>?,
+        /** True when this frame stands on its own, so decoding may start here. */
+        val keyframe: Boolean,
+        val accessUnit: ByteArray,
+    ) : Event {
+        // A data class with a ByteArray gets identity equality, which is right
+        // here: two frames carrying the same bytes are still two frames.
+        override fun equals(other: Any?): Boolean = this === other
+        override fun hashCode(): Int = System.identityHashCode(this)
+    }
+
         /**
          * A frame, and where the machine's pointer is while it is showing.
          *
@@ -210,8 +235,11 @@ class ScreenSocket(
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
-            val patches = decode(bytes.toByteArray())
-            if (patches != null) events.trySend(patches)
+            // A binary message is either a tile frame or a video frame, and which
+            // one is told by the header inside it — not by the connection, because
+            // the codec can change while it is open.
+            val frame = decode(bytes.toByteArray())
+            if (frame != null) events.trySend(frame)
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -226,6 +254,7 @@ class ScreenSocket(
                             tile = parsed.optInt("tile"),
                             quality = parsed.optInt("quality"),
                             sharedMemory = parsed.optBoolean("shm"),
+                            codec = parsed.optString("codec", "jpeg"),
                         ),
                     ),
                 )
@@ -252,7 +281,7 @@ class ScreenSocket(
      * Returns null for a message that is not a frame, so the caller can ignore
      * it rather than showing a broken picture.
      */
-    private fun decode(bytes: ByteArray): Event.Patch? {
+    private fun decode(bytes: ByteArray): Event? {
         if (bytes.size < 8) return null
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         val headerLength = buffer.int
@@ -262,6 +291,23 @@ class ScreenSocket(
         val headerJson = runCatching {
             JSONObject(String(header, Charsets.UTF_8))
         }.getOrNull() ?: return null
+
+        // A video frame stops after the header: one access unit follows.
+        if (headerJson.optString("type") == "video") {
+            val unit = bytes.copyOfRange(4 + headerLength, bytes.size)
+            if (unit.isEmpty()) return null
+            val cursor = headerJson.optJSONArray("cursor")?.let { array ->
+                if (array.length() == 2) array.optInt(0) to array.optInt(1) else null
+            }
+            return Event.Video(
+                width = headerJson.optInt("width"),
+                height = headerJson.optInt("height"),
+                seq = headerJson.optLong("seq"),
+                cursor = cursor,
+                keyframe = headerJson.optBoolean("keyframe"),
+                accessUnit = unit,
+            )
+        }
 
         val count = buffer.int
         if (count < 0 || count > MAX_TILES) return null

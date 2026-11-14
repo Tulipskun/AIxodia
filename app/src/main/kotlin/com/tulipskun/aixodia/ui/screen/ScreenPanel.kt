@@ -1,5 +1,8 @@
 package com.tulipskun.aixodia.ui.screen
 
+import android.graphics.SurfaceTexture
+import android.view.Surface
+import android.view.TextureView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,9 +59,20 @@ fun ScreenPanel(
     var hello by remember { mutableStateOf<ScreenSocket.Hello?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var quality by remember { mutableIntStateOf(62) }
+    var directTouch by rememberSaveable { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(false) }
     val surface = remember { ScreenSurface() }
     var view by remember { mutableStateOf<ScreenView?>(null) }
+    // The video decoder, created only when the engine says it is sending video.
+    // Building one for a JPEG stream would take a decoder from another app for
+    // nothing.
+    val video = remember { VideoSurface(onFirstFrame = {}) }
+    var videoMode by remember { mutableStateOf(false) }
+    var videoHasPicture by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose { video.stop() }
+    }
 
     DisposableEffect(baseUrl) {
         socket.connect(baseUrl)
@@ -72,6 +87,19 @@ fun ScreenPanel(
                     quality = event.hello.quality
                     failure = null
                     surface.sizeTo(event.hello.width, event.hello.height)
+                    // The engine decides; the client does not ask for video it
+                    // cannot be given.
+                    videoMode = event.hello.codec == "h264"
+                    if (videoMode) video.sizeTo(event.hello.width, event.hello.height)
+                }
+                is ScreenSocket.Event.Video -> {
+                    // A video frame goes straight to the decoder; there are no
+                    // tiles to paint into a bitmap.
+                    videoMode = true
+                    video.submit(event.accessUnit, event.keyframe)
+                    surface.cursorTo(event.cursor)
+                    view?.invalidateFrame()
+                    if (video.hasPicture) videoHasPicture = true
                 }
                 is ScreenSocket.Event.Patch -> {
                     surface.cursorTo(event.cursor)
@@ -81,6 +109,7 @@ fun ScreenPanel(
                     view?.invalidateFrame()
                 }
                 is ScreenSocket.Event.Failed -> {
+                    videoHasPicture = false
                     failure = event.reason
                     // The picture on screen is now a photograph of the past: say
                     // so rather than leaving it looking live.
@@ -100,10 +129,45 @@ fun ScreenPanel(
     // navigation bar and cannot be reached.
     Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            // The decoded video sits under the touch view, which is transparent
+            // and owns the gestures: one view reads the fingers whether the
+            // picture beneath it is a bitmap or a video surface.
+            if (videoMode) {
+                AndroidView(
+                    factory = { context ->
+                        TextureView(context).also { textured ->
+                            textured.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                override fun onSurfaceTextureAvailable(
+                                    texture: SurfaceTexture,
+                                    width: Int,
+                                    height: Int,
+                                ) {
+                                    video.attach(Surface(texture))
+                                }
+
+                                override fun onSurfaceTextureSizeChanged(
+                                    texture: SurfaceTexture,
+                                    width: Int,
+                                    height: Int,
+                                ) = Unit
+
+                                override fun onSurfaceTextureDestroyed(texture: SurfaceTexture) = true
+
+                                override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             AndroidView(
                 factory = { context ->
                     ScreenView(context).also {
                         it.attach(socket, surface)
+                        // In video mode the arrow is drawn over the video rather
+                        // than into a bitmap, and the picture itself is not drawn
+                        // here at all.
+                        it.videoMode = videoMode
                         view = it
                     }
                 },
@@ -124,11 +188,22 @@ fun ScreenPanel(
         ScreenBar(
             hello = hello,
             quality = quality,
+            direct = directTouch,
             expanded = showControls,
             onToggle = { showControls = !showControls },
             onQuality = { value ->
                 quality = value
                 socket.settings(quality = value)
+            },
+            onMode = { chosen ->
+                directTouch = chosen
+                // The view holds the mode because it is the thing that
+                // interprets a finger; the bar only chooses.
+                view?.touchMode = if (chosen) {
+                    ScreenView.TouchMode.Direct
+                } else {
+                    ScreenView.TouchMode.Trackpad
+                }
             },
         )
     }
@@ -153,9 +228,11 @@ private fun Centered(text: String) {
 private fun ScreenBar(
     hello: ScreenSocket.Hello?,
     quality: Int,
+    direct: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
     onQuality: (Int) -> Unit,
+    onMode: (Boolean) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(
@@ -167,11 +244,21 @@ private fun ScreenBar(
                 hello?.let { "${it.width}×${it.height} · ${it.fps}fps" } ?: "connecting…",
                 style = MaterialTheme.typography.labelMedium,
             )
-            Text(
-                "${quality}%",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(start = 8.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Which of the two ways a finger works. Labelled by what the
+                // finger does, not by the name of a mode.
+                Text(
+                    if (direct) "touch" else "trackpad",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .padding(end = 12.dp)
+                        .pointerTap({ onMode(!direct) }, size = 14.dp),
+                )
+                Text(
+                    "${quality}%",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
         }
         if (expanded) {
             Slider(

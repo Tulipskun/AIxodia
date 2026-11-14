@@ -150,6 +150,33 @@ class ScreenView(context: Context) : View(context) {
     private var twoFingerX = 0f
     private var twoFingerY = 0f
 
+    /**
+     * How a finger drives the far machine.
+     *
+     * [TouchMode.Trackpad] treats the screen as a trackpad: the pointer moves
+     * with the finger and stays where it is let go, which is how a careful click
+     * is made. [TouchMode.Direct] puts the pointer exactly under the finger,
+     * which is quicker for pressing something visible but hides the target
+     * under the fingertip. A viewer usually wants one and switches to the other
+     * for a particular job, so both are offered rather than one being chosen for
+     * everybody.
+     */
+    enum class TouchMode { Trackpad, Direct }
+
+    var touchMode: TouchMode = TouchMode.Trackpad
+
+    /**
+     * True when the picture is a decoded video underneath this view rather than
+     * a bitmap drawn by it.
+     *
+     * The view still owns the fingers and still draws the arrow; it only stops
+     * painting a picture it does not have.
+     */
+    var videoMode: Boolean = false
+
+    /** Where the pointer was when a trackpad finger landed. */
+    private var trackpadAnchor: Pair<Int, Int>? = null
+
     // Pinch state, captured when the second finger lands.
     private var pinchStartDistance = 0f
     private var pinchStartZoom = 1f
@@ -179,6 +206,15 @@ class ScreenView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), background)
+        if (videoMode) {
+            // The picture is on the video surface beneath; only the arrow and
+            // the gestures belong to this view.
+            val picture = surface?.bitmap()
+            if (picture != null) {
+                drawCursor(canvas, picture.width, picture.height, pictureRect(picture.width, picture.height))
+            }
+            return
+        }
         if (surface?.blank != false) return
         val picture = surface?.bitmap() ?: return
         if (picture.width == 0 || picture.height == 0) return
@@ -302,8 +338,17 @@ class ScreenView(context: Context) : View(context) {
                 // The pointer follows the finger from the first moment, exactly
                 // as a remote desktop's does: there is no separate "grab" step.
                 val (cx, cy) = toScreen(event.x, event.y)
-                socket.move(cx, cy)
-                markCursor(cx, cy)
+                if (touchMode == TouchMode.Direct) {
+                    socket.move(cx, cy)
+                    markCursor(cx, cy)
+                } else {
+                    // Trackpad: the pointer keeps its place and the finger's
+                    // travel is added to it, so a finger can lift and start
+                    // again without the pointer jumping back.
+                    trackpadAnchor = surface?.cursor ?: (cx to cy)
+                    socket.move(cx, cy)
+                    markCursor(cx, cy)
+                }
                 return true
             }
 
