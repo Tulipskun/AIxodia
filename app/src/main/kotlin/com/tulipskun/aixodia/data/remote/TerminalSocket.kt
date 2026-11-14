@@ -260,7 +260,7 @@ class TerminalSocket(
             // name shells the user believes are still running.
             while (!syncSessions()) {
                 if (!wanted) return@launch
-                _detail.value = "engine has not answered /v1/terminals; waiting before opening shells"
+                _detail.value = "engine has not answered /api/terminals; waiting before opening shells"
                 refreshDaemonAddressIfDue()
                 delay(RETRY_MS)
             }

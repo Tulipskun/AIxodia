@@ -50,8 +50,8 @@ object AccessLogin {
     private const val DEFAULT_ACCESS_AUD =
         "1e2270863178234a46c4f3e1c91a4dc2558d6b428258e4b63ff365fea607cbbd"
 
-    private const val AUTHORIZE_PATH = "/v1/auth/authorize"
-    private const val EXCHANGE_PATH = "/v1/auth/exchange"
+    private const val AUTHORIZE_PATH = "/api/auth/authorize"
+    private const val EXCHANGE_PATH = "/api/auth/exchange"
 
     /** PKCE allows 43..128 characters; 48 random bytes encodes to 64. */
     private const val VERIFIER_BYTES = 48
@@ -131,7 +131,7 @@ object AccessLogin {
     /** The Access login URL; see the notes above for why each part is required. */
     internal fun loginUrlFor(origin: String, code: String): String {
         val base = origin.trim().trimEnd('/')
-        val callbackPath = "/v1/auth/callback?code=$code"
+        val callbackPath = "/api/auth/callback?code=$code"
         return "$base/cdn-cgi/access/login/${hostOf(base)}?kid=${appAudience()}" +
             "&redirect_url=" + java.net.URLEncoder.encode(callbackPath, "UTF-8")
     }

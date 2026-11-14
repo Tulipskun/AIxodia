@@ -70,7 +70,7 @@ internal fun pickDaemonAddress(currentUrl: String, node: NodeInfo?): String? {
 }
 
 /**
- * Chat over POST /v1/runs + short polls of GET /v1/runs/{id}/events.
+ * Chat over POST /api/runs + short polls of GET /api/runs/{id}/events.
  *
  * The daemon also offers a live SSE stream, but Cloudflare Tunnels
  * buffer `text/event-stream` until the origin closes it: through the tunnel a
@@ -202,7 +202,7 @@ class RunSocket(
             val cfg = config() ?: return@launch
             runCatching {
                 val req = Request.Builder()
-                    .url("${cfg.base}/v1/runs/$id/cancel")
+                    .url("${cfg.base}/api/runs/$id/cancel")
                     .header("Authorization", "Bearer " + cfg.token)
                     .header("Content-Type", "application/json")
                     .post("{}".toRequestBody(JSON))
@@ -349,7 +349,7 @@ class RunSocket(
         }
 
         val request = Request.Builder()
-            .url("${cfg.base}/v1/runs")
+            .url("${cfg.base}/api/runs")
             .header("Authorization", "Bearer " + cfg.token)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
@@ -440,7 +440,7 @@ class RunSocket(
             }
             val before = lastSeq
             val request = Request.Builder()
-                .url("${cfg.base}/v1/runs/$id/events?after=$lastSeq&poll=1")
+                .url("${cfg.base}/api/runs/$id/events?after=$lastSeq&poll=1")
                 .header("Authorization", "Bearer " + cfg.token)
                 .header("Accept", "text/event-stream")
                 .get()
@@ -610,7 +610,7 @@ class RunSocket(
             return false
         }
         val request = Request.Builder()
-            .url("${cfg.base}/v1/sessions")
+            .url("${cfg.base}/api/sessions")
             .header("Authorization", "Bearer " + cfg.token)
             .header("Accept", "application/json")
             .get()
@@ -645,7 +645,7 @@ class RunSocket(
         val id = cursor.getString(keyRun(sessionId), null) ?: return
         val cfg = config() ?: return
         val request = Request.Builder()
-            .url("${cfg.base}/v1/runs/$id")
+            .url("${cfg.base}/api/runs/$id")
             .header("Authorization", "Bearer " + cfg.token)
             .header("Accept", "application/json")
             .get()

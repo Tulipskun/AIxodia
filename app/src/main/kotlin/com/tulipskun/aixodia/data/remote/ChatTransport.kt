@@ -36,7 +36,7 @@ internal fun jitteredBackoff(millis: Long, draw: Double): Long {
 
 /**
  * What the chat screen needs from a transport. [RunSocket] implements it: a
- * turn is a POST /v1/runs and its events arrive over SSE. The repository only
+ * turn is a POST /api/runs and its events arrive over SSE. The repository only
  * knows this interface, so the merge logic and the UI are independent of the
  * wire format.
  */

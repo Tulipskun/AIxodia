@@ -212,7 +212,7 @@ sealed interface TerminalShells {
     /** The engine answered. This is every shell it holds, possibly none. */
     data class Listed(val rows: List<JSONObject>) : TerminalShells
 
-    /** The engine has no `/v1/terminals`: a build too old to list its shells. */
+    /** The engine has no `/api/terminals`: a build too old to list its shells. */
     data object Unlisted : TerminalShells
 
     /** Nothing was answered: the daemon, its tunnel, or the network is down. */
@@ -702,7 +702,7 @@ class HistoryApi(
         val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
-            val req = Request.Builder().url("$base/v1/sessions")
+            val req = Request.Builder().url("$base/api/sessions")
                 .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
@@ -743,7 +743,7 @@ class HistoryApi(
             val body = JSONObject().put("title", title)
             if (id.isNotBlank()) body.put("id", id)
             val request = body.toString()
-            val req = Request.Builder().url("$base/v1/sessions")
+            val req = Request.Builder().url("$base/api/sessions")
                 .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .post(request.toRequestBody("application/json".toMediaType()))
@@ -762,7 +762,7 @@ class HistoryApi(
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
             val body = JSONObject().put("title", title).toString()
-            val req = Request.Builder().url("$base/v1/sessions/$sessionId")
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer " + c.token)
                 .header("Content-Type", "application/json")
                 .patch(body.toRequestBody("application/json".toMediaType()))
@@ -776,7 +776,7 @@ class HistoryApi(
         val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
-            val req = Request.Builder().url("$base/v1/sessions/$sessionId")
+            val req = Request.Builder().url("$base/api/sessions/$sessionId")
                 .header("Authorization", "Bearer " + c.token)
                 .delete()
                 .build()
@@ -822,7 +822,7 @@ class HistoryApi(
                     append("before_seq=").append(beforeSeq)
                 }
             }
-            val url = "$base/v1/sessions/$sessionId/turns" + if (query.isEmpty()) "" else "?$query"
+            val url = "$base/api/sessions/$sessionId/turns" + if (query.isEmpty()) "" else "?$query"
             runCatchingCancellable {
                 val req = Request.Builder().url(url)
                     .header("Authorization", "Bearer " + c.token)
@@ -1172,7 +1172,7 @@ class HistoryApi(
         val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatching {
-            val req = Request.Builder().url("$base/v1/terminals/ticket")
+            val req = Request.Builder().url("$base/api/terminals/ticket")
                 .header("Authorization", "Bearer " + (authToken ?: c.token))
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
@@ -1189,7 +1189,7 @@ class HistoryApi(
         val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext false
         runCatching {
-            val req = Request.Builder().url("$base/v1/terminals/${URLEncoder.encode(id, "UTF-8")}")
+            val req = Request.Builder().url("$base/api/terminals/${URLEncoder.encode(id, "UTF-8")}")
                 .header("Authorization", "Bearer " + c.token)
                 .delete().build()
             client.newCall(req).execute().use { it.isSuccessful }
@@ -1209,7 +1209,7 @@ class HistoryApi(
         val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext TerminalShells.Unreachable
         runCatching {
-            val req = Request.Builder().url("$base/v1/terminals")
+            val req = Request.Builder().url("$base/api/terminals")
                 .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
@@ -1239,7 +1239,7 @@ class HistoryApi(
         val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext null
         runCatchingCancellable {
-            val req = Request.Builder().url("$base/v1/sessions/$sessionId/objectives")
+            val req = Request.Builder().url("$base/api/sessions/$sessionId/objectives")
                 .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
@@ -1275,7 +1275,7 @@ class HistoryApi(
         val c = engineConfig()
         val base = absoluteUrl(c.daemonUrl) ?: return@withContext 0
         runCatching {
-            val req = Request.Builder().url("$base/v1/sessions")
+            val req = Request.Builder().url("$base/api/sessions")
                 .header("Authorization", "Bearer " + c.token)
                 .header("Accept", "application/json")
                 .get().build()
@@ -1324,7 +1324,7 @@ class HistoryApi(
                     input.source().use { sink.writeAll(it) }
                 }
             }
-            val req = Request.Builder().url("$base/v1/attachments?$query")
+            val req = Request.Builder().url("$base/api/attachments?$query")
                 .header("Authorization", "Bearer " + c.token)
                 .post(body)
                 .build()
