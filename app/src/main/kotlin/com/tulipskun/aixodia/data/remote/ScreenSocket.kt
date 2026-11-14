@@ -66,7 +66,20 @@ class ScreenSocket(
 
     sealed interface Event {
         data class Ready(val hello: Hello) : Event
-        data class Patch(val width: Int, val height: Int, val patches: List<TilePatch>) : Event
+        /**
+         * A frame, and where the machine's pointer is while it is showing.
+         *
+         * The pointer is not in the pixels: X removes it from the framebuffer
+         * before the capture ever sees it. So a client that wants to show a
+         * cursor, the way a real remote desktop does, draws its own at [cursor]
+         * and has to be told where that is. Null when the position is unknown.
+         */
+        data class Patch(
+            val width: Int,
+            val height: Int,
+            val patches: List<TilePatch>,
+            val cursor: Pair<Int, Int>? = null,
+        ) : Event
         data class Failed(val reason: String) : Event
         data object Closed : Event
     }
@@ -268,10 +281,17 @@ class ScreenSocket(
             patches.add(TilePatch(col, row, bitmap))
         }
 
+        // The pointer comes as a two-element array, and only when the machine
+        // could say where it was.
+        val cursor = headerJson.optJSONArray("cursor")?.let { array ->
+            if (array.length() == 2) array.optInt(0) to array.optInt(1) else null
+        }
+
         return Event.Patch(
             width = headerJson.optInt("width"),
             height = headerJson.optInt("height"),
             patches = patches,
+            cursor = cursor,
         )
     }
 

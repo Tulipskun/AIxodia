@@ -74,6 +74,7 @@ fun ScreenPanel(
                     surface.sizeTo(event.hello.width, event.hello.height)
                 }
                 is ScreenSocket.Event.Patch -> {
+                    surface.cursorTo(event.cursor)
                     surface.paint(event)
                     // The frame is one bitmap, so a repaint is a single draw; no
                     // composable re-runs for it.

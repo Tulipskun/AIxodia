@@ -14,6 +14,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import android.graphics.Path
 
 /**
  * The picture, kept as the last bitmap that arrived.
@@ -65,6 +66,21 @@ class ScreenSurface {
         if (patch.patches.isNotEmpty()) blank = false
     }
 
+    /**
+     * Where the machine's pointer is drawn, in captured pixels, and the last
+     * place the local finger left it.
+     *
+     * A remote desktop without a visible pointer is a guess: you move your
+     * finger and hope the machine agrees. This is the arrow, drawn here.
+     */
+    @Volatile
+    var cursor: Pair<Int, Int>? = null
+        private set
+
+    fun cursorTo(at: Pair<Int, Int>?) {
+        cursor = at
+    }
+
     /** Forgets the picture, for a link that has gone away. */
     fun clear() {
         frame = null
@@ -100,6 +116,17 @@ class ScreenView(context: Context) : View(context) {
         isFilterBitmap = false
     }
     private val background = Paint().apply { color = Color.BLACK }
+    private val cursorEdge = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+        color = Color.BLACK
+    }
+    private val cursorFill = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
 
     /** 1 means the picture exactly fits the view. */
     private var zoom = 1f
@@ -117,10 +144,11 @@ class ScreenView(context: Context) : View(context) {
     private var fingertips = 0
     private var scrollFrom = 0f
     private var longPress: Runnable? = null
-    /** True while one finger is moving the picture rather than the far pointer. */
-    private var panning = false
-    private var downPanX = 0f
-    private var downPanY = 0f
+    /** True once a second finger has turned the gesture into picture handling. */
+    private var twoFinger = false
+    /** Where two fingers started, so their movement can be measured. */
+    private var twoFingerX = 0f
+    private var twoFingerY = 0f
 
     // Pinch state, captured when the second finger lands.
     private var pinchStartDistance = 0f
@@ -130,10 +158,6 @@ class ScreenView(context: Context) : View(context) {
     private var pinchStartPanX = 0f
     private var pinchStartPanY = 0f
 
-    // A double tap is two taps inside this window, near the same point.
-    private var lastTapAt = 0L
-    private var lastTapX = 0f
-    private var lastTapY = 0f
 
     fun attach(socket: ScreenSocket, surface: ScreenSurface) {
         this.socket = socket
@@ -160,6 +184,38 @@ class ScreenView(context: Context) : View(context) {
         if (picture.width == 0 || picture.height == 0) return
         val box = pictureRect(picture.width, picture.height)
         canvas.drawBitmap(picture, null, box, draw)
+        drawCursor(canvas, picture.width, picture.height, box)
+    }
+
+    /**
+     * The arrow, at the pointer's place in the picture, scaled with it.
+     *
+     * Drawn after the tiles so it is never buried, and with a dark outline under
+     * a light fill so it stays visible over both a white document and a black
+     * terminal.
+     */
+    private fun drawCursor(canvas: Canvas, pictureWidth: Int, pictureHeight: Int, box: RectF) {
+        val at = surface?.cursor ?: return
+        if (pictureWidth <= 0 || pictureHeight <= 0 || box.width() <= 0f) return
+        val scaleX = box.width() / pictureWidth
+        val scaleY = box.height() / pictureHeight
+        val x = box.left + at.first * scaleX
+        val y = box.top + at.second * scaleY
+        // A pointer that shrinks to nothing on a fitted picture is unreadable;
+        // it keeps a floor size of its own, as the desktop viewers do.
+        val size = (CURSOR_SIZE * max(1f, min(scaleX, scaleY))).coerceAtMost(CURSOR_MAX)
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x + size * 0.62f, y + size)
+            lineTo(x + size * 0.28f, y + size * 0.76f)
+            lineTo(x + size * 0.08f, y + size * 1.12f)
+            lineTo(x - size * 0.10f, y + size * 1.02f)
+            lineTo(x + size * 0.10f, y + size * 0.66f)
+            lineTo(x - size * 0.16f, y + size * 0.66f)
+            close()
+        }
+        canvas.drawPath(path, cursorEdge)
+        canvas.drawPath(path, cursorFill)
     }
 
     /** Where the picture is drawn, after fit, zoom and pan. */
@@ -206,13 +262,6 @@ class ScreenView(context: Context) : View(context) {
         panY = panY.coerceIn(-slackY, slackY)
     }
 
-    /** Whether the picture is bigger than the view, so a drag should pan it. */
-    private fun canPan(): Boolean {
-        val picture = surface?.bitmap() ?: return false
-        val box = pictureRect(picture.width, picture.height)
-        return box.width() > width + 1f || box.height() > height + 1f
-    }
-
     private fun distance(event: MotionEvent): Float {
         if (event.pointerCount < 2) return 0f
         val dx = event.getX(0) - event.getX(1)
@@ -231,7 +280,7 @@ class ScreenView(context: Context) : View(context) {
         val socket = socket ?: return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                fingertips = event.pointerCount
+                fingertips = 1
                 downAt = System.currentTimeMillis()
                 downX = event.x
                 downY = event.y
@@ -239,15 +288,8 @@ class ScreenView(context: Context) : View(context) {
                 lastY = event.y
                 dragging = false
                 movedEnough = false
-                scrollFrom = event.y
-                // Zoomed in, a drag pans the picture. The baseline is taken now
-                // so the pan is measured from where the finger landed.
-                panning = canPan()
-                downPanX = panX
-                downPanY = panY
+                twoFinger = false
 
-                // Holding still is the right-click: arm it now, cancel it the
-                // moment the finger moves or lifts.
                 val press = Runnable {
                     if (movedEnough) return@Runnable
                     val (px, py) = toScreen(lastX, lastY)
@@ -256,48 +298,73 @@ class ScreenView(context: Context) : View(context) {
                 }
                 longPress = press
                 postDelayed(press, LONG_PRESS_MS)
+
+                // The pointer follows the finger from the first moment, exactly
+                // as a remote desktop's does: there is no separate "grab" step.
                 val (cx, cy) = toScreen(event.x, event.y)
                 socket.move(cx, cy)
+                markCursor(cx, cy)
                 return true
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 fingertips = event.pointerCount
-                // A second finger means the tap that was starting is not one.
                 dropLongPress()
                 if (fingertips >= 2) {
+                    // A second finger switches the whole gesture to the picture:
+                    // from here nothing is sent to the machine until both lift.
+                    if (dragging) {
+                        val (px, py) = toScreen(lastX, lastY)
+                        socket.up(px, py, "left")
+                        dragging = false
+                    }
+                    twoFinger = true
                     pinchStartDistance = distance(event)
                     pinchStartZoom = zoom
                     pinchFocusX = focusX(event)
                     pinchFocusY = focusY(event)
                     pinchStartPanX = panX
                     pinchStartPanY = panY
-                    // Two fingers that only move together scroll; two that
-                    // spread zoom. Which one it is is decided on the first move.
+                    twoFingerX = focusX(event)
+                    twoFingerY = focusY(event)
                     scrollFrom = event.getY(1)
                 }
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (fingertips >= 2) {
-                    val started = distance(event)
-                    if (pinchStartDistance > 0f && started > 0f) {
-                        val ratio = started / pinchStartDistance
+                if (twoFinger) {
+                    // Two fingers: pinch to zoom, or move together to pan.
+                    val apart = distance(event)
+                    if (pinchStartDistance > 0f && apart > 0f) {
+                        val ratio = apart / pinchStartDistance
                         val wanted = (pinchStartZoom * ratio).coerceIn(MIN_ZOOM, MAX_ZOOM)
                         if (abs(wanted - zoom) > 0.01f) {
                             applyZoom(wanted, pinchFocusX, pinchFocusY, pinchStartPanX, pinchStartPanY)
-                            scrollFrom = event.getY(1)
                             return true
                         }
                     }
-                    // Not a pinch: two fingers moving together scroll the page.
-                    val y = event.getY(1)
-                    val step = (y - scrollFrom).toInt()
-                    if (abs(step) > SCROLL_STEP_PX && !canPan()) {
-                        val (px, py) = toScreen(event.getX(1), y)
-                        socket.wheel(px, py, if (step > 0) 1 else -1)
-                        scrollFrom = y
+                    // Both fingers moved together: that is a pan, the way a
+                    // photo viewer treats it, not a scroll to the machine. A
+                    // remote desktop sends wheel notches only when the picture
+                    // already fits the screen, otherwise the picture itself is
+                    // what wants to move.
+                    val dx = focusX(event) - twoFingerX
+                    val dy = focusY(event) - twoFingerY
+                    if (abs(dx) > 0.5f || abs(dy) > 0.5f) {
+                        if (zoom > 1.01f) {
+                            panX = pinchStartPanX + dx
+                            panY = pinchStartPanY + dy
+                            clampPan()
+                            invalidate()
+                        } else {
+                            val step = (event.getY(1) - scrollFrom).toInt()
+                            if (abs(step) > SCROLL_STEP_PX) {
+                                val (px, py) = toScreen(event.getX(1), event.getY(1))
+                                socket.wheel(px, py, if (step > 0) 1 else -1)
+                                scrollFrom = event.getY(1)
+                            }
+                        }
                     }
                     return true
                 }
@@ -306,26 +373,17 @@ class ScreenView(context: Context) : View(context) {
                     movedEnough = true
                     dropLongPress()
                 }
-                if (movedEnough) {
-                    if (panning) {
-                        // Zoomed in: a finger moves the picture, the way a photo
-                        // viewer does, instead of dragging the far pointer.
-                        panX = downPanX + (event.x - downX)
-                        panY = downPanY + (event.y - downY)
-                        clampPan()
-                        invalidate()
-                    } else {
-                        val (px, py) = toScreen(event.x, event.y)
-                        val (lx, ly) = toScreen(lastX, lastY)
-                        if (!dragging) {
-                            // The first movement after the slop becomes a real
-                            // drag: press where the finger landed, then follow it.
-                            dragging = true
-                            socket.down(lx, ly, "left")
-                        }
-                        socket.move(px, py)
-                    }
+
+                // One finger always drives the machine: move continuously, and
+                // press only once the movement is a drag rather than a tap.
+                val (px, py) = toScreen(event.x, event.y)
+                if (movedEnough && !dragging) {
+                    val (sx, sy) = toScreen(downX, downY)
+                    dragging = true
+                    socket.down(sx, sy, "left")
                 }
+                socket.move(px, py)
+                markCursor(px, py)
                 lastX = event.x
                 lastY = event.y
                 return true
@@ -333,33 +391,20 @@ class ScreenView(context: Context) : View(context) {
 
             MotionEvent.ACTION_UP -> {
                 dropLongPress()
-                if (fingertips < 2) {
+                if (!twoFinger) {
                     val (px, py) = toScreen(event.x, event.y)
                     if (dragging) {
                         socket.up(px, py, "left")
                     } else if (!movedEnough) {
-                        val now = System.currentTimeMillis()
-                        val nearLast = abs(event.x - lastTapX) < DOUBLE_TAP_SLOP &&
-                            abs(event.y - lastTapY) < DOUBLE_TAP_SLOP
-                        if (now - lastTapAt < DOUBLE_TAP_MS && nearLast) {
-                            // Two taps: fit the picture, or go back to actual
-                            // size if it already fits. Never a click, so a
-                            // double-click on the far side is not accidental.
-                            toggleZoom()
-                            lastTapAt = 0L
-                        } else {
-                            lastTapAt = now
-                            lastTapX = event.x
-                            lastTapY = event.y
-                            // A tap is a click, but only once it is sure it is
-                            // not the first half of a double tap.
-                            postDelayed({ socket.down(px, py, "left"); socket.up(px, py, "left") }, TAP_GRACE_MS)
-                        }
+                        // A tap is a click. It is sent after the grace window so
+                        // that the first half of a double tap is not one.
+                        postDelayed({ socket.down(px, py, "left"); socket.up(px, py, "left") }, TAP_GRACE_MS)
                     }
+                    markCursor(px, py)
                 }
                 dragging = false
                 movedEnough = false
-                panning = false
+                twoFinger = false
                 fingertips = 0
                 return true
             }
@@ -372,12 +417,18 @@ class ScreenView(context: Context) : View(context) {
                 }
                 dragging = false
                 movedEnough = false
-                panning = false
+                twoFinger = false
                 fingertips = 0
                 return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    /** Keeps the drawn arrow where the local finger just put it. */
+    private fun markCursor(x: Int, y: Int) {
+        surface?.cursorTo(x to y)
+        postInvalidateOnAnimation()
     }
 
     /**
@@ -397,21 +448,6 @@ class ScreenView(context: Context) : View(context) {
         panX = basePanX + (focusX - centreX - basePanX) * (1 - growth)
         panY = basePanY + (focusY - centreY - basePanY) * (1 - growth)
         clampPan()
-        invalidate()
-    }
-
-    /** Fits the picture to the view, or shows it at twice the fit when it fits. */
-    private fun toggleZoom() {
-        if (zoom > 1.05f) {
-            zoom = 1f
-            panX = 0f
-            panY = 0f
-        } else {
-            zoom = FIT_AGAIN_ZOOM
-            // Zoom around the middle of the view, which is where the eye is.
-            panX = 0f
-            panY = 0f
-        }
         invalidate()
     }
 
@@ -439,13 +475,9 @@ class ScreenView(context: Context) : View(context) {
         private const val MIN_ZOOM = 1f
         private const val MAX_ZOOM = 4f
 
-        /** Where a double tap lands when the picture fitted the screen. */
-        private const val FIT_AGAIN_ZOOM = 2f
-
-        /** A double tap is two taps inside this many milliseconds… */
-        private const val DOUBLE_TAP_MS = 280L
-        /** …and this many pixels of each other. */
-        private const val DOUBLE_TAP_SLOP = 48f
+        /** The arrow's size at 1:1, and the largest it is allowed to grow. */
+        private const val CURSOR_SIZE = 14f
+        private const val CURSOR_MAX = 30f
 
         /**
          * A tap waits this long before it becomes a click, so that the second
