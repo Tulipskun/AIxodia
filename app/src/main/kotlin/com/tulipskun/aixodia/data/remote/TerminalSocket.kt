@@ -1199,7 +1199,13 @@ class TerminalSocket(
             }
             val host = clean.substring(at + 3).substringBefore('/')
             if (host.isBlank()) return ""
-            return "$scheme://$host/terminal"
+            // Keep any path prefix the endpoint carries: an install reached through
+            // the console's proxy is https://…/engine, and its socket lives at
+            // /engine/terminal. Dropping the prefix dialled the site root, which
+            // answered 200 with a page where a 101 was expected.
+            val rest = clean.substring(at + 3).substringAfter('/', "")
+            val prefix = if (rest.isBlank()) "" else "/" + rest.trim('/')
+            return "$scheme://$host$prefix/terminal"
         }
     }
 }
