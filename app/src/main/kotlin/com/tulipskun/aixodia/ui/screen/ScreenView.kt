@@ -166,6 +166,10 @@ class ScreenView(context: Context) : View(context) {
     private var scrolled = false
     private var movedEnough = false
     private var fingersDown = 0
+    /** How many fingers the touch began with, which decides what a click means. */
+    private var fingersAtStart = 0
+    /** The most fingers down at once during this touch. */
+    private var maxFingers = 0
     /** When the last tap ended, so a second one can be recognised. */
     private var lastTapAt = 0L
     /** True when this touch is the second tap of a double tap. */
@@ -364,7 +368,12 @@ class ScreenView(context: Context) : View(context) {
                 dragged = false
                 pinched = false
                 movedEnough = false
+                // How many fingers started the touch decides the click, and it is
+                // remembered here because the count at the end is already one
+                // fewer by the time the last finger lifts.
                 fingersDown = 1
+                fingersAtStart = 1
+                maxFingers = 1
                 // A second tap that lands soon after the first is the start of a
                 // double tap, which in this viewer is click-and-hold.
                 secondTap = downAt - lastTapAt <= DOUBLE_TAP_MS
@@ -375,6 +384,7 @@ class ScreenView(context: Context) : View(context) {
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 fingersDown = event.pointerCount
+                maxFingers = maxOf(maxFingers, event.pointerCount)
                 dragged = false
                 if (fingersDown >= 2) {
                     // Two fingers own the picture; the movement done with one is
@@ -405,10 +415,12 @@ class ScreenView(context: Context) : View(context) {
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
-                // One of two fingers left. The gesture is over; the remaining
-                // finger must not be mistaken for a fresh tap or drag.
-                fingersDown = event.pointerCount - 1
+                // One finger of a several-finger touch left. The count is left as
+                // it was on purpose: lowering it would let the ACTION_UP that
+                // follows look like a one-finger tap, which turned a two-finger
+                // click into a left click and a three-finger click into nothing.
                 dragged = false
+                movedEnough = true
                 return true
             }
 
@@ -470,7 +482,6 @@ class ScreenView(context: Context) : View(context) {
         lastX = event.x
         lastY = event.y
         if (movedEnough) dragged = true
-        if (stepX == 0 && stepY == 0) return
 
         val wantX = (from.first + stepX).coerceIn(0, picture.width - 1)
         val wantY = (from.second + stepY).coerceIn(0, picture.height - 1)
@@ -515,15 +526,16 @@ class ScreenView(context: Context) : View(context) {
 
         val isDouble = secondTap && now - lastTapAt <= DOUBLE_TAP_MS
         if (isDouble) {
-            // RealVNC's click-and-hold: press and keep it pressed, so a drag
-            // that follows moves the object rather than the pointer's target.
+            // The viewer's click-and-hold: press and keep it pressed, so a drag
+            // that follows moves the object rather than the pointer.
             socket.down(at.first, at.second, "left")
             held = true
             secondTap = false
             return
         }
-        // A single tap clicks the left button where the pointer is.
-        when (fingersDown) {
+        // Which button a tap clicks is decided by how many fingers made it, not
+        // by how many are left at the end — by then the others have lifted.
+        when (maxFingers) {
             2 -> {
                 socket.down(at.first, at.second, "right")
                 socket.up(at.first, at.second, "right")
@@ -603,17 +615,41 @@ class ScreenView(context: Context) : View(context) {
         val zoom = wanted.coerceIn(MIN_ZOOM, MAX_ZOOM)
         this.zoom = zoom
         val growth = if (previous <= 0f) 1f else zoom / previous
-        // The point under the fingers when the pinch began must stay put: the
-        // picture grows about it, so its distance from the centre shifts by the
-        // same proportion.
+        // What is being zoomed about is the pointer, not the middle of the
+        // fingers. Moving the desktop so the arrow stays where it is on the
+        // picture is what keeps the thing being worked on in view: pinching to
+        // read something small would otherwise throw it off the screen. It
+        // slides only when the arrow is against an edge, because the picture
+        // stops at the desktop's own bounds.
         val centreX = width / 2f
         val centreY = height / 2f
-        panX = basePanX + (focusX - centreX - basePanX) * (1 - growth)
-        panY = basePanY + (focusY - centreY - basePanY) * (1 - growth)
+        val anchor = anchorFor(focusX, focusY)
+        panX = basePanX + (anchor.first - centreX - basePanX) * (1 - growth)
+        panY = basePanY + (anchor.second - centreY - basePanY) * (1 - growth)
         clampPan()
         // On the next frame, not now: touch events arrive faster than the screen
         // refreshes, and drawing per event is the other half of the stutter.
         postInvalidateOnAnimation()
+    }
+
+    /**
+     * The point a pinch should keep still, in view coordinates.
+     *
+     * The pointer's place on screen, so zooming holds on to whatever is under it.
+     * Falls back to the middle of the fingers when the pointer's place is not
+     * known, which is the best a pinch can do then.
+     */
+    private fun anchorFor(focusX: Float, focusY: Float): Pair<Float, Float> {
+        val picture = surface?.bitmap()
+        val at = surface?.cursor
+        if (picture == null || at == null || picture.width <= 0 || picture.height <= 0) {
+            return focusX to focusY
+        }
+        val box = pictureRect(picture.width, picture.height)
+        if (box.width() <= 0f || box.height() <= 0f) return focusX to focusY
+        val x = box.left + at.first * (box.width() / picture.width)
+        val y = box.top + at.second * (box.height() / picture.height)
+        return x to y
     }
 
     private fun dropLongPress() {
