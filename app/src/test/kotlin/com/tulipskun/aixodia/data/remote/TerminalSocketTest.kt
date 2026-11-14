@@ -14,15 +14,22 @@ class TerminalSocketTest {
 
     @Test
     fun terminalUrlKeepsTheTunnelAndSwapsThePath() {
+        // A bind-mounted install is reached through the console's proxy, so the
+        // prefix is part of the address: /ws becomes /ws/terminal, not /terminal.
         assertEquals(
-            "wss://flat-clip.trycloudflare.com/terminal",
+            "wss://flat-clip.trycloudflare.com/ws/terminal",
             TerminalSocket.terminalUrlFor("wss://flat-clip.trycloudflare.com/ws"),
+        )
+        assertEquals(
+            "wss://host/engine/terminal",
+            TerminalSocket.terminalUrlFor("https://host/engine"),
         )
         // Discovery hands over an https endpoint before it becomes a socket URL;
         // the terminal has to read it the same way the chat does.
         assertEquals("wss://host/terminal", TerminalSocket.terminalUrlFor("https://host"))
         assertEquals("ws://127.0.0.1:8787/terminal", TerminalSocket.terminalUrlFor("http://127.0.0.1:8787"))
-        assertEquals("wss://host/terminal", TerminalSocket.terminalUrlFor("wss://host/ws/"))
+        // A trailing slash is the same endpoint: the prefix is kept, minus the slash.
+        assertEquals("wss://host/ws/terminal", TerminalSocket.terminalUrlFor("wss://host/ws/"))
     }
 
     @Test

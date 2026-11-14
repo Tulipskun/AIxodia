@@ -440,4 +440,41 @@ class TerminalEmulatorTest {
         assertTrue("scrollback must be empty after ESC c", em.buffer.scrollback.isEmpty())
     }
 
+    /**
+     * Opening the keyboard shortens the page and closing it lengthens it again.
+     * The screen must come back exactly as it was: a shell that repaints its
+     * prompt over the moved cursor, or rows that survive on both sides of the
+     * resize, is what makes the prompt appear twice.
+     */
+    @Test
+    fun the_keyboard_coming_and_going_leaves_one_prompt() {
+        val (em, _) = emulator(cols = 40, rows = 12)
+        em.send("\u001bc")
+        em.send("root@host:~# ")
+        assertEquals("root@host:~#", em.buffer.lines[0].text())
+
+        // Keyboard opens: fewer rows.
+        em.resize(40, 8)
+        // Keyboard closes: the page grows again.
+        em.resize(40, 12)
+
+        assertEquals("root@host:~#", em.buffer.lines[0].text())
+        assertEquals("no history should have accumulated", 0, em.buffer.scrollback.size)
+        // The cursor is the line the shell will write its prompt on. Leaving it
+        // down the page is what puts a second prompt halfway down the screen.
+        assertEquals("cursor must be back on the prompt line", 0, em.buffer.cursorRow)
+    }
+    @Test
+    fun debug_resize_roundtrip() {
+        val out = RecordingOutput()
+        val em = TerminalEmulator(40, 12, out)
+        em.write("\u001bc".toByteArray())
+        em.write("root@host:~# ".toByteArray())
+        println("DBG before: rows=${em.rows} lines=${em.buffer.lines.size} sb=${em.buffer.scrollback.size} row0=${em.buffer.lines[0].text()}")
+        em.resize(40, 8)
+        println("DBG shrink: rows=${em.rows} lines=${em.buffer.lines.size} sb=${em.buffer.scrollback.size}")
+        em.resize(40, 12)
+        println("DBG grow:   rows=${em.rows} lines=${em.buffer.lines.size} sb=${em.buffer.scrollback.size} row0=${em.buffer.lines[0].text()}")
+    }
+
 }

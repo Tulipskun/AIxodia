@@ -191,6 +191,14 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
 
     var cursorCol = 0
     var cursorRow = 0
+
+    /**
+     * Rows the cursor sits above the top of the page, if the page shrank under
+     * it — the keyboard is up and the shell is still writing on the line it
+     * believes is on screen. A grow hands these back, so the cursor lands where
+     * the content put it instead of that many rows further down.
+     */
+    private var cursorAboveTop = 0
     var scrollTop = 0
     var scrollBottom = rows - 1
 
@@ -373,7 +381,17 @@ class TerminalBuffer(var columns: Int, var rows: Int, private val scrollbackLimi
             while (lines.size < newRows) lines.add(blankRow())
             while (lines.size > newRows) lines.removeAt(lines.lastIndex)
         }
-        if (shifted != 0) cursorRow = (cursorRow + shifted).coerceIn(0, newRows - 1)
+        // The cursor moves with the content. It is kept as an absolute row, so a
+        // cursor pushed off the top by a short page is remembered rather than
+        // clamped away: the keyboard coming back hands those rows over again and
+        // the cursor returns to the line it was on, instead of that many rows
+        // down the page where the shell would then paint a second prompt.
+        // Absolute row of the cursor: the rows it is above the page, plus where
+        // the page shows it. The content's move applies to that, not to the
+        // clamped copy, so nothing is lost while the page is short.
+        val absolute = cursorRow - cursorAboveTop + shifted
+        cursorAboveTop = (-absolute).coerceAtLeast(0)
+        cursorRow = absolute + cursorAboveTop
         scrollTop = 0
         scrollBottom = newRows - 1
         cursorRow = cursorRow.coerceIn(0, newRows - 1)
